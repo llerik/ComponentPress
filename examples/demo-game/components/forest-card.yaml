@@ -1,0 +1,53 @@
+# Статический макет с вложенной группой
+schema_version: 2
+id: forest-card
+name: "Лесная карта"
+size_mm:
+  width: 63
+  height: 88
+background: "#FFFFFF"
+elements:
+  - id: leaf-art
+    name: "Иллюстрация"
+    type: image
+    x_mm: 4
+    y_mm: 4
+    width_mm: 55
+    height_mm: 42
+    source: assets/images/animals/enemy/leaf.png
+    fit: contain
+  - id: text-group
+    type: group
+    name: "Текст"
+    x_mm: 4
+    y_mm: 51
+    children:
+      - id: heading
+        name: "Заголовок"
+        type: html
+        x_mm: 0
+        y_mm: 0
+        width_mm: 55
+        height_mm: 10
+        font_family: Arial
+        font_size_pt: 14
+        color: "#111111"
+        html: |-
+          <p><b>Лесная карта</b></p>
+      - id: caption
+        name: "Описание"
+        type: html
+        x_mm: 0
+        y_mm: 11
+        width_mm: 55
+        height_mm: 25
+        font_family: Arial
+        font_size_pt: 8
+        color: "#111111"
+        html: |-
+          <p>{{ vars["edition"] }} <img src="assets/images/animals/enemy/leaf.png" width="12" height="12" /></p>
+          <table border="1" cellspacing="0" cellpadding="2" width="100%">
+            <tr><th colspan="2">Свойства</th></tr>
+            <tr><td rowspan="2"><img src="assets/images/animals/enemy/leaf.png" width="12" height="12" /></td><td>Тип: лес</td></tr>
+            <tr><td>Редакция: 1</td></tr>
+          </table>

@@ -1,0 +1,27 @@
+# Python and local environments
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build artifacts and local project state
+/build/
+dist/
+*.spec.bak
+releases/*/*.exe
+**/output/
+**/archive/
+**/.componentpress/
+
+# Local agent instructions and project documentation
+/AGENTS.md
+/agent-roles
+/docs
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

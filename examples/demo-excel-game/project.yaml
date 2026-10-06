@@ -1,0 +1,33 @@
+# Пример проекта второго этапа; расширен для демонстрации этапа 6
+schema_version: 2
+id: demo-game
+name: "Лесная игра"
+version: "0.1.0"
+variables:
+  edition: "Первый прототип"
+icons:
+  ic_leaf_6:
+    path: assets/images/animals/enemy/leaf.png
+    width_mm: 6
+    height_mm: 6
+  ic_leaf_3:
+    path: assets/images/icons/effects/leaf-small.png
+    width_mm: 3
+    height_mm: 3
+data_sources:
+  main:
+    path: data/game.xlsx
+    formula_mode: cached
+components:
+  - id: forest-card
+    path: components/forest-card.yaml
+  - id: event-card
+    path: components/event-card.yaml
+print:
+  paper: A4
+  orientation: portrait
+  margin_mm: 5
+  gap_mm: 3
+  dpi: 300
+  cut_lines: true
+  cut_line_width_mm: 0.2

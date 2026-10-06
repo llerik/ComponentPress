@@ -1,0 +1,26 @@
+# Второй компонент читает другой лист той же книги
+schema_version: 2
+id: event-card
+name: "Карта события"
+size_mm:
+  width: 63
+  height: 88
+background: "#F4F8FF"
+data:
+  source: main
+  sheet: "События"
+  id_column: "ID"
+elements:
+  - id: event-title
+    name: "Событие"
+    type: html
+    x_mm: 5
+    y_mm: 8
+    width_mm: 53
+    height_mm: 24
+    font_family: Arial
+    font_size_pt: 16
+    color: "#17365D"
+    html: |-
+      <p><b>{Название}</b></p>
+      <p>{{ vars["edition"] }}</p>

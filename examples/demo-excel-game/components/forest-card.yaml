@@ -1,0 +1,58 @@
+# Статический макет с вложенной группой; на этапе 6 к нему добавлены данные Excel
+schema_version: 2
+id: forest-card
+name: "Лесная карта"
+size_mm:
+  width: 63
+  height: 88
+background: "#FFFFFF"
+data:
+  source: main
+  sheet: "Карты"
+  id_column: "ID"
+  copies_column: "Количество"
+elements:
+  - id: leaf-art
+    name: "Иллюстрация"
+    type: image
+    x_mm: 4
+    y_mm: 4
+    width_mm: 55
+    height_mm: 42
+    source: assets/images/{Изображение}
+    fit: contain
+  - id: text-group
+    type: group
+    name: "Текст"
+    x_mm: 4
+    y_mm: 49
+    children:
+      - id: heading
+        name: "Заголовок"
+        type: html
+        x_mm: 0
+        y_mm: 0
+        width_mm: 55
+        height_mm: 10
+        font_family: Arial
+        font_size_pt: 14
+        color: "#111111"
+        html: |-
+          <p><b>{Название}</b></p>
+      - id: caption
+        name: "Описание"
+        type: html
+        x_mm: 0
+        y_mm: 10
+        width_mm: 55
+        height_mm: 29
+        font_family: Arial
+        font_size_pt: 6
+        color: "#111111"
+        html: |-
+          <p>{{ vars["edition"] }} — сила {Сила}</p>
+          <table border="1" cellspacing="0" cellpadding="2" width="100%">
+            <tr><th colspan="2">Свойства</th></tr>
+            <tr><td rowspan="2"><img src="assets/images/{Изображение}" width="12" height="12" /></td><td>{Описание}</td></tr>
+            <tr><td>ID и тираж выбираются в панели данных</td></tr>
+          </table>
