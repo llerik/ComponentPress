@@ -104,6 +104,12 @@ class ElementProperties(QWidget):
         self.fit_combo = QComboBox()
         self.fit_combo.setObjectName("imageFit")
         self.fit_combo.addItems(["contain", "cover", "stretch"])
+        self.content_mode = QComboBox()
+        self.content_mode.setObjectName("contentMode")
+        self.content_mode.addItem("Ручной ввод", "manual")
+        self.content_mode.addItem("Столбец", "column")
+        self.content_column = QComboBox()
+        self.content_column.setObjectName("contentColumn")
         self.font_edit = QLineEdit()
         self.font_edit.setObjectName("htmlFont")
         self.font_spin = self._number("htmlFontSize", 0.001, 1000.0)
@@ -116,6 +122,8 @@ class ElementProperties(QWidget):
         form.addRow("Ширина, мм", self.width_spin)
         form.addRow("Высота, мм", self.height_spin)
         form.addRow("Изображение", self.source_edit)
+        form.addRow("Источник содержимого", self.content_mode)
+        form.addRow("Столбец Excel", self.content_column)
         form.addRow("Режим", self.fit_combo)
         form.addRow("Шрифт", self.font_edit)
         form.addRow("Размер, pt", self.font_spin)
@@ -137,6 +145,8 @@ class ElementProperties(QWidget):
             spin.editingFinished.connect(self._geometry_changed)
         self.name_edit.editingFinished.connect(lambda: self.nodeChanged.emit({"name": self.name_edit.text()}))
         self.source_edit.editingFinished.connect(lambda: self.nodeChanged.emit({"source": self.source_edit.text()}))
+        self.content_mode.currentIndexChanged.connect(self._content_mode_changed)
+        self.content_column.activated.connect(lambda _index: self._content_column_changed())
         self.fit_combo.currentTextChanged.connect(lambda value: self.nodeChanged.emit({"fit": value}))
         self.font_edit.editingFinished.connect(lambda: self.nodeChanged.emit({"font_family": self.font_edit.text()}))
         self.font_spin.editingFinished.connect(lambda: self.nodeChanged.emit({"font_size_pt": self.font_spin.value()}))
@@ -160,17 +170,18 @@ class ElementProperties(QWidget):
             changes.update(width_mm=self.width_spin.value(), height_mm=self.height_spin.value())
         self.nodeChanged.emit(changes)
 
-    def show_node(self, node: Node | None) -> None:
+    def show_node(self, node: Node | None, columns: tuple[str, ...] = ()) -> None:
         self.setEnabled(node is not None)
         if node is None:
             return
         widgets = (
             self.x_spin, self.y_spin, self.width_spin, self.height_spin, self.name_edit,
             self.source_edit, self.fit_combo, self.font_edit, self.font_spin, self.color_edit,
-            self.html_edit,
+            self.html_edit, self.content_mode, self.content_column,
         )
         blockers = [QSignalBlocker(widget) for widget in widgets]
         self.identity.setText(f"{node.id} ({node.type})")
+        self._node_type = node.type
         self.x_spin.setValue(node.x_mm)
         self.y_spin.setValue(node.y_mm)
         sized = isinstance(node, (ImageNode, HtmlNode))
@@ -185,9 +196,24 @@ class ElementProperties(QWidget):
         self.name_edit.setText(node.name)
         self.form.setRowVisible(self.source_edit, image)
         self.form.setRowVisible(self.fit_combo, image)
+        self.form.setRowVisible(self.content_mode, image or html)
+        self.form.setRowVisible(self.content_column, image or html)
         if image:
             self.source_edit.setText(node.source)
             self.fit_combo.setCurrentText(node.fit)
+            mode, column = node.source_mode, node.source_column
+        elif html:
+            mode, column = node.content_mode, node.content_column
+        else:
+            mode, column = "manual", None
+        self.content_mode.setCurrentIndex(max(0, self.content_mode.findData(mode)))
+        self.content_column.clear()
+        self.content_column.addItems(list(columns))
+        if column and self.content_column.findText(column) < 0:
+            self.content_column.addItem(column)
+        if column:
+            self.content_column.setCurrentText(column)
+        self.content_column.setEnabled(mode == "column")
         for widget in (self.font_edit, self.font_spin, self.color_edit):
             self.form.setRowVisible(widget, html)
         for widget in (self.html_edit, self.insert_image, self.apply_html):
@@ -198,6 +224,19 @@ class ElementProperties(QWidget):
             self.color_edit.setText(node.color)
             self.html_edit.setPlainText(node.html)
         del blockers
+
+    def _content_mode_changed(self, _index: int) -> None:
+        mode = self.content_mode.currentData()
+        field = "source_mode" if getattr(self, "_node_type", "") == "image" else "content_mode"
+        changes = {field: mode}
+        if mode == "column" and self.content_column.currentText():
+            changes["source_column" if field == "source_mode" else "content_column"] = self.content_column.currentText()
+        self.content_column.setEnabled(mode == "column")
+        self.nodeChanged.emit(changes)
+
+    def _content_column_changed(self) -> None:
+        field = "source_column" if getattr(self, "_node_type", "") == "image" else "content_column"
+        self.nodeChanged.emit({field: self.content_column.currentText()})
 
     def insert_html_image(self, source: str, width: int, height: int, align: str) -> None:
         cursor = self.html_edit.textCursor()

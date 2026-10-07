@@ -43,13 +43,14 @@ class FileProjectRepository:
         for folder in ("components", "data", "assets/images", "assets/fonts"):
             (root / folder).mkdir(parents=True, exist_ok=True)
         template = (
-            "schema_version: 2\n"
+            "schema_version: 3\n"
             f"id: {project_id}\n"
             f"name: {json.dumps(name, ensure_ascii=False)}\n"
             'version: "0.1.0"\n'
             "variables: {}\n"
             "icons: {}\n"
-            "data_sources: {}\n"
+            "data_source: null\n"
+            "copies_columns:\n  prod: Prod\n  test: Debug\n"
             "components: []\n"
             "print:\n"
             "  paper: A4\n  orientation: portrait\n  margin_mm: 5\n  gap_mm: 3\n"
@@ -81,9 +82,9 @@ class FileProjectRepository:
         project_path = root / "project.yaml"
         text, disk_hash = _read_text(project_path)
         model, _ = parse_project(text, project_path)
-        for item in model.data_sources.values():
-            check_exact_case(root, item.path)
-            resolve_project_path(root, item.path)
+        if model.data_source is not None:
+            check_exact_case(root, model.data_source.path)
+            resolve_project_path(root, model.data_source.path)
         for item in model.icons.values():
             check_exact_case(root, item.path)
             resolve_project_path(root, item.path)
@@ -103,9 +104,9 @@ class FileProjectRepository:
 
             def check_node_paths(nodes: tuple[Node, ...]) -> None:
                 for node in nodes:
-                    if isinstance(node, ImageNode):
+                    if isinstance(node, ImageNode) and node.source_mode == "manual":
                         candidates = (node.source,)
-                    elif isinstance(node, HtmlNode):
+                    elif isinstance(node, HtmlNode) and node.content_mode == "manual":
                         candidates = html_image_sources(node.html)
                     elif isinstance(node, GroupNode):
                         check_node_paths(node.children)
@@ -121,8 +122,8 @@ class FileProjectRepository:
             check_node_paths(doc_model.elements)
             if doc_model.id != ref.id:
                 raise ProjectError(Diagnostic("COMPONENT_ID_MISMATCH", "ID в реестре не совпадает с документом", path, "id"))
-            if doc_model.data and doc_model.data.source not in model.data_sources:
-                raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", "источник данных не найден в проекте", path, "data.source"))
+            if doc_model.data and model.data_source is None:
+                raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", "задайте XLSX в настройках проекта", path, "data.sheet"))
             documents[ref.id] = DocumentSnapshot(path, doc_text, doc_hash, doc_model)
         return ProjectSnapshot(root, text, disk_hash, model, MappingProxyType(documents))
 
@@ -144,8 +145,8 @@ class FileProjectRepository:
             raise ProjectError(Diagnostic("COMPONENT_REGISTRY", "реестр компонентов изменяется отдельной операцией", snapshot.root / "project.yaml", "components"))
         for document in snapshot.documents.values():
             checked, _ = parse_component(document.text, document.path, validated.variables)
-            if checked.data and checked.data.source not in validated.data_sources:
-                raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", "источник данных не найден в проекте", document.path, "data.source"))
+            if checked.data and validated.data_source is None:
+                raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", "задайте XLSX в настройках проекта", document.path, "data.sheet"))
         with ProjectWriteLock(snapshot.root):
             atomic_write(snapshot.root / "project.yaml", text.encode("utf-8"), snapshot.disk_hash)
         return self.open(snapshot.root)
@@ -158,8 +159,8 @@ class FileProjectRepository:
         update_tree(tree, updated)
         text = dump_yaml(tree)
         checked, _ = parse_component(text, document.path, project_model.variables)
-        if checked.data and checked.data.source not in project_model.data_sources:
-            raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", "источник данных не найден в проекте", document.path, "data.source"))
+        if checked.data and project_model.data_source is None:
+            raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", "задайте XLSX в настройках проекта", document.path, "data.sheet"))
         with ProjectWriteLock(snapshot.root):
             if file_hash(snapshot.root / "project.yaml") != snapshot.disk_hash:
                 raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "описание проекта изменено после чтения", snapshot.root / "project.yaml"))
@@ -188,8 +189,8 @@ class FileProjectRepository:
         checked, _ = parse_component(text, document.path, snapshot.model.variables)
         if checked.id != component_id:
             raise ProjectError(Diagnostic("COMPONENT_ID_MISMATCH", "ID компонента нельзя изменить", document.path, "id"))
-        if checked.data and checked.data.source not in snapshot.model.data_sources:
-            raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", "источник данных не найден в проекте", document.path, "data.source"))
+        if checked.data and snapshot.model.data_source is None:
+            raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", "задайте XLSX в настройках проекта", document.path, "data.sheet"))
         return DocumentSnapshot(document.path, text, document.disk_hash, checked)
 
     def save_prepared(
@@ -212,7 +213,7 @@ class FileProjectRepository:
             raise ProjectError(Diagnostic("COMPONENT_ID_DUPLICATE", "компонент уже зарегистрирован", snapshot.root))
         path = f"components/{component_id}.yaml"
         component_text = (
-            f"schema_version: 2\nid: {component_id}\nname: {json.dumps(name, ensure_ascii=False)}\n"
+            f"schema_version: 3\nid: {component_id}\nname: {json.dumps(name, ensure_ascii=False)}\n"
             "size_mm:\n  width: 63\n  height: 88\nbackground: \"#FFFFFF\"\n"
             "elements: []\n"
         )

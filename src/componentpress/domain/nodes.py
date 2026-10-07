@@ -1,6 +1,6 @@
 from typing import Annotated, Literal, Union
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from .project import PositiveMM, StrictModel, _finite
 
@@ -29,12 +29,22 @@ class ImageNode(PositionedNode):
     width_mm: PositiveMM
     height_mm: PositiveMM
     source: str
+    source_mode: Literal["manual", "column"] = "manual"
+    source_column: str | None = None
     fit: Literal["contain", "cover", "stretch"] = "contain"
 
     @field_validator("width_mm", "height_mm", mode="before")
     @classmethod
     def finite_size(cls, value: object) -> float:
         return _finite(value)
+
+    @model_validator(mode="after")
+    def valid_content_source(self):
+        if self.source_mode == "column" and not self.source_column:
+            raise ValueError("для режима column требуется source_column")
+        if self.source_mode == "manual" and not self.source:
+            raise ValueError("для ручного режима требуется путь изображения")
+        return self
 
 
 class HtmlNode(PositionedNode):
@@ -45,11 +55,19 @@ class HtmlNode(PositionedNode):
     font_size_pt: PositiveMM
     color: str = "#111111"
     html: str
+    content_mode: Literal["manual", "column"] = "manual"
+    content_column: str | None = None
 
     @field_validator("width_mm", "height_mm", "font_size_pt", mode="before")
     @classmethod
     def finite_size(cls, value: object) -> float:
         return _finite(value)
+
+    @model_validator(mode="after")
+    def valid_content_source(self):
+        if self.content_mode == "column" and not self.content_column:
+            raise ValueError("для режима column требуется content_column")
+        return self
 
 
 class GroupNode(PositionedNode):

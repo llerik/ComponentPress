@@ -7,6 +7,7 @@ from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
 import re
+import unicodedata
 from typing import Callable
 
 from jinja2 import StrictUndefined, nodes
@@ -18,11 +19,12 @@ from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
 from componentpress.domain.project import ProjectDefinition
 from componentpress.domain.render_plan import ResolvedComponent
 from componentpress.domain.values import CellValue, DataRow, DataSheetSnapshot, FormulaState, value_to_text
+from componentpress.bindings.html_policy import validate_html
 from componentpress.project_io.paths import validate_relative_path
 from componentpress.rendering.resources import ProjectResourceLoader
 
 from .grammar import Reference, parse_references
-from .icons import expand_icons
+from .icons import expand_html_icons, expand_icons
 
 
 _VARIABLE = re.compile(r'''\{\{\s*vars\s*\[\s*(["'])([^"'\\]+)\1\s*\]\s*\}\}''')
@@ -150,6 +152,7 @@ class BindingResolver:
         parser.feed(template)
         parser.close()
         html = "".join(parser.output)
+        validate_html(html, location.owner, location.field)
         # One common resource boundary for static, variable and column paths.
         for source, cell in parser.resources:
             try:
@@ -193,16 +196,72 @@ class BindingResolver:
             for node in nodes_:
                 if isinstance(node, ImageNode):
                     location = BindingLocation(owner, f"elements.{node.id}.source", node.id, source, sheet)
-                    resolved.append(node.model_copy(update={"source": self.resolve_path(node.source, row, location)}))
+                    path_template = node.source
+                    if node.source_mode == "column":
+                        cell = self._column_cell(node.source_column or "", row, location)
+                        path_template = self._cell_text(cell, location, node.source_column or "")
+                        try:
+                            validate_relative_path(path_template)
+                            self.loader.image(path_template, owner=owner, field=location.field)
+                        except ProjectError as exc:
+                            raise self._resource_error(exc, location, cell) from exc
+                        resolved_path = path_template
+                    else:
+                        resolved_path = self.resolve_path(path_template, row, location)
+                    resolved.append(node.model_copy(update={
+                        "source": resolved_path,
+                        "source_mode": "manual", "source_column": None,
+                    }))
                 elif isinstance(node, HtmlNode):
                     location = BindingLocation(owner, f"elements.{node.id}.html", node.id, source, sheet)
-                    resolved.append(node.model_copy(update={"html": self.resolve_html(node.html, row, location)}))
+                    html = node.html
+                    if node.content_mode == "column":
+                        cell = self._column_cell(node.content_column or "", row, location)
+                        html = self._cell_text(cell, location, node.content_column or "")
+                        try:
+                            validate_html(html, owner, location.field, allow_images=False)
+                        except ProjectError as exc:
+                            raise ProjectError(Diagnostic(
+                                exc.diagnostic.code, exc.diagnostic.message, owner, location.field,
+                                source=source, sheet=sheet, cell=cell.coordinate, node_id=node.id,
+                            )) from exc
+                        if parse_references(html):
+                            raise ProjectError(Diagnostic("COLUMN_TEMPLATE_FORBIDDEN", "содержимое Excel не может содержать подстановки", owner, location.field, source=source, sheet=sheet, cell=cell.coordinate, node_id=node.id))
+                        html = expand_html_icons(
+                            html, self.project.icons, loader=self.loader, owner=owner,
+                            field=location.field, source=source, sheet=sheet,
+                            cell=cell.coordinate, node_id=node.id,
+                        )
+                        try:
+                            validate_html(html, owner, location.field)
+                        except ProjectError as exc:
+                            raise ProjectError(Diagnostic(
+                                exc.diagnostic.code, exc.diagnostic.message, owner, location.field,
+                                source=source, sheet=sheet, cell=cell.coordinate, node_id=node.id,
+                            )) from exc
+                    else:
+                        html = self.resolve_html(html, row, location)
+                    resolved.append(node.model_copy(update={"html": html, "content_mode": "manual", "content_column": None}))
                 elif isinstance(node, GroupNode):
                     resolved.append(node.model_copy(update={"children": visit(node.children)}))
             return tuple(resolved)
 
         model = component.model_copy(update={"elements": visit(component.elements)})
         return ResolvedComponent(model, component.id, row, data.version if data else None)
+
+    @staticmethod
+    def _column_cell(column: str, row: DataRow | None, location: BindingLocation) -> CellValue:
+        if row is None:
+            raise ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", f"столбец {column!r} без строки Excel", location.owner, location.field, node_id=location.node_id))
+        normalized = unicodedata.normalize("NFKC", column.strip()).casefold()
+        cell = next((value for name, value in row.values.items() if unicodedata.normalize("NFKC", name.strip()).casefold() == normalized), None)
+        if cell is None:
+            raise ProjectError(Diagnostic("COLUMN_UNKNOWN", f"нет столбца {column!r}", location.owner, location.field, source=location.source, sheet=location.sheet, node_id=location.node_id))
+        return cell
+
+    def _column_value(self, column: str, row: DataRow | None, location: BindingLocation) -> str:
+        cell = self._column_cell(column, row, location)
+        return self._cell_text(cell, location, column)
 
 
 class _BindingHtmlParser(HTMLParser):

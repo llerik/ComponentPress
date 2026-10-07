@@ -15,6 +15,7 @@ from PySide6.QtCore import QByteArray
 from PySide6.QtGui import QFontDatabase, QImage, QRawFont
 
 from componentpress.application.contracts import ProjectSnapshot
+from componentpress.application.identifiers import instance_id as make_instance_id
 from componentpress.bindings.resolver import BindingResolver
 from componentpress.data_sources import XlsxReader
 from componentpress.domain.component import ComponentDefinition
@@ -249,10 +250,10 @@ class InputSnapshotBuilder:
             input_hashes[document.path.relative_to(source.root).as_posix()] = document.disk_hash
             source_file_hashes[document.path] = document.disk_hash
             component = document.model
-            rows = (None,)
+            rows = ((None, None),)
             sheet = None
             if component.data is not None:
-                data_source = source.model.data_sources.get(component.data.source)
+                data_source = source.model.data_source
                 if data_source is None:
                     raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", f"источник {component.data.source!r} не найден", document.path, "data.source"))
                 check_exact_case(source.root, data_source.path)
@@ -265,15 +266,23 @@ class InputSnapshotBuilder:
                 sheet = self.reader.read(
                     xlsx_path,
                     component.data.sheet,
-                    source=component.data.source,
-                    id_column=component.data.id_column,
-                    copies_column=component.data.copies_column,
+                    source="main",
+                    copies_columns=(source.model.copies_columns.prod, source.model.copies_columns.test),
                     data=xlsx_bytes[xlsx_path],
                 )
-                rows = tuple(row for row in sheet.rows if row.copies > 0)
-            for row in rows:
+                # Validate every row, including zero-copy rows. Only after
+                # resolution succeeds do we retain the stage-8 Prod rows.
+                validated_rows = []
+                for row in sheet.rows:
+                    stable = replace(row, instance_id=make_instance_id(source.model.id, component_id, sheet.sheet, row.row_number))
+                    resolved = resolver.resolve_component(component, sheet, stable, owner=document.path)
+                    if stable.copies > 0:
+                        validated_rows.append((stable, resolved))
+                rows = tuple(validated_rows)
+            else:
+                rows = ((None, resolver.resolve_component(component, None, None, owner=document.path)),)
+            for row, resolved in rows:
                 token.check()
-                resolved = resolver.resolve_component(component, sheet, row, owner=document.path)
                 copies = row.copies if row is not None else 1
                 index = len(instances)
                 instance_id = row.instance_id if row is not None else "static"

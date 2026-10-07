@@ -37,63 +37,36 @@ def make_window(root: Path, qtbot) -> MainWindow:
     return window
 
 
-def test_v1_migration_preserves_ids_comments_and_recoverable_copy(tmp_path: Path) -> None:
+def test_legacy_project_is_rejected_without_migration_or_writes(tmp_path: Path) -> None:
     root = copy_example(tmp_path)
     project = root / "project.yaml"
     component = root / "components/forest-card.yaml"
-    project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 2", "schema_version: 1"), encoding="utf-8")
-    old_component = component.read_text(encoding="utf-8").replace("schema_version: 2", "schema_version: 1")
-    for line in ('    name: "Иллюстрация"\n', '        name: "Заголовок"\n', '        name: "Описание"\n'):
-        old_component = old_component.replace(line, "")
-    component.write_text(old_component, encoding="utf-8")
-
+    project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 3", "schema_version: 2"), encoding="utf-8")
+    originals = (project.read_bytes(), component.read_bytes())
     repository = FileProjectRepository()
     try:
         repository.open(root)
     except ProjectError as exc:
-        assert exc.diagnostic.code == "MIGRATION_REQUIRED"
+        assert exc.diagnostic.code == "SCHEMA_UNSUPPORTED"
     else:
-        raise AssertionError("формат 1 не должен изменяться без явного подтверждения")
-    assert project.read_text(encoding="utf-8").startswith("# Пример проекта второго этапа\nschema_version: 1")
-    snapshot = repository.migrate(root)
-
-    assert snapshot.model.schema_version == 2
-    assert snapshot.documents["forest-card"].model.schema_version == 2
-    nodes = locations(snapshot.documents["forest-card"].model)
-    assert nodes["leaf-art"].node.name == "leaf-art"
-    assert nodes["heading"].node.name == "heading"
-    assert "# Статический макет с вложенной группой" in component.read_text(encoding="utf-8")
-    backups = list((root / ".componentpress/migrations").glob("schema-1-*"))
-    assert len(backups) == 1
-    assert "schema_version: 1" in (backups[0] / "project.yaml").read_text(encoding="utf-8")
-    assert (backups[0] / "components/forest-card.yaml").read_text(encoding="utf-8") == old_component
-    assert (backups[0] / "manifest.json").is_file()
+        raise AssertionError("старый формат должен быть отклонён")
+    assert (project.read_bytes(), component.read_bytes()) == originals
+    assert not (root / ".componentpress/migrations").exists()
 
 
-def test_failed_migration_restores_every_source_file(tmp_path: Path, monkeypatch) -> None:
+def test_legacy_migration_entry_point_is_read_only(tmp_path: Path, monkeypatch) -> None:
     root = copy_example(tmp_path)
     project = root / "project.yaml"
     component = root / "components/forest-card.yaml"
-    project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 2", "schema_version: 1"), encoding="utf-8")
-    component.write_text(component.read_text(encoding="utf-8").replace("schema_version: 2", "schema_version: 1"), encoding="utf-8")
+    project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 3", "schema_version: 1"), encoding="utf-8")
+    component.write_text(component.read_text(encoding="utf-8").replace("schema_version: 3", "schema_version: 1"), encoding="utf-8")
     originals = (project.read_bytes(), component.read_bytes())
-    real_write = migrations.atomic_write
-    failed = False
-
-    def fail_component_once(path: Path, data: bytes, expected_hash: str | None = None):
-        nonlocal failed
-        if path == component and b"schema_version: 2" in data and not failed:
-            failed = True
-            raise OSError("injected migration failure")
-        return real_write(path, data, expected_hash)
-
-    monkeypatch.setattr(migrations, "atomic_write", fail_component_once)
     try:
         migrations.migrate_v1_to_v2(root)
-    except OSError as exc:
-        assert "injected" in str(exc)
+    except ProjectError as exc:
+        assert exc.diagnostic.code == "SCHEMA_UNSUPPORTED"
     else:
-        raise AssertionError("ошибка миграции не была внедрена")
+        raise AssertionError("legacy schema must not migrate")
     assert (project.read_bytes(), component.read_bytes()) == originals
     assert not (root / migrations.ACTIVE_JOURNAL).exists()
 
@@ -116,7 +89,7 @@ def test_text_and_layout_are_synchronized_with_one_undo_step(tmp_path: Path, qtb
     assert locations(original)["leaf-art"].node.x_mm == 4
 
     window._request_mode(tab, "text")
-    edited = tab.text_editor.toPlainText().replace("schema_version: 2", "schema_version: 2\n# Новый комментарий")
+    edited = tab.text_editor.toPlainText().replace("schema_version: 3", "schema_version: 3\n# Новый комментарий")
     edited = edited.replace("    x_mm: 4\n", "    x_mm: 7\n", 1)
     tab.text_editor.setPlainText(edited)
     assert locations(window.session.documents["forest-card"].model)["leaf-art"].node.x_mm == 4
@@ -152,7 +125,7 @@ def test_invalid_draft_keeps_last_model_and_blocks_save(tmp_path: Path, qtbot) -
     qtbot.keyClick(tab.text_editor, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
     assert tab.text_editor.toPlainText() == initial
     assert tab.undo_stack.count() == 0
-    tab.text_editor.setPlainText("schema_version: 2\nelements: [")
+    tab.text_editor.setPlainText("schema_version: 3\nelements: [")
     document = window.session.documents["forest-card"]
     assert document.model == before
     assert document.has_invalid_draft

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from componentpress.application.contracts import DocumentSnapshot, ProjectSnapshot
 from componentpress.application.ports import DataSourceReader
+from componentpress.application.identifiers import instance_id
 from componentpress.bindings.resolver import BindingResolver
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.component import ComponentDefinition
@@ -40,13 +42,13 @@ class PreviewService:
         binding = component.data
         if binding is None:
             return None
-        source = snapshot.model.data_sources.get(binding.source)
+        source = snapshot.model.data_source
         if source is None:
             document = snapshot.documents[component_id]
             raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", f"источник {binding.source!r} не найден", document.path, "data.source"))
         return (
-            snapshot.root.resolve(), component_id, binding.source, source.path,
-            source.formula_mode, binding.sheet, binding.id_column, binding.copies_column,
+            snapshot.root.resolve(), component_id, source.path,
+            source.formula_mode, binding.sheet,
         )
 
     def refresh(
@@ -57,7 +59,7 @@ class PreviewService:
         binding = model.data
         if binding is None:
             return None
-        source = snapshot.model.data_sources.get(binding.source)
+        source = snapshot.model.data_source
         if source is None:
             raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", f"источник {binding.source!r} не найден", document.path, "data.source"))
         cache_key = self._cache_key(snapshot, component_id, model)
@@ -72,14 +74,43 @@ class PreviewService:
         check_exact_case(snapshot.root, source.path)
         path = resolve_project_path(snapshot.root, source.path)
         loaded = self.reader.read(
-            path, binding.sheet, source=binding.source, id_column=binding.id_column,
-            copies_column=binding.copies_column, version=version, request_id=request_id,
+            path, binding.sheet, source="main",
+            copies_columns=(snapshot.model.copies_columns.prod, snapshot.model.copies_columns.test),
+            version=version, request_id=request_id,
         )
         if request_id != self._requested.get(request_key):
             raise ProjectError(Diagnostic("DATA_REFRESH_STALE", "устаревший результат обновления данных отброшен", document.path))
+        loaded = replace(loaded, rows=tuple(
+            replace(row, instance_id=instance_id(snapshot.model.id, component_id, binding.sheet, row.row_number))
+            for row in loaded.rows
+        ))
+        resolver = BindingResolver(snapshot.root, snapshot.model)
+        issues = []
+        for row in loaded.rows:
+            try:
+                resolver.resolve_component(model, loaded, row, owner=document.path)
+            except ProjectError as exc:
+                issues.append(exc.diagnostic)
+        if issues:
+            # Retain the last successful cache and surface every row-level issue.
+            raise ValidationIssues(issues)
         self._versions[cache_key] = version
         self._data[cache_key] = loaded
         return loaded
+
+    def validate_all(self, snapshot: ProjectSnapshot) -> tuple[object, ...]:
+        diagnostics = []
+        for component in snapshot.model.components:
+            model = snapshot.documents[component.id].model
+            if model.data is None:
+                continue
+            try:
+                self.refresh(snapshot, component.id, component=model)
+            except ValidationIssues as exc:
+                diagnostics.extend(exc.diagnostics)
+            except ProjectError as exc:
+                diagnostics.append(exc.diagnostic)
+        return tuple(diagnostics)
 
     def data(
         self, snapshot: ProjectSnapshot, component_id: str, *,
@@ -95,20 +126,22 @@ class PreviewService:
     def select_row(
         self, snapshot: ProjectSnapshot, component_id: str, *,
         row_number: int | None = None, instance_id: str | None = None,
+        mode: str = "prod",
         component: ComponentDefinition | None = None,
     ) -> ResolvedComponent:
         document, model = self._model(snapshot, component_id, component)
         data = self.data(snapshot, component_id, component=model)
         row: DataRow | None = None
         if data is not None:
-            if not data.rows:
+            eligible = tuple(item for item in data.rows if (item.copies if mode == "prod" else item.test_copies) > 0)
+            if not eligible:
                 raise ProjectError(Diagnostic("DATA_EMPTY", "на листе нет строк данных", data.path, source=data.source, sheet=data.sheet))
             if instance_id is not None:
-                row = next((item for item in data.rows if item.instance_id == instance_id), None)
+                row = next((item for item in eligible if item.instance_id == instance_id), None)
             elif row_number is not None:
-                row = next((item for item in data.rows if item.row_number == row_number), None)
+                row = next((item for item in eligible if item.row_number == row_number), None)
             else:
-                row = data.rows[0]
+                row = eligible[0]
             if row is None:
                 raise ProjectError(Diagnostic("DATA_ROW_UNKNOWN", "строка предпросмотра не найдена", data.path, source=data.source, sheet=data.sheet))
         resolver = BindingResolver(snapshot.root, snapshot.model)
@@ -117,10 +150,17 @@ class PreviewService:
     def export_png(
         self, snapshot: ProjectSnapshot, component_id: str, output: Path, *,
         row_number: int | None = None, instance_id: str | None = None, dpi: int | None = None,
+        mode: str = "prod",
         component: ComponentDefinition | None = None,
     ) -> RenderResult:
         resolved = self.select_row(
-            snapshot, component_id, row_number=row_number, instance_id=instance_id,
+            snapshot, component_id, row_number=row_number, instance_id=instance_id, mode=mode,
             component=component,
         )
         return render_component(snapshot, component_id, output, component=resolved.component, dpi=dpi)
+
+
+class ValidationIssues(ProjectError):
+    def __init__(self, diagnostics):
+        self.diagnostics = tuple(diagnostics)
+        super().__init__(self.diagnostics[0])

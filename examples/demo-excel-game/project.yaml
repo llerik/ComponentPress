@@ -1,5 +1,5 @@
 # Пример проекта второго этапа; расширен для демонстрации этапа 6
-schema_version: 2
+schema_version: 3
 id: demo-game
 name: "Лесная игра"
 version: "0.1.0"
@@ -14,10 +14,11 @@ icons:
     path: assets/images/icons/effects/leaf-small.png
     width_mm: 3
     height_mm: 3
-data_sources:
-  main:
-    path: data/game.xlsx
-    formula_mode: cached
+data_source:
+  path: data/game.xlsx
+copies_columns:
+  prod: Prod
+  test: Debug
 components:
   - id: forest-card
     path: components/forest-card.yaml

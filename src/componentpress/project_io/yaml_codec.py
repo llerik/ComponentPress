@@ -1,5 +1,6 @@
 """Round-trip YAML codec with strict schema and location-aware diagnostics."""
 
+from copy import deepcopy
 from io import StringIO
 from html.parser import HTMLParser
 import re
@@ -77,7 +78,7 @@ def _load(text: str, path: Path) -> CommentedMap:
 
 def _validate(tree: CommentedMap, cls: type[Model], path: Path) -> Model:
     version = tree.get("schema_version")
-    if version != 2 or isinstance(version, bool):
+    if version != 3 or isinstance(version, bool):
         raise ProjectError(Diagnostic("SCHEMA_UNSUPPORTED", f"неподдерживаемая версия схемы {version!r}", path, "schema_version", _field_line(tree, ("schema_version",))))
     try:
         return cls.model_validate(tree)
@@ -164,7 +165,8 @@ def parse_project(text: str, path: Path) -> tuple[ProjectDefinition, CommentedMa
     model = _validate(tree, ProjectDefinition, path)
     paths: list[tuple[str, str]] = []
     paths.extend((f"components.{i}.path", item.path) for i, item in enumerate(model.components))
-    paths.extend((f"data_sources.{name}.path", item.path) for name, item in model.data_sources.items())
+    if model.data_source is not None:
+        paths.append(("data_source.path", model.data_source.path))
     paths.extend((f"icons.{name}.path", item.path) for name, item in model.icons.items())
     for field, value in paths:
         try:
@@ -173,14 +175,44 @@ def parse_project(text: str, path: Path) -> tuple[ProjectDefinition, CommentedMa
             raise ProjectError(Diagnostic(exc.diagnostic.code, exc.diagnostic.message, path, field)) from exc
         if field.startswith("icons.") and (not value.startswith("assets/images/") or not value.lower().endswith((".png", ".jpg", ".jpeg"))):
             raise ProjectError(Diagnostic("ICON_PATH", "иконка должна ссылаться на PNG/JPEG в assets/images", path, field))
-        if field.startswith("data_sources.") and not value.lower().endswith(".xlsx"):
+        if field == "data_source.path" and not value.lower().endswith(".xlsx"):
             raise ProjectError(Diagnostic("DATA_SOURCE_PATH", "ожидается файл .xlsx", path, field))
     return model, tree
 
 
 def parse_component(text: str, path: Path, variables: dict[str, str] | None = None) -> tuple[ComponentDefinition, CommentedMap]:
     tree = _load(text, path)
-    model = _validate(tree, ComponentDefinition, path)
+    model_tree = deepcopy(tree)
+    # Keep the application model convenient for the renderer while the public
+    # YAML format expresses an explicit manual/column content source.
+    def normalize_nodes(items: Any) -> None:
+        if not isinstance(items, list):
+            return
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "image" and not isinstance(item.get("source"), dict):
+                raise ProjectError(Diagnostic("CONTENT_SOURCE_INVALID", "источник изображения должен задавать mode и path/column", path, "source"))
+            if item.get("type") == "image" and isinstance(item.get("source"), dict):
+                source = item["source"]
+                item["source_mode"] = source.get("mode", "manual")
+                item["source_column"] = source.get("column")
+                item["source"] = source.get("path", "")
+            if item.get("type") == "html" and not isinstance(item.get("content"), dict):
+                raise ProjectError(Diagnostic("CONTENT_SOURCE_INVALID", "содержимое HTML должно задавать mode и html/column", path, "content"))
+            if item.get("type") == "html" and isinstance(item.get("content"), dict):
+                content = item["content"]
+                item["content_mode"] = content.get("mode", "manual")
+                item["content_column"] = content.get("column")
+                item["html"] = content.get("html", "")
+                del item["content"]
+            if item.get("type") == "group":
+                normalize_nodes(item.get("children"))
+        # The v3 project has one source; components only select a sheet.
+    if isinstance(model_tree.get("data"), dict):
+        model_tree["data"].setdefault("source", "main")
+    normalize_nodes(model_tree.get("elements"))
+    model = _validate(model_tree, ComponentDefinition, path)
 
     def visit(nodes: tuple[Node, ...], prefix: tuple[Any, ...]) -> None:
         for i, node in enumerate(nodes):
@@ -188,14 +220,19 @@ def parse_component(text: str, path: Path, variables: dict[str, str] | None = No
             if isinstance(node, ImageNode):
                 location = (*base, "source")
                 field = ".".join(map(str, location))
-                _grammar(node.source, path, field, tree, location, has_data=model.data is not None, variables=variables)
-                _template_path(node.source, path, field)
+                if node.source_mode == "manual":
+                    _template_path(node.source, path, field)
+                elif model.data is None:
+                    raise ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", "столбец изображения без привязки к листу", path, field))
             elif isinstance(node, HtmlNode):
                 location = (*base, "html")
                 field = ".".join(map(str, location))
-                _grammar(node.html, path, field, tree, location, has_data=model.data is not None, variables=variables)
-                for source in html_image_sources(node.html):
-                    _template_path(source, path, f"{field}.img.src")
+                if node.content_mode == "manual":
+                    _grammar(node.html, path, field, tree, location, has_data=False, variables=variables)
+                    for source in html_image_sources(node.html):
+                        _template_path(source, path, f"{field}.img.src")
+                elif model.data is None:
+                    raise ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", "столбец HTML без привязки к листу", path, field))
             elif isinstance(node, GroupNode):
                 visit(node.children, (*base, "children"))
 
@@ -264,8 +301,28 @@ def update_tree(
                     collect(child)
 
         collect(tree)
+    def schema_data(model: BaseModel) -> dict[str, Any]:
+        raw = model.model_dump(mode="python", exclude_unset=True)
+        if isinstance(model, ComponentDefinition):
+            data = raw.get("data")
+            if isinstance(data, dict):
+                data.pop("source", None)
+            raw["elements"] = [schema_data(node) for node in model.elements]
+        elif isinstance(model, ImageNode):
+            mode = raw.pop("source_mode", "manual")
+            column = raw.pop("source_column", None)
+            raw["source"] = {"mode": mode, **({"path": raw.pop("source")} if mode == "manual" else {"column": column})}
+        elif isinstance(model, HtmlNode):
+            mode = raw.pop("content_mode", "manual")
+            column = raw.pop("content_column", None)
+            html = raw.pop("html", "")
+            raw["content"] = {"mode": mode, **({"html": html} if mode == "manual" else {"column": column})}
+        elif isinstance(model, GroupNode):
+            raw["children"] = [schema_data(node) for node in model.children]
+        return raw
+
     if isinstance(value, BaseModel):
-        value = value.model_dump(mode="python", exclude_unset=True)
+        value = schema_data(value)
     if isinstance(tree, CommentedMap) and isinstance(value, dict):
         for key in tuple(tree):
             if key not in value:

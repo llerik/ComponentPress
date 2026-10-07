@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from io import BytesIO
 import hashlib
+import unicodedata
 from pathlib import Path
 import posixpath
 from typing import Iterable
 from xml.etree import ElementTree as ET
 from zipfile import BadZipFile, ZipFile
+from uuid import UUID, uuid5
 
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
@@ -19,6 +21,11 @@ from componentpress.domain.values import CellValue, DataRow, DataSheetSnapshot, 
 
 _NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main", "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"}
 _REL_NS = {"p": "http://schemas.openxmlformats.org/package/2006/relationships"}
+_INSTANCE_NAMESPACE = UUID("1f8f7f5c-8b38-5f19-b836-1ce6c606865e")
+
+
+def normalize_header(value: str) -> str:
+    return unicodedata.normalize("NFKC", value.strip()).casefold()
 
 
 def _formula_xml_states(data: bytes, sheet: str) -> dict[str, tuple[FormulaState, str | None]]:
@@ -86,6 +93,7 @@ class XlsxReader:
         version: int = 1,
         request_id: int = 0,
         data: bytes | None = None,
+        copies_columns: tuple[str, str] | None = None,
     ) -> DataSheetSnapshot:
         if data is None:
             try:
@@ -109,7 +117,7 @@ class XlsxReader:
                 raise ProjectError(Diagnostic("MERGED_CELLS_UNSUPPORTED", f"объединённые ячейки данных не поддерживаются: {merged}", path, source=source, sheet=sheet))
             max_column = formula_sheet.max_column
             headers: list[str] = []
-            seen: set[str] = set()
+            seen: dict[str, str] = {}
             for column in range(1, max_column + 1):
                 coordinate = f"{get_column_letter(column)}1"
                 raw = formula_sheet.cell(1, column).value
@@ -118,12 +126,16 @@ class XlsxReader:
                 header = raw.strip()
                 if "{" in header or "}" in header:
                     raise ProjectError(Diagnostic("HEADER_BRACES", "фигурные скобки в заголовке запрещены", path, source=source, sheet=sheet, cell=coordinate))
-                if header in seen:
+                normalized = normalize_header(header)
+                if normalized in seen:
                     raise ProjectError(Diagnostic("HEADER_DUPLICATE", f"повторный заголовок {header!r}", path, source=source, sheet=sheet, cell=coordinate))
-                seen.add(header)
+                seen[normalized] = header
                 headers.append(header)
-            for configured, field in ((id_column, "data.id_column"), (copies_column, "data.copies_column")):
-                if configured is not None and configured not in seen:
+            configured_copies = copies_columns or (copies_column or "", copies_column or "")
+            required = (*((id_column,) if id_column is not None else ()), *(name for name in configured_copies if name))
+            for configured in required:
+                if normalize_header(configured) not in seen:
+                    field = "copies_columns" if configured in configured_copies else "data.id_column"
                     raise ProjectError(Diagnostic("COLUMN_UNKNOWN", f"нет столбца {configured!r}", path, field, source=source, sheet=sheet))
             rows: list[DataRow] = []
             ids: set[str] = set()
@@ -146,7 +158,8 @@ class XlsxReader:
                 if id_column is None:
                     instance_id = str(row_number)
                 else:
-                    id_cell = cells[id_column]
+                    id_key = seen[normalize_header(id_column)]
+                    id_cell = cells[id_key]
                     self._require_usable(id_cell, path, source, sheet, id_column)
                     instance_id = value_to_text(id_cell.value)
                     if not instance_id:
@@ -154,15 +167,21 @@ class XlsxReader:
                     if instance_id in ids:
                         raise ProjectError(Diagnostic("INSTANCE_ID_DUPLICATE", f"повторный ID экземпляра {instance_id!r}", path, source=source, sheet=sheet, cell=id_cell.coordinate))
                 ids.add(instance_id)
-                copies = 1
-                if copies_column is not None:
-                    copy_cell = cells[copies_column]
-                    self._require_usable(copy_cell, path, source, sheet, copies_column)
+                counts: list[int] = []
+                for configured in configured_copies:
+                    if not configured:
+                        counts.append(1)
+                        continue
+                    actual = seen.get(normalize_header(configured))
+                    if actual is None:
+                        raise ProjectError(Diagnostic("COLUMN_UNKNOWN", f"нет столбца {configured!r}", path, "copies_columns", source=source, sheet=sheet))
+                    copy_cell = cells[actual]
+                    self._require_usable(copy_cell, path, source, sheet, actual)
                     raw = copy_cell.value
                     if isinstance(raw, bool) or not isinstance(raw, (int, float)) or int(raw) != raw or raw < 0:
-                        raise ProjectError(Diagnostic("COPIES_INVALID", "тираж должен быть целым числом от 0", path, source=source, sheet=sheet, cell=copy_cell.coordinate))
-                    copies = int(raw)
-                rows.append(DataRow(row_number, instance_id, copies, cells))
+                        raise ProjectError(Diagnostic("COPIES_INVALID", "тираж должен быть целым числом от 0", path, "copies_columns", source=source, sheet=sheet, cell=copy_cell.coordinate))
+                    counts.append(int(raw))
+                rows.append(DataRow(row_number, instance_id, counts[0], cells, counts[1]))
             return DataSheetSnapshot(source, path, sheet, digest, version, tuple(headers), tuple(rows), request_id)
         except ProjectError:
             raise

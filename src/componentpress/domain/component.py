@@ -18,14 +18,15 @@ class SizeMM(StrictModel):
 
 
 class DataBinding(StrictModel):
-    source: str = Field(min_length=1)
     sheet: str = Field(min_length=1)
-    id_column: str | None = None
-    copies_column: str | None = None
+    # Internal compatibility key: schema 3 has one project-wide source.
+    source: str = "main"
+    id_column: str | None = Field(default=None, exclude=True)
+    copies_column: str | None = Field(default=None, exclude=True)
 
 
 class ComponentDefinition(StrictModel):
-    schema_version: Literal[2]
+    schema_version: Literal[3]
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     size_mm: SizeMM

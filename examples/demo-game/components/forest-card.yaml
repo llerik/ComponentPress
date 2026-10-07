@@ -1,5 +1,5 @@
 # Статический макет с вложенной группой
-schema_version: 2
+schema_version: 3
 id: forest-card
 name: "Лесная карта"
 size_mm:
@@ -14,7 +14,9 @@ elements:
     y_mm: 4
     width_mm: 55
     height_mm: 42
-    source: assets/images/animals/enemy/leaf.png
+    source:
+      mode: manual
+      path: assets/images/animals/enemy/leaf.png
     fit: contain
   - id: text-group
     type: group
@@ -32,8 +34,10 @@ elements:
         font_family: Arial
         font_size_pt: 14
         color: "#111111"
-        html: |-
-          <p><b>Лесная карта</b></p>
+        content:
+          mode: manual
+          html: |-
+            <p><b>Лесная карта</b></p>
       - id: caption
         name: "Описание"
         type: html
@@ -44,10 +48,12 @@ elements:
         font_family: Arial
         font_size_pt: 8
         color: "#111111"
-        html: |-
-          <p>{{ vars["edition"] }} <img src="assets/images/animals/enemy/leaf.png" width="12" height="12" /></p>
-          <table border="1" cellspacing="0" cellpadding="2" width="100%">
-            <tr><th colspan="2">Свойства</th></tr>
-            <tr><td rowspan="2"><img src="assets/images/animals/enemy/leaf.png" width="12" height="12" /></td><td>Тип: лес</td></tr>
-            <tr><td>Редакция: 1</td></tr>
-          </table>
+        content:
+          mode: manual
+          html: |-
+            <p>{{ vars["edition"] }} <img src="assets/images/animals/enemy/leaf.png" width="12" height="12" /></p>
+            <table border="1" cellspacing="0" cellpadding="2" width="100%">
+              <tr><th colspan="2">Свойства</th></tr>
+              <tr><td rowspan="2"><img src="assets/images/animals/enemy/leaf.png" width="12" height="12" /></td><td>Тип: лес</td></tr>
+              <tr><td>Редакция: 1</td></tr>
+            </table>

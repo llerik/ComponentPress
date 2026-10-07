@@ -43,6 +43,11 @@ class DataSource(StrictModel):
     formula_mode: Literal["cached"] = "cached"
 
 
+class CopiesColumns(StrictModel):
+    prod: str = "Prod"
+    test: str = "Debug"
+
+
 class PrintSettings(StrictModel):
     paper: Literal["A4", "Letter"] = "A4"
     orientation: Literal["portrait", "landscape"] = "portrait"
@@ -59,13 +64,14 @@ class PrintSettings(StrictModel):
 
 
 class ProjectDefinition(StrictModel):
-    schema_version: Literal[2]
+    schema_version: Literal[3]
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     version: str
     variables: dict[str, str] = Field(default_factory=dict)
     icons: dict[str, IconDefinition] = Field(default_factory=dict)
-    data_sources: dict[str, DataSource] = Field(default_factory=dict)
+    data_source: DataSource | None = None
+    copies_columns: CopiesColumns = Field(default_factory=CopiesColumns)
     components: tuple[ComponentRef, ...] = ()
     print: PrintSettings = Field(default_factory=PrintSettings)
 

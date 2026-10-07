@@ -31,7 +31,7 @@ EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "demo-game"
 
 def simple_component() -> ComponentDefinition:
     return ComponentDefinition(
-        schema_version=2,
+        schema_version=3,
         id="card",
         name="Карта",
         size_mm=SizeMM(width=63, height=88),
@@ -74,7 +74,7 @@ def test_layer_drop_changes_storage_order_used_by_painter() -> None:
 
 def test_grouping_keeps_comments_attached_to_moved_nodes(tmp_path: Path) -> None:
     path = tmp_path / "card.yaml"
-    text = """schema_version: 2
+    text = """schema_version: 3
 id: card
 name: Card
 size_mm: {width: 63, height: 88}
@@ -87,7 +87,9 @@ elements:
     y_mm: 6
     width_mm: 20
     height_mm: 20
-    source: assets/images/a.png
+    source:
+      mode: manual
+      path: assets/images/a.png
   # comment for front
   - id: front
     name: Front
@@ -98,7 +100,9 @@ elements:
     height_mm: 10
     font_family: Arial
     font_size_pt: 10
-    html: text
+    content:
+      mode: manual
+      html: text
 """
     model, tree = parse_component(text, path)
     grouped = group_nodes(model, ("back", "front"), "pair", "Pair")

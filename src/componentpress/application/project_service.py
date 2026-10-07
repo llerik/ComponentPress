@@ -4,7 +4,7 @@ from pathlib import Path
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.component import ComponentDefinition
-from componentpress.domain.project import DataSource
+from componentpress.domain.project import CopiesColumns, DataSource
 import re
 import unicodedata
 from componentpress.domain.tree import locations
@@ -99,18 +99,23 @@ class ProjectService:
             return self.resources.import_image(snapshot.root, source, folder)
 
     def import_data(self, session: ProjectSession, source: Path) -> str:
-        """Import an XLSX and register a stable local source name."""
+        """Import the project's single XLSX source."""
         with self.write_lock(session.snapshot.root):
             relative = self.resources.import_data(session.snapshot.root, source)
-        stem = unicodedata.normalize("NFKD", source.stem).encode("ascii", "ignore").decode().lower()
-        base = re.sub(r"[^a-z0-9]+", "-", stem).strip("-") or "data"
-        source_id = base
-        counter = 2
-        while source_id in session.snapshot.model.data_sources:
-            source_id = f"{base}-{counter}"
-            counter += 1
-        sources = dict(session.snapshot.model.data_sources)
-        sources[source_id] = DataSource(path=relative)
-        updated = self.projects.save_project(session.snapshot, data_sources=sources)
+        updated = self.projects.save_project(session.snapshot, data_source=DataSource(path=relative))
         session.replace_snapshot(updated)
-        return source_id
+        return "main"
+
+    def clear_data_source(self, session: ProjectSession) -> None:
+        if any(item.model.data is not None for item in session.documents.values()):
+            raise ProjectError(Diagnostic("DATA_SOURCE_IN_USE", "сначала отвяжите листы компонентов от Excel", session.snapshot.root))
+        updated = self.projects.save_project(session.snapshot, data_source=None)
+        session.replace_snapshot(updated)
+
+    def set_project_details(self, session: ProjectSession, *, name: str, version: str) -> None:
+        updated = self.projects.save_project(session.snapshot, name=name, version=version)
+        session.replace_snapshot(updated)
+
+    def set_copies_columns(self, session: ProjectSession, *, prod: str, test: str) -> None:
+        updated = self.projects.save_project(session.snapshot, copies_columns=CopiesColumns(prod=prod, test=test))
+        session.replace_snapshot(updated)

@@ -75,9 +75,9 @@ def test_build_is_deterministic_for_one_two_and_four_workers(tmp_path: Path) -> 
     assert hashes[0] == hashes[1] == hashes[2]
     for result, report in results:
         assert report["complete"] is True
-        assert report["counts"] == {"instances": 4, "copies": 5, "pages": 2}
+        assert report["counts"] == {"instances": 3, "copies": 4, "pages": 2}
         assert [item["component_id"] for item in report["instances"]] == [
-            "forest-card", "forest-card", "event-card", "event-card"
+            "forest-card", "event-card", "event-card"
         ]
         first = QImage(str(result.output_directory / report["instances"][0]["png"]))
         assert first.size() == QSize(744, 1039)

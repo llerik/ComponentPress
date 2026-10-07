@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
+    QListWidget,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -29,7 +31,8 @@ from componentpress.application.sessions import ProjectSession
 from componentpress.application.contracts import BuildRequest, BuildResult, BuildProgress
 from componentpress.domain.component import ComponentDefinition, SizeMM
 from componentpress.domain.component import DataBinding
-from componentpress.domain.diagnostics import ProjectError
+from componentpress.application.preview_service import ValidationIssues
+from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode
 from componentpress.platforms.services import PlatformServices
 from componentpress.domain.tree import (
@@ -98,6 +101,7 @@ class MainWindow(QMainWindow):
         self.close_tab_action = self._action("Закрыть вкладку", QKeySequence.StandardKey.Close)
         self.exit_action = self._action("Выход", QKeySequence.StandardKey.Quit)
         self.add_component_action = self._action("Добавить компонент…", "Ctrl+Shift+N")
+        self.project_settings_action = self._action("Настройки проекта…")
         self.undo_action = self.undo_group.createUndoAction(self, "Отменить")
         self.undo_action.setShortcut(QKeySequence.StandardKey.Undo)
         self.redo_action = self.undo_group.createRedoAction(self, "Повторить")
@@ -125,6 +129,7 @@ class MainWindow(QMainWindow):
         edit_menu.addActions([self.delete_action, self.group_action, self.ungroup_action])
         project_menu = self.menuBar().addMenu("Проект")
         project_menu.addAction(self.add_component_action)
+        project_menu.addAction(self.project_settings_action)
         build_menu = self.menuBar().addMenu("Сборка")
         build_menu.addActions([
             self.build_all_action,
@@ -186,21 +191,20 @@ class MainWindow(QMainWindow):
         self.data_source.setObjectName("dataSource")
         self.data_sheet = QComboBox()
         self.data_sheet.setObjectName("dataSheet")
-        self.data_id_column = QComboBox()
-        self.data_id_column.setObjectName("dataIdColumn")
-        self.data_copies_column = QComboBox()
-        self.data_copies_column.setObjectName("dataCopiesColumn")
         self.data_row = QComboBox()
         self.data_row.setObjectName("dataRow")
+        self.data_mode = QComboBox()
+        self.data_mode.setObjectName("dataMode")
+        self.data_mode.addItem("Prod", "prod")
+        self.data_mode.addItem("Test", "test")
         self.data_column = QComboBox()
         self.data_column.setObjectName("dataColumn")
         self.data_chain = QLabel("Нет привязки")
         self.data_chain.setObjectName("dataChain")
         self.data_chain.setWordWrap(True)
         for label, widget in (
-            ("Источник", self.data_source), ("Лист", self.data_sheet),
-            ("ID", self.data_id_column), ("Тираж", self.data_copies_column),
-            ("Строка", self.data_row), ("Столбец", self.data_column),
+            ("Источник проекта", self.data_source), ("Лист компонента", self.data_sheet),
+            ("Режим превью", self.data_mode), ("Строка", self.data_row), ("Столбец", self.data_column),
         ):
             data_layout.addWidget(QLabel(label))
             data_layout.addWidget(widget)
@@ -210,9 +214,17 @@ class MainWindow(QMainWindow):
         self.data_refresh = QPushButton("Обновить")
         self.data_insert = QPushButton("Вставить {Столбец}")
         self.data_export = QPushButton("Экспорт PNG…")
+        self.data_validate = QPushButton("Валидировать")
+        self.data_validate_all = QPushButton("Валидировать всё")
+        self.data_clear = QPushButton("Удалить XLSX")
         for button in (self.data_import, self.data_refresh, self.data_insert, self.data_export):
             data_buttons.addWidget(button)
         data_layout.addLayout(data_buttons)
+        validation_buttons = QHBoxLayout()
+        validation_buttons.addWidget(self.data_validate)
+        validation_buttons.addWidget(self.data_validate_all)
+        validation_buttons.addWidget(self.data_clear)
+        data_layout.addLayout(validation_buttons)
         layout.addWidget(data)
         tools = QGroupBox("Инструменты")
         tools_layout = QVBoxLayout(tools)
@@ -225,6 +237,17 @@ class MainWindow(QMainWindow):
             button.setEnabled(False)
             tools_layout.addWidget(button)
         layout.addWidget(tools)
+        events = QGroupBox("События")
+        events_layout = QVBoxLayout(events)
+        self.event_search = QLineEdit()
+        self.event_search.setPlaceholderText("Поиск событий")
+        self.event_list = QListWidget()
+        clear_events = QPushButton("Очистить")
+        clear_events.clicked.connect(self.event_list.clear)
+        events_layout.addWidget(self.event_search)
+        events_layout.addWidget(self.event_list, 1)
+        events_layout.addWidget(clear_events)
+        layout.addWidget(events, 1)
         return panel
 
     def _right_panel(self) -> QWidget:
@@ -268,6 +291,7 @@ class MainWindow(QMainWindow):
         self.close_tab_action.triggered.connect(lambda: self.close_tab(self.tabs.currentIndex()))
         self.exit_action.triggered.connect(self.close)
         self.add_component_action.triggered.connect(self.add_component_dialog)
+        self.project_settings_action.triggered.connect(self.project_settings_dialog)
         self.build_all_action.triggered.connect(lambda: self._start_build(False))
         self.build_active_action.triggered.connect(lambda: self._start_build(True))
         self.cancel_build_action.triggered.connect(self._cancel_build)
@@ -298,15 +322,17 @@ class MainWindow(QMainWindow):
         self.element_properties.nodeChanged.connect(self._edit_selected_node)
         self.element_properties.insertImageRequested.connect(self.insert_html_image)
         self.data_import.clicked.connect(self._import_xlsx)
+        self.data_clear.clicked.connect(self._clear_xlsx)
         self.data_refresh.clicked.connect(lambda: self._refresh_data(force=True))
+        self.data_validate.clicked.connect(self._validate_active)
+        self.data_validate_all.clicked.connect(self._validate_all)
         self.data_export.clicked.connect(self._export_instance)
         self.data_insert.clicked.connect(self._insert_column_binding)
         self.data_row.currentIndexChanged.connect(self._row_changed)
-        self.data_source.currentIndexChanged.connect(self._source_changed)
         self.data_sheet.currentIndexChanged.connect(self._data_binding_changed)
-        self.data_id_column.currentIndexChanged.connect(self._data_binding_changed)
-        self.data_copies_column.currentIndexChanged.connect(self._data_binding_changed)
         self.data_column.currentIndexChanged.connect(self._update_data_chain)
+        self.data_mode.currentIndexChanged.connect(self._data_mode_changed)
+        self.event_search.textChanged.connect(self._filter_events)
 
     def load_session(self, session: ProjectSession) -> None:
         """Install an already opened session; useful to bootstrap and to test the UI."""
@@ -326,23 +352,8 @@ class MainWindow(QMainWindow):
         try:
             session = self.controller.open(root)
         except ProjectError as exc:
-            if exc.diagnostic.code != "MIGRATION_REQUIRED":
-                self._show_error(exc)
-                return False
-            choice = QMessageBox.question(
-                self,
-                "Обновление формата проекта",
-                "Проект использует формат 1. Создать восстанавливаемую копию и перейти на формат 2?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes,
-            )
-            if choice != QMessageBox.StandardButton.Yes:
-                return False
-            try:
-                session = self.controller.migrate(root)
-            except ProjectError as migration_error:
-                self._show_error(migration_error)
-                return False
+            self._show_error(exc)
+            return False
         self.load_session(session)
         return True
 
@@ -369,6 +380,29 @@ class MainWindow(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, "Открыть проект")
         if folder:
             self.open_path(Path(folder))
+
+    def project_settings_dialog(self) -> None:
+        if self.session is None:
+            return
+        model = self.session.snapshot.model
+        name, accepted = QInputDialog.getText(self, "Настройки проекта", "Название", text=model.name)
+        if not accepted:
+            return
+        version, accepted = QInputDialog.getText(self, "Настройки проекта", "Версия игры", text=model.version)
+        if not accepted:
+            return
+        prod, accepted = QInputDialog.getText(self, "Столбцы тиража", "Prod", text=model.copies_columns.prod)
+        if not accepted:
+            return
+        test, accepted = QInputDialog.getText(self, "Столбцы тиража", "Test", text=model.copies_columns.test)
+        if not accepted:
+            return
+        try:
+            self.controller.service.set_project_details(self.session, name=name, version=version)
+            self.controller.service.set_copies_columns(self.session, prod=prod, test=test)
+            self.setWindowTitle(f"{name} — ComponentPress")
+        except (ProjectError, ValidationError) as exc:
+            self._show_error(exc if isinstance(exc, ProjectError) else ProjectError(Diagnostic("PROJECT_SETTINGS", str(exc))))
 
     def add_component_dialog(self) -> None:
         if self.session is None:
@@ -409,7 +443,7 @@ class MainWindow(QMainWindow):
             return existing
         tab = DocumentTab(component_id)
         tab.zoomChanged.connect(self._zoom_changed)
-        tab.previewError.connect(lambda message: self.statusBar().showMessage(message, 7000))
+        tab.previewError.connect(lambda message: (self.statusBar().showMessage(message, 7000), self._add_events((Diagnostic("PREVIEW_ERROR", message),))))
         tab.modeRequested.connect(lambda mode, item=tab: self._request_mode(item, mode))
         tab.draftChanged.connect(lambda text, item=tab: self._draft_changed(item, text))
         tab.canvas.selectionChanged.connect(self._canvas_selection_changed)
@@ -470,24 +504,21 @@ class MainWindow(QMainWindow):
             return
         document = self.session.documents[tab.component_id]
         binding = document.model.data
-        sources = [("Без данных", None)] + [(name, name) for name in self.session.snapshot.model.data_sources]
-        self._fill_combo(self.data_source, sources, binding.source if binding else None)
+        source = self.session.snapshot.model.data_source
+        sources = [("Без XLSX", None)] + ([(source.path, "main")] if source else [])
+        self._fill_combo(self.data_source, sources, "main" if source else None)
         sheets: list[tuple[str, object]] = []
-        if binding is not None and self.controller.preview is not None:
+        if source is not None and self.controller.preview is not None:
             try:
-                source = self.session.snapshot.model.data_sources[binding.source]
                 from componentpress.project_io.paths import resolve_project_path
                 names = self.controller.preview.reader.sheet_names(resolve_project_path(self.session.snapshot.root, source.path))
                 sheets = [(name, name) for name in names]
-            except (ProjectError, KeyError) as exc:
-                message = str(exc.diagnostic) if isinstance(exc, ProjectError) else str(exc)
+            except ProjectError as exc:
+                message = str(exc.diagnostic)
                 self.statusBar().showMessage(message, 7000)
         self._fill_combo(self.data_sheet, sheets, binding.sheet if binding else None)
         data = self._refresh_data(force=False, render=False) if binding is not None else None
         headers = list(data.headers) if data is not None else []
-        optional = [("—", None)] + [(header, header) for header in headers]
-        self._fill_combo(self.data_id_column, optional, binding.id_column if binding else None)
-        self._fill_combo(self.data_copies_column, optional, binding.copies_column if binding else None)
         self._fill_combo(self.data_column, [(header, header) for header in headers])
         self._populate_rows(data)
         self._update_data_chain()
@@ -500,13 +531,63 @@ class MainWindow(QMainWindow):
     def _populate_rows(self, data) -> None:
         tab = self.active_tab
         current = tab.preview_row_number if tab is not None else None
+        mode = self.data_mode.currentData() or "prod"
         values = [] if data is None else [
-            (f"{row.instance_id} — строка {row.row_number} — тираж {row.copies}", row.row_number)
-            for row in data.rows
+            (f"{row.instance_id} — строка {row.row_number} — тираж {row.copies if mode == 'prod' else row.test_copies}", row.row_number)
+            for row in data.rows if (row.copies if mode == "prod" else row.test_copies) > 0
         ]
         self._fill_combo(self.data_row, values, current)
         if tab is not None and values:
             tab.preview_row_number = int(self.data_row.currentData())
+
+    def _data_mode_changed(self, _index: int) -> None:
+        data = None
+        if self.session is not None and self.active_tab is not None and self.controller.preview is not None:
+            data = self.controller.preview.data(self.session.snapshot, self.active_tab.component_id)
+        self._populate_rows(data)
+        if self.active_tab is not None:
+            self._refresh_preview(self.active_tab)
+
+    def _add_events(self, diagnostics) -> None:
+        for diagnostic in diagnostics:
+            self.event_list.addItem(str(diagnostic))
+        self._filter_events(self.event_search.text())
+
+    def _filter_events(self, query: str) -> None:
+        needle = query.casefold().strip()
+        for index in range(self.event_list.count()):
+            item = self.event_list.item(index)
+            item.setHidden(needle not in item.text().casefold())
+
+    def _validate_active(self) -> None:
+        if self.session is None or self.active_tab is None or self.controller.preview is None:
+            return
+        component_id = self.active_tab.component_id
+        if self.session.documents[component_id].model.data is None:
+            self.statusBar().showMessage("У компонента не выбран лист Excel", 5000)
+            return
+        try:
+            data = self.controller.preview.refresh(self.session.snapshot, component_id)
+        except ValidationIssues as exc:
+            self._add_events(exc.diagnostics)
+            self.statusBar().showMessage(f"Ошибок: {len(exc.diagnostics)}; подробности в панели событий", 7000)
+            return
+        except ProjectError as exc:
+            self._add_events((exc.diagnostic,))
+            self.statusBar().showMessage("Проверка не пройдена; подробности в панели событий", 7000)
+            return
+        self._add_events((Diagnostic("VALIDATION_OK", f"Лист {data.sheet} проверен; строк: {len(data.rows)}", data.path, source="main", sheet=data.sheet, severity="info"),))
+        self._populate_data_panel()
+
+    def _validate_all(self) -> None:
+        if self.session is None or self.controller.preview is None:
+            return
+        diagnostics = self.controller.preview.validate_all(self.session.snapshot)
+        self._add_events(diagnostics or (Diagnostic("VALIDATION_OK", "Все листы проекта проверены", self.session.snapshot.root, severity="info"),))
+        if diagnostics:
+            self.statusBar().showMessage(f"Ошибок: {len(diagnostics)}; подробности в панели событий", 7000)
+        else:
+            self.statusBar().showMessage("Все листы проекта проверены", 5000)
 
     def _refresh_data(self, *, force: bool, render: bool = True):
         tab = self.active_tab
@@ -518,14 +599,12 @@ class MainWindow(QMainWindow):
             component = self.session.documents[tab.component_id].model
             data = self.controller.preview.refresh(self.session.snapshot, tab.component_id, component=component) if force else self.controller.preview.data(self.session.snapshot, tab.component_id, component=component)
         except ProjectError as exc:
+            self._add_events(exc.diagnostics if isinstance(exc, ValidationIssues) else (exc.diagnostic,))
             self.statusBar().showMessage(str(exc.diagnostic), 10000)
             return None
         if data is not None:
             self._populate_rows(data)
             headers = [(header, header) for header in data.headers]
-            binding = self.session.documents[tab.component_id].model.data
-            self._fill_combo(self.data_id_column, [("—", None), *headers], binding.id_column if binding else None)
-            self._fill_combo(self.data_copies_column, [("—", None), *headers], binding.copies_column if binding else None)
             self._fill_combo(self.data_column, headers, self.data_column.currentData())
             if render:
                 self._refresh_preview(tab)
@@ -542,6 +621,7 @@ class MainWindow(QMainWindow):
         try:
             resolved = self.controller.preview.select_row(
                 self.session.snapshot, tab.component_id, row_number=tab.preview_row_number,
+                mode=str(self.data_mode.currentData() or "prod"),
                 component=document.model,
             )
         except ProjectError as exc:
@@ -563,18 +643,11 @@ class MainWindow(QMainWindow):
     def _data_binding_changed(self, _index: int) -> None:
         if self.session is None or self.active_tab is None:
             return
-        source = self.data_source.currentData()
-        if source is None:
+        sheet = self.data_sheet.currentData()
+        if not sheet:
             binding = None
         else:
-            sheet = self.data_sheet.currentData()
-            if not sheet:
-                return
-            binding = DataBinding(
-                source=str(source), sheet=str(sheet),
-                id_column=self.data_id_column.currentData(),
-                copies_column=self.data_copies_column.currentData(),
-            )
+            binding = DataBinding(sheet=str(sheet))
         try:
             self.controller.update_component(self.active_tab.component_id, data=binding)
         except ProjectError as exc:
@@ -583,25 +656,6 @@ class MainWindow(QMainWindow):
         self.active_tab.preview_row_number = None
         self._populate_data_panel()
         self._refresh_data(force=True)
-
-    def _source_changed(self, _index: int) -> None:
-        if self.session is None:
-            return
-        source_id = self.data_source.currentData()
-        if source_id is None:
-            self._fill_combo(self.data_sheet, [])
-            self._data_binding_changed(-1)
-            return
-        try:
-            source = self.session.snapshot.model.data_sources[str(source_id)]
-            from componentpress.project_io.paths import resolve_project_path
-            names = self.controller.preview.reader.sheet_names(resolve_project_path(self.session.snapshot.root, source.path)) if self.controller.preview else ()
-        except (ProjectError, KeyError) as exc:
-            message = str(exc.diagnostic) if isinstance(exc, ProjectError) else str(exc)
-            self.statusBar().showMessage(message, 7000)
-            return
-        self._fill_combo(self.data_sheet, [(name, name) for name in names])
-        self._data_binding_changed(-1)
 
     def _update_data_chain(self, _index: int = -1) -> None:
         source = self.data_source.currentData()
@@ -621,7 +675,7 @@ class MainWindow(QMainWindow):
         if item is None or not isinstance(item.node, HtmlNode):
             self.statusBar().showMessage("Привязка столбца вставляется в HTML-элемент", 5000)
             return
-        self._edit_selected_node({"html": item.node.html + "{" + str(column) + "}"})
+        self._edit_selected_node({"content_mode": "column", "content_column": str(column)})
 
     def _import_xlsx(self) -> None:
         if self.session is None:
@@ -630,14 +684,28 @@ class MainWindow(QMainWindow):
         if not filename:
             return
         try:
-            source_id = self.controller.import_data(Path(filename))
+            self.controller.import_data(Path(filename))
         except ProjectError as exc:
             self._show_error(exc)
             return
         self._populate_data_panel()
-        index = self.data_source.findData(source_id)
-        if index >= 0:
-            self.data_source.setCurrentIndex(index)
+        self._refresh_component_tree()
+
+    def _clear_xlsx(self) -> None:
+        if self.session is None:
+            return
+        choice = QMessageBox.question(self, "Удалить XLSX", "Отвязать все листы компонентов и убрать источник Excel из проекта?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if choice != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            for component_id, document in tuple(self.session.documents.items()):
+                if document.model.data is not None:
+                    self.controller.update_component(component_id, data=None)
+            self.controller.save_all()
+            self.controller.service.clear_data_source(self.session)
+            self._populate_data_panel()
+        except ProjectError as exc:
+            self._show_error(exc)
 
     def _export_instance(self) -> None:
         if self.session is None or self.active_tab is None or self.controller.preview is None:
@@ -649,6 +717,7 @@ class MainWindow(QMainWindow):
             result = self.controller.preview.export_png(
                 self.session.snapshot, self.active_tab.component_id, Path(filename),
                 row_number=self.active_tab.preview_row_number,
+                mode=str(self.data_mode.currentData() or "prod"),
                 component=self.session.documents[self.active_tab.component_id].model,
             )
         except ProjectError as exc:
@@ -878,7 +947,14 @@ class MainWindow(QMainWindow):
                 self._show_selection(())
                 return
             node = found.node
-            self.element_properties.show_node(node)
+            columns = ()
+            if self.controller.preview is not None:
+                try:
+                    data = self.controller.preview.data(self.session.snapshot, tab.component_id)
+                    columns = data.headers if data is not None else ()
+                except ProjectError:
+                    pass
+            self.element_properties.show_node(node, columns)
             self.component_properties_group.hide()
             self.element_properties_group.show()
             self.statusBar().showMessage(f"Выбран элемент: {node.id}", 2500)

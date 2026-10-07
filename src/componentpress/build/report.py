@@ -11,7 +11,7 @@ from .imposition import ImpositionPlan
 from .input_snapshot import BuildInputSnapshot
 
 
-APPLICATION_VERSION = "0.07"
+APPLICATION_VERSION = "0.08"
 
 
 def sha256(path: Path) -> str:

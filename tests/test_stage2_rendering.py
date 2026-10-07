@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from pathlib import Path
 import shutil
+import re
 import subprocess
 import sys
 
@@ -39,17 +40,22 @@ def _save_color(path: Path, width: int, height: int, color: str) -> None:
 
 
 def _write_project(root: Path, elements: str, *, width: float = 10, height: float = 10) -> None:
+    elements = re.sub(
+        r'(?m)^(\s*)source: (.+)$',
+        lambda match: f'{match.group(1)}source:\n{match.group(1)}  mode: manual\n{match.group(1)}  path: {match.group(2)}',
+        elements,
+    )
     root.mkdir(parents=True)
     (root / "components").mkdir()
     (root / "assets/images").mkdir(parents=True)
     (root / "project.yaml").write_text(
-        "schema_version: 2\nid: test\nname: Test\nversion: 0.1.0\nvariables: {}\nicons: {}\ndata_sources: {}\n"
+        "schema_version: 3\nid: test\nname: Test\nversion: 0.1.0\nvariables: {}\nicons: {}\ndata_source: null\ncopies_columns: {prod: Prod, test: Debug}\n"
         "components:\n  - id: card\n    path: components/card.yaml\n"
         "print:\n  paper: A4\n  orientation: portrait\n  margin_mm: 5\n  gap_mm: 3\n  dpi: 254\n  cut_lines: true\n  cut_line_width_mm: 0.2\n",
         encoding="utf-8",
     )
     (root / "components/card.yaml").write_text(
-        f'schema_version: 2\nid: card\nname: Card\nsize_mm:\n  width: {width}\n  height: {height}\nbackground: "#FFFFFF"\nelements:\n{elements}',
+        f'schema_version: 3\nid: card\nname: Card\nsize_mm:\n  width: {width}\n  height: {height}\nbackground: "#FFFFFF"\nelements:\n{elements}',
         encoding="utf-8",
     )
 

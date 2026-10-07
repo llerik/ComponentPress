@@ -70,7 +70,7 @@ def test_comments_group_ids_and_values_survive_save_cycle(tmp_path: Path) -> Non
 @pytest.mark.parametrize(
     ("replacement", "code"),
     [
-        ("schema_version: 3", "SCHEMA_UNSUPPORTED"),
+        ("schema_version: 2", "SCHEMA_UNSUPPORTED"),
         ("name: [", "YAML_SYNTAX"),
         ("width: -1", "DOCUMENT_INVALID"),
         ("id: heading", "NODE_ID_DUPLICATE"),
@@ -83,7 +83,7 @@ def test_invalid_component_has_diagnostic_and_is_not_rewritten(tmp_path: Path, r
     path = root / "components/forest-card.yaml"
     original = path.read_text(encoding="utf-8")
     if code == "SCHEMA_UNSUPPORTED":
-        broken = original.replace("schema_version: 2", replacement)
+            broken = original.replace("schema_version: 3", replacement)
     elif code == "YAML_SYNTAX":
         broken = original.replace('name: "Лесная карта"', replacement)
     elif code == "DOCUMENT_INVALID":
@@ -166,17 +166,22 @@ def test_grammar_accepts_only_public_forms() -> None:
             parse_references(invalid)
 
 
-def test_column_reference_requires_data_but_does_not_read_xlsx(tmp_path: Path) -> None:
+def test_column_content_requires_a_sheet_binding(tmp_path: Path) -> None:
     root = demo(tmp_path)
     project = root / "project.yaml"
-    project.write_text(project.read_text(encoding="utf-8").replace("data_sources: {}", "data_sources:\n  main:\n    path: data/missing.xlsx\n    formula_mode: cached"), encoding="utf-8")
+    project.write_text(project.read_text(encoding="utf-8").replace("data_source: null", "data_source:\n  path: data/game.xlsx"), encoding="utf-8")
+    (root / "data").mkdir(exist_ok=True)
+    shutil.copy2(EXAMPLE.parent / "demo-excel-game" / "data" / "game.xlsx", root / "data" / "game.xlsx")
     component = root / "components/forest-card.yaml"
-    text = component.read_text(encoding="utf-8").replace('html: |-\n          <p><b>Лесная карта</b></p>', 'html: |-\n          <p><b>{Название}</b></p>')
+    text = component.read_text(encoding="utf-8").replace(
+        'content:\n          mode: manual\n          html: |-\n            <p><b>Лесная карта</b></p>',
+        'content:\n          mode: column\n          column: "Название"',
+    )
     component.write_text(text, encoding="utf-8")
     with pytest.raises(ProjectError) as caught:
         FileProjectRepository().open(root)
     assert caught.value.diagnostic.code == "COLUMN_WITHOUT_DATA"
-    component.write_text(text.replace("background: \"#FFFFFF\"", 'background: "#FFFFFF"\ndata:\n  source: main\n  sheet: "Существа"'), encoding="utf-8")
+    component.write_text(text.replace("background: \"#FFFFFF\"", 'background: "#FFFFFF"\ndata:\n  sheet: "Карты"'), encoding="utf-8")
     assert cli("validate", str(root)).returncode == 0
 
 

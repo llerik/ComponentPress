@@ -1,5 +1,5 @@
 # Второй компонент читает другой лист той же книги
-schema_version: 2
+schema_version: 3
 id: event-card
 name: "Карта события"
 size_mm:
@@ -7,9 +7,7 @@ size_mm:
   height: 88
 background: "#F4F8FF"
 data:
-  source: main
   sheet: "События"
-  id_column: "ID"
 elements:
   - id: event-title
     name: "Событие"
@@ -21,6 +19,6 @@ elements:
     font_family: Arial
     font_size_pt: 16
     color: "#17365D"
-    html: |-
-      <p><b>{Название}</b></p>
-      <p>{{ vars["edition"] }}</p>
+    content:
+      mode: column
+      column: "Заголовок HTML"

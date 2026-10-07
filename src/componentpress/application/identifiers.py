@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Collection
 import re
 import unicodedata
-from uuid import uuid4
+from uuid import UUID, uuid4, uuid5
 
 
 class IdentifierGenerator:
@@ -33,3 +33,12 @@ class IdentifierGenerator:
             if candidate not in occupied:
                 return candidate
         raise RuntimeError("не удалось создать уникальный технический ID")
+
+
+_INSTANCE_NAMESPACE = UUID("1f8f7f5c-8b38-5f19-b836-1ce6c606865e")
+
+
+def instance_id(project_id: str, component_id: str, sheet: str, row_number: int) -> str:
+    """Stable row identity; moving a row intentionally changes its ID."""
+    key = "\0".join((project_id, component_id, sheet, str(row_number)))
+    return str(uuid5(_INSTANCE_NAMESPACE, key))

@@ -33,6 +33,7 @@ class DataSourceReader(Protocol):
         self, path: Path, sheet: str, *, source: str = "main",
         id_column: str | None = None, copies_column: str | None = None,
         version: int = 1, request_id: int = 0, data: bytes | None = None,
+        copies_columns: tuple[str, str] | None = None,
     ) -> DataSheetSnapshot: ...
 
 

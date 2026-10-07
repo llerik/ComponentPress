@@ -1,6 +1,5 @@
 """Validated QTextDocument preparation in a fixed 96-DPI coordinate space."""
 
-from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -9,51 +8,10 @@ from PySide6.QtGui import QAbstractTextDocumentLayout, QFont, QImage, QPainter, 
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.nodes import HtmlNode
+from componentpress.bindings.html_policy import validate_html
 from componentpress.project_io.yaml_codec import html_image_sources
 from .geometry import HTML_DPI, mm_to_html_pixels
 from .resources import ProjectResourceLoader
-
-
-_TAGS = {"p", "br", "span", "b", "strong", "i", "em", "u", "ul", "ol", "li", "table", "thead", "tbody", "tfoot", "tr", "td", "th", "img"}
-_GLOBAL_ATTRS = {"style", "align"}
-_ATTRS = {
-    "p": {"color"}, "span": {"color"}, "table": {"border", "cellspacing", "cellpadding", "width", "bgcolor"},
-    "td": {"width", "bgcolor", "colspan", "rowspan", "valign"},
-    "th": {"width", "bgcolor", "colspan", "rowspan", "valign"},
-    "img": {"src", "width", "height", "alt", "valign"},
-}
-_CSS = {"color", "font-family", "font-size", "font-weight", "font-style", "text-decoration", "text-align", "background-color", "border", "border-color", "border-style", "border-width", "width", "padding", "margin", "margin-top", "margin-right", "margin-bottom", "margin-left", "vertical-align"}
-
-
-class _HtmlValidator(HTMLParser):
-    def __init__(self, owner: Path, field: str):
-        super().__init__(convert_charrefs=True)
-        self.owner = owner
-        self.field = field
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        tag = tag.lower()
-        if tag not in _TAGS:
-            raise ProjectError(Diagnostic("HTML_UNSUPPORTED", f"тег <{tag}> не поддерживается", self.owner, self.field))
-        allowed = _GLOBAL_ATTRS | _ATTRS.get(tag, set())
-        for raw_name, value in attrs:
-            name = raw_name.lower()
-            if name not in allowed:
-                raise ProjectError(Diagnostic("HTML_UNSUPPORTED", f"атрибут {name!r} тега <{tag}> не поддерживается", self.owner, self.field))
-            if name == "style" and value:
-                for declaration in value.split(";"):
-                    if not declaration.strip():
-                        continue
-                    prop, separator, _ = declaration.partition(":")
-                    if not separator or prop.strip().lower() not in _CSS:
-                        raise ProjectError(Diagnostic("HTML_UNSUPPORTED", f"CSS-свойство {prop.strip()!r} не поддерживается", self.owner, self.field))
-
-    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        self.handle_starttag(tag, attrs)
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag.lower() not in _TAGS:
-            raise ProjectError(Diagnostic("HTML_UNSUPPORTED", f"тег </{tag}> не поддерживается", self.owner, self.field))
 
 
 class PreparedHtml:
@@ -82,14 +40,7 @@ def _resource_path(source: str, owner: Path, field: str) -> str:
 
 def prepare_html(node: HtmlNode, html: str, loader: ProjectResourceLoader, owner: Path) -> PreparedHtml:
     field = f"elements.{node.id}.html"
-    parser = _HtmlValidator(owner, field)
-    try:
-        parser.feed(html)
-        parser.close()
-    except ProjectError:
-        raise
-    except Exception as exc:
-        raise ProjectError(Diagnostic("HTML_INVALID", str(exc), owner, field)) from exc
+    validate_html(html, owner, field)
 
     width_px = mm_to_html_pixels(node.width_mm)
     height_px = mm_to_html_pixels(node.height_mm)

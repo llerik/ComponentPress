@@ -36,6 +36,7 @@ class DataRow:
     instance_id: str
     copies: int
     values: Mapping[str, CellValue]
+    test_copies: int = 1
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "values", MappingProxyType(dict(self.values)))

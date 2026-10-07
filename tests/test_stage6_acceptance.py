@@ -77,18 +77,18 @@ def _patch_formula_cells(path: Path) -> None:
 
 def _project(*, variables: dict[str, str] | None = None) -> ProjectDefinition:
     return ProjectDefinition(
-        schema_version=2,
+        schema_version=3,
         id="test",
         name="Тест",
         version="0.0.1",
         variables=variables or {},
-        data_sources={"main": DataSource(path="data/test.xlsx")},
+        data_source=DataSource(path="data/test.xlsx"),
     )
 
 
 def _html_component(html: str) -> ComponentDefinition:
     return ComponentDefinition(
-        schema_version=2,
+        schema_version=3,
         id="card",
         name="Карта",
         size_mm=SizeMM(width=40.0, height=30.0),
@@ -246,7 +246,7 @@ def test_spreadsheet_text_is_not_reinterpreted_as_template_during_render(tmp_pat
 def test_missing_dynamic_image_reports_originating_excel_cell_and_node(tmp_path: Path) -> None:
     project = _project()
     component = ComponentDefinition(
-        schema_version=2,
+        schema_version=3,
         id="card",
         name="Карта",
         size_mm=SizeMM(width=40.0, height=30.0),
@@ -274,14 +274,13 @@ def test_demo_two_sheets_icons_nested_paths_and_template_immutability(tmp_path: 
     before_models = {name: doc.model for name, doc in snapshot.documents.items()}
     service = PreviewService(XlsxReader())
 
-    forest = service.select_row(snapshot, "forest-card", instance_id="wolf")
-    event = service.select_row(snapshot, "event-card", instance_id="event-1")
+    forest = service.select_row(snapshot, "forest-card", row_number=2)
+    event = service.select_row(snapshot, "event-card", row_number=2)
     forest_dump = repr(forest.component)
     event_dump = repr(event.component)
     assert "assets/images/animals/enemy/leaf.png" in forest_dump
-    assert 'width="22.6772"' in forest_dump
-    assert 'width="11.3386"' in forest_dump
     assert "Волк" in forest_dump and "Лесной дождь" in event_dump
+    assert len(forest.row.instance_id) == 36
     assert forest.row is not None and forest.row.copies == 2
     assert event.row is not None and event.row.copies == 1
     assert {name: doc.path.read_bytes() for name, doc in snapshot.documents.items()} == before_yaml
@@ -327,9 +326,9 @@ def test_cli_preview_export_and_gui_canvas_use_same_resolved_pixels(tmp_path: Pa
     service = PreviewService(XlsxReader())
     expected = tmp_path / "service.png"
     cli = tmp_path / "cli.png"
-    service.export_png(snapshot, "forest-card", expected, instance_id="fox", dpi=96)
+    service.export_png(snapshot, "forest-card", expected, row_number=2, dpi=96)
     assert cli_main([
-        "render", str(root), "--component", "forest-card", "--instance-id", "fox",
+        "render", str(root), "--component", "forest-card", "--row", "2",
         "--dpi", "96", "--output", str(cli),
     ]) == 0
     assert cli.read_bytes() == expected.read_bytes()
@@ -399,7 +398,7 @@ def test_dynamic_resource_errors_keep_excel_context_for_all_render_contexts(
     project = _project()
     if kind == "image":
         component = ComponentDefinition(
-            schema_version=2, id="card", name="Карта", size_mm=SizeMM(width=40.0, height=30.0),
+            schema_version=3, id="card", name="Карта", size_mm=SizeMM(width=40.0, height=30.0),
             data=DataBinding(source="main", sheet="Лист"),
             elements=(ImageNode(
                 id="subject", name="Ресурс", type="image", x_mm=0.0, y_mm=0.0,
@@ -447,28 +446,29 @@ def test_static_gui_canvas_matches_static_cli_export_with_project_variables(tmp_
     window._clear_tabs(discard=True)
 
 
-def test_preview_cache_invalidates_every_data_identity_field_without_force(tmp_path: Path) -> None:
+def test_preview_cache_uses_project_source_and_component_sheet(tmp_path: Path) -> None:
     root = tmp_path / "cache-project"
     (root / "components").mkdir(parents=True)
     (root / "data").mkdir()
     (root / "data/a.xlsx").write_bytes(b"a")
     (root / "data/b.xlsx").write_bytes(b"b")
-    component = _html_component("<p>{Значение}</p>")
-    project = _project().model_copy(update={
-        "data_sources": {
-            "main": DataSource(path="data/a.xlsx"),
-            "alt": DataSource(path="data/b.xlsx"),
-        },
-    })
+    component = ComponentDefinition(
+        schema_version=3, id="card", name="Карта", size_mm=SizeMM(width=40, height=30),
+        data=DataBinding(sheet="Лист"),
+        elements=(HtmlNode(id="text", name="Текст", type="html", x_mm=0, y_mm=0,
+            width_mm=40, height_mm=30, font_family="Arial", font_size_pt=8,
+            html="", content_mode="column", content_column="Значение"),),
+    )
+    project = _project().model_copy(update={"data_source": DataSource(path="data/a.xlsx")})
     document = DocumentSnapshot(root / "components/card.yaml", "", "", component)
     base = ProjectSnapshot(root, "", "", project, {"card": document})
 
     class RecordingReader:
         def __init__(self) -> None:
-            self.calls: list[tuple[str, str, str | None, str | None]] = []
+            self.calls: list[tuple[str, str]] = []
 
         def read(self, path, sheet, **kwargs):
-            call = (Path(path).name, sheet, kwargs["id_column"], kwargs["copies_column"])
+            call = (Path(path).name, sheet)
             self.calls.append(call)
             row = DataRow(2, repr(call), 1, {"Значение": CellValue(repr(call), "A2")})
             return DataSheetSnapshot(
@@ -479,112 +479,36 @@ def test_preview_cache_invalidates_every_data_identity_field_without_force(tmp_p
     reader = RecordingReader()
     service = PreviewService(reader)
     cases: list[tuple[ProjectSnapshot, ComponentDefinition]] = [(base, component)]
-    cases.extend([
-        (base, component.model_copy(update={"data": component.data.model_copy(update={"source": "alt"})})),
-        (base, component.model_copy(update={"data": component.data.model_copy(update={"sheet": "Другой"})})),
-        (base, component.model_copy(update={"data": component.data.model_copy(update={"id_column": "ID"})})),
-        (base, component.model_copy(update={"data": component.data.model_copy(update={"copies_column": "Тираж"})})),
-    ])
-    path_project = project.model_copy(update={
-        "data_sources": {**project.data_sources, "main": DataSource(path="data/b.xlsx")},
-    })
+    cases.append((base, component.model_copy(update={"data": component.data.model_copy(update={"sheet": "Другой"})})))
+    path_project = project.model_copy(update={"data_source": DataSource(path="data/b.xlsx")})
     cases.append((ProjectSnapshot(root, "", "", path_project, {"card": document}), component))
-    changed_mode = project.data_sources["main"].model_copy(update={"formula_mode": "future-mode"})
-    mode_project = project.model_copy(update={
-        "data_sources": {**project.data_sources, "main": changed_mode},
-    })
-    cases.append((ProjectSnapshot(root, "", "", mode_project, {"card": document}), component))
 
     snapshots = [service.data(snapshot, "card", component=model) for snapshot, model in cases]
     assert len(reader.calls) == len(cases)
-    assert len({item.rows[0].instance_id for item in snapshots if item is not None}) >= 5
+    assert len({item.rows[0].instance_id for item in snapshots if item is not None}) == 2
     for snapshot, model in cases:
         service.data(snapshot, "card", component=model)
     assert len(reader.calls) == len(cases), "повтор того же identity должен использовать свой кэш"
 
 
-def test_gui_unsaved_yaml_source_id_and_copies_change_without_forced_refresh(tmp_path: Path, qtbot) -> None:
+def test_gui_prod_test_preview_filters_validated_snapshot(tmp_path: Path, qtbot) -> None:
     root = tmp_path / "gui-invalidation"
     shutil.copytree(DEMO, root)
-    alternate = root / "data" / "alternate.xlsx"
-    book = load_workbook(root / "data" / "game.xlsx")
-    sheet = book["События"]
-    sheet["C1"] = "Количество"
-    sheet["D1"] = "Другой тираж"
-    sheet["A2"], sheet["B2"], sheet["C2"], sheet["D2"] = "alt-id", "Альтернативное событие", 4, 7
-    sheet["C3"], sheet["D3"] = 1, 1
-    other = book.create_sheet("Другие")
-    other.append(["ID", "Название", "Количество", "Другой тираж"])
-    other.append(["other-id", "Другое событие", 2, 9])
-    book.save(alternate)
-    book.close()
-    project_file = root / "project.yaml"
-    text = project_file.read_text(encoding="utf-8")
-    text = text.replace(
-        "data_sources:\n  main:\n    path: data/game.xlsx\n    formula_mode: cached",
-        "data_sources:\n  main:\n    path: data/game.xlsx\n    formula_mode: cached\n"
-        "  alternate:\n    path: data/alternate.xlsx\n    formula_mode: cached",
-    )
-    project_file.write_text(text, encoding="utf-8")
-
     controller = project_controller()
     window = MainWindow(controller)
     qtbot.addWidget(window)
     window.load_session(project_service().open_session(root))
     try:
-        tab = window.open_component("event-card")
-        assert tab is not None and "Лесной дождь" in repr(tab.resolved_component)
-        before = len(controller.preview._data)
-        current_snapshot = window.session.snapshot
-        changed_main = DataSource(path="data/alternate.xlsx").model_copy(
-            update={"formula_mode": "future-mode"},
-        )
-        changed_project = current_snapshot.model.model_copy(update={
-            "data_sources": {**current_snapshot.model.data_sources, "main": changed_main},
-        })
-        window.session.snapshot = ProjectSnapshot(
-            current_snapshot.root, current_snapshot.text, current_snapshot.disk_hash,
-            changed_project, current_snapshot.documents,
-        )
-        changed_by_project = window._refresh_data(force=False)
-        assert changed_by_project is not None and changed_by_project.path.name == "alternate.xlsx"
-        assert "Альтернативное событие" in repr(tab.resolved_component)
-
-        window._request_mode(tab, "text")
-        draft = tab.text_editor.toPlainText()
-        draft = draft.replace("source: main", "source: alternate")
-        draft = draft.replace('id_column: "ID"', 'id_column: "ID"\n  copies_column: "Количество"')
-        tab.text_editor.setPlainText(draft)
-        assert window._apply_draft("event-card")
-        # Layout transition calls the normal non-force preview path.
-        window._request_mode(tab, "layout")
-        current = window.session.documents["event-card"].model
-        data = controller.preview.data(window.session.snapshot, "event-card", component=current)
-        assert len(controller.preview._data) > before
-        assert data is not None and data.path.name == "alternate.xlsx"
-        assert (data.rows[0].instance_id, data.rows[0].copies) == ("alt-id", 4)
-        assert "Альтернативное событие" in repr(tab.resolved_component)
-
-        window._request_mode(tab, "text")
-        draft = tab.text_editor.toPlainText()
-        draft = draft.replace('id_column: "ID"', 'id_column: "Название"')
-        draft = draft.replace('copies_column: "Количество"', 'copies_column: "Другой тираж"')
-        tab.text_editor.setPlainText(draft)
-        assert window._apply_draft("event-card")
-        window._request_mode(tab, "layout")
-        current = window.session.documents["event-card"].model
-        data = controller.preview.data(window.session.snapshot, "event-card", component=current)
-        assert data is not None
-        assert (data.rows[0].instance_id, data.rows[0].copies) == ("Альтернативное событие", 7)
-
-        window._request_mode(tab, "text")
-        tab.text_editor.setPlainText(tab.text_editor.toPlainText().replace('sheet: "События"', 'sheet: "Другие"'))
-        assert window._apply_draft("event-card")
-        window._request_mode(tab, "layout")
-        current = window.session.documents["event-card"].model
-        data = controller.preview.data(window.session.snapshot, "event-card", component=current)
-        assert data is not None and data.sheet == "Другие"
-        assert (data.rows[0].instance_id, data.rows[0].copies) == ("Другое событие", 9)
+        tab = window.open_component("forest-card")
+        assert tab is not None and tab.preview_row_number == 2
+        data = controller.preview.data(window.session.snapshot, "forest-card")
+        assert data is not None and len(data.rows) == 2
+        window.data_mode.setCurrentIndex(1)
+        assert window.data_row.count() == 2
+        window.data_row.setCurrentIndex(1)
+        assert tab.preview_row_number == 3
+        assert "Лиса" in repr(tab.resolved_component)
+        assert controller.preview.data(window.session.snapshot, "forest-card") is data
     finally:
         window._clear_tabs(discard=True)
 
@@ -654,7 +578,7 @@ def test_path_invalid_from_excel_keeps_full_origin(
     expected_node: str,
 ) -> None:
     component = ComponentDefinition(
-        schema_version=2, id="card", name="Карта", size_mm=SizeMM(width=40.0, height=30.0),
+        schema_version=3, id="card", name="Карта", size_mm=SizeMM(width=40.0, height=30.0),
         data=DataBinding(source="main", sheet="Лист"), elements=(node,),
     )
     data, row = _data_row(Путь="../outside.png")

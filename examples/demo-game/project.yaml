@@ -1,5 +1,5 @@
 # Пример проекта второго этапа
-schema_version: 2
+schema_version: 3
 id: demo-game
 name: "Лесная игра"
 version: "0.1.0"
@@ -10,7 +10,10 @@ icons:
     path: assets/images/animals/enemy/leaf.png
     width_mm: 6
     height_mm: 6
-data_sources: {}
+data_source: null
+copies_columns:
+  prod: Prod
+  test: Debug
 components:
   - id: forest-card
     path: components/forest-card.yaml

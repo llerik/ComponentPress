@@ -34,16 +34,18 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
         if data is None or len(data.rows) < 2:
             return False
         template_before = window.session.documents[first_id].current_text
-        first = window.controller.preview.select_row(window.session.snapshot, first_id, row_number=data.rows[0].row_number)
-        second = window.controller.preview.select_row(window.session.snapshot, first_id, row_number=data.rows[1].row_number)
+        # The demo's second card row is intentionally excluded from Prod, so
+        # exercise the alternate validated filter to resolve both examples.
+        first = window.controller.preview.select_row(window.session.snapshot, first_id, row_number=data.rows[0].row_number, mode="test")
+        second = window.controller.preview.select_row(window.session.snapshot, first_id, row_number=data.rows[1].row_number, mode="test")
         if first.component == second.component or window.session.documents[first_id].current_text != template_before:
             return False
         smoke_dir = root / ".componentpress"
         smoke_dir.mkdir(parents=True, exist_ok=True)
         first_png = smoke_dir / "release-smoke-row1.png"
         second_png = smoke_dir / "release-smoke-row2.png"
-        window.controller.preview.export_png(window.session.snapshot, first_id, first_png, row_number=data.rows[0].row_number, dpi=96)
-        window.controller.preview.export_png(window.session.snapshot, first_id, second_png, row_number=data.rows[1].row_number, dpi=96)
+        window.controller.preview.export_png(window.session.snapshot, first_id, first_png, row_number=data.rows[0].row_number, mode="test", dpi=96)
+        window.controller.preview.export_png(window.session.snapshot, first_id, second_png, row_number=data.rows[1].row_number, mode="test", dpi=96)
         if not first_png.is_file() or not second_png.is_file() or first_png.read_bytes() == second_png.read_bytes():
             return False
     smoke_id = "release-smoke"
