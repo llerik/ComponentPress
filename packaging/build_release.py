@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 import runpy
@@ -114,9 +115,17 @@ def main() -> int:
             print("Smoke-проверка не экспортировала два разных Excel-экземпляра", file=sys.stderr)
             return 8
         outputs = sorted((smoke_project / "output").glob("build-*/build-report.json"))
-        if len(outputs) != 1 or not (outputs[0].parent / "print.pdf").is_file():
-            print("Smoke-проверка не опубликовала печатную сборку", file=sys.stderr)
+        if len(outputs) != 2 or not all((item.parent / "print.pdf").is_file() for item in outputs):
+            print("Smoke-проверка не опубликовала Prod- и Test-сборки", file=sys.stderr)
             return 9
+        reports = [json.loads(item.read_text(encoding="utf-8")) for item in outputs]
+        if {item.get("mode") for item in reports} != {"prod", "test"}:
+            print("Smoke-проверка не зафиксировала оба режима сборки", file=sys.stderr)
+            return 11
+        test_zip = smoke_project / ".componentpress" / "release-smoke-test.zip"
+        if not test_zip.is_file():
+            print("Smoke-проверка не создала Test PNG ZIP", file=sys.stderr)
+            return 12
         jobs = smoke_project / ".componentpress" / "jobs"
         if jobs.exists() and any(jobs.iterdir()):
             print("Smoke-проверка оставила временный каталог задания", file=sys.stderr)

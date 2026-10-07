@@ -11,6 +11,7 @@ from componentpress.application.identifiers import instance_id
 from componentpress.bindings.resolver import BindingResolver
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.component import ComponentDefinition
+from componentpress.domain.copy_mode import copies_for_mode, validate_copy_mode
 from componentpress.domain.render_plan import ResolvedComponent
 from componentpress.domain.values import DataRow, DataSheetSnapshot
 from componentpress.project_io.paths import check_exact_case, resolve_project_path
@@ -123,6 +124,15 @@ class PreviewService:
         assert key is not None
         return self._data.get(key) or self.refresh(snapshot, component_id, component=model)
 
+    def cached_data(
+        self, snapshot: ProjectSnapshot, component_id: str, *,
+        component: ComponentDefinition | None = None,
+    ) -> DataSheetSnapshot | None:
+        """Return the latest successful snapshot without causing an XLSX read."""
+        _document, model = self._model(snapshot, component_id, component)
+        key = self._cache_key(snapshot, component_id, model)
+        return self._data.get(key) if key is not None else None
+
     def select_row(
         self, snapshot: ProjectSnapshot, component_id: str, *,
         row_number: int | None = None, instance_id: str | None = None,
@@ -130,10 +140,11 @@ class PreviewService:
         component: ComponentDefinition | None = None,
     ) -> ResolvedComponent:
         document, model = self._model(snapshot, component_id, component)
+        mode = validate_copy_mode(mode)
         data = self.data(snapshot, component_id, component=model)
         row: DataRow | None = None
         if data is not None:
-            eligible = tuple(item for item in data.rows if (item.copies if mode == "prod" else item.test_copies) > 0)
+            eligible = tuple(item for item in data.rows if copies_for_mode(item, mode) > 0)
             if not eligible:
                 raise ProjectError(Diagnostic("DATA_EMPTY", "на листе нет строк данных", data.path, source=data.source, sheet=data.sheet))
             if instance_id is not None:

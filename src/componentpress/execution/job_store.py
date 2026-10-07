@@ -106,12 +106,28 @@ class JobStore:
         report_path = path / "build-report.json"
         try:
             report = json.loads(report_path.read_text(encoding="utf-8"))
-            if report.get("job_id") != job_id or report.get("complete") is not True:
+            if report.get("job_id") != job_id or report.get("complete") is not True or report.get("report_version", 1) not in {1, 2}:
                 return False
             for relative, expected in report.get("output_hashes", {}).items():
-                file_path = path / Path(relative)
+                relative_path = Path(relative)
+                file_path = (path / relative_path).resolve()
+                if relative_path.is_absolute() or ".." in relative_path.parts or not file_path.is_relative_to(path.resolve()):
+                    return False
                 digest = hashlib.sha256(file_path.read_bytes()).hexdigest()
                 if digest != expected:
+                    return False
+            complete_files = report.get("complete_files", list(report.get("output_hashes", {})))
+            if not isinstance(complete_files, list):
+                return False
+            for name in complete_files:
+                relative_path = Path(name) if isinstance(name, str) else Path("..")
+                file_path = (path / relative_path).resolve()
+                if (
+                    relative_path.is_absolute()
+                    or ".." in relative_path.parts
+                    or not file_path.is_relative_to(path.resolve())
+                    or not file_path.is_file()
+                ):
                     return False
             return True
         except (OSError, json.JSONDecodeError, TypeError):

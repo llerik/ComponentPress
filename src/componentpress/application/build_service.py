@@ -12,6 +12,7 @@ from componentpress.application.contracts import BuildProgress, BuildRequest, Bu
 from componentpress.application.sessions import ProjectSession
 from componentpress.build.input_snapshot import InputSnapshotBuilder
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.domain.copy_mode import validate_copy_mode
 from componentpress.execution.cancellation import CancellationToken
 from componentpress.execution.cleanup import cleanup_job_directory
 from componentpress.execution.job_store import JobStore
@@ -48,6 +49,7 @@ class _Preparing:
     recovery_diagnostics: tuple[Diagnostic, ...]
     on_progress: object
     on_finished: object
+    mode: str
 
 
 class BuildService(QObject):
@@ -77,6 +79,7 @@ class BuildService(QObject):
         return store.recover()
 
     def start(self, session: ProjectSession, request: BuildRequest, *, on_progress=None, on_finished=None) -> str:
+        mode = validate_copy_mode(request.mode)
         store, runner = self._runtime(session.snapshot.root)
         if runner.is_active() or self._preparing:
             raise ProjectError(Diagnostic("BUILD_ACTIVE", "для проекта уже выполняется сборка", session.snapshot.root))
@@ -84,8 +87,9 @@ class BuildService(QObject):
         recovery_diagnostics = store.recover()
         job_id = uuid4().hex
         job_directory = store.initialize(job_id, session.snapshot.model.id)
+        store.update(job_id, mode=mode)
         token = CancellationToken()
-        self._preparing[job_id] = _Preparing(token, recovery_diagnostics, on_progress, on_finished)
+        self._preparing[job_id] = _Preparing(token, recovery_diagnostics, on_progress, on_finished, mode)
         if on_progress is not None:
             on_progress(BuildProgress(job_id, "preparing", 0, 0, "Подготовка неизменяемого снимка"))
         self._preparation_pool.start(_PreparationTask(
@@ -95,6 +99,7 @@ class BuildService(QObject):
                 "job_id": job_id,
                 "job_directory": job_directory,
                 "component_ids": request.component_ids,
+                "mode": mode,
                 "print_settings": request.print_settings,
                 "memory_budget_bytes": request.memory_budget_bytes,
                 "max_render_workers": request.max_render_workers,
@@ -130,6 +135,7 @@ class BuildService(QObject):
                 status,
                 diagnostics=(*pending.recovery_diagnostics, diagnostic, *cleanup),
                 cleanup_state="cleanup_pending" if cleanup else "done",
+                mode=pending.mode,
             )
             if pending.on_finished is not None:
                 pending.on_finished(result)
@@ -160,6 +166,7 @@ class BuildService(QObject):
                 "failed",
                 diagnostics=(*pending.recovery_diagnostics, diagnostic, *cleanup),
                 cleanup_state="cleanup_pending" if cleanup else "done",
+                mode=pending.mode,
             )
             if pending.on_finished is not None:
                 pending.on_finished(result)

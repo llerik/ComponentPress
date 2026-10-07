@@ -19,6 +19,7 @@ from componentpress.application.identifiers import instance_id as make_instance_
 from componentpress.bindings.resolver import BindingResolver
 from componentpress.data_sources import XlsxReader
 from componentpress.domain.component import ComponentDefinition
+from componentpress.domain.copy_mode import copies_for_mode, validate_copy_mode
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
 from componentpress.domain.project import PrintSettings, ProjectDefinition
@@ -66,6 +67,7 @@ class BuildInputSnapshot:
     staging_directory: Path
     project: ProjectDefinition
     print_settings: PrintSettings
+    mode: str
     instances: tuple[BuildInstance, ...]
     resources: Mapping[str, SnapshotResource]
     input_hashes: Mapping[str, str]
@@ -211,6 +213,7 @@ class InputSnapshotBuilder:
         job_id: str,
         job_directory: Path,
         component_ids: tuple[str, ...] | None = None,
+        mode: str = "prod",
         print_settings: PrintSettings | None = None,
         memory_budget_bytes: int = 128 * 1024 * 1024,
         max_render_workers: int = 2,
@@ -218,6 +221,7 @@ class InputSnapshotBuilder:
         defer_font_registration: bool = False,
     ) -> BuildInputSnapshot:
         token = cancellation or CancellationToken()
+        mode = validate_copy_mode(mode)
         if memory_budget_bytes < 0:
             raise ProjectError(Diagnostic("BUILD_MEMORY_BUDGET", "бюджет памяти не может быть отрицательным"))
         if max_render_workers not in range(1, 65):
@@ -276,14 +280,14 @@ class InputSnapshotBuilder:
                 for row in sheet.rows:
                     stable = replace(row, instance_id=make_instance_id(source.model.id, component_id, sheet.sheet, row.row_number))
                     resolved = resolver.resolve_component(component, sheet, stable, owner=document.path)
-                    if stable.copies > 0:
+                    if copies_for_mode(stable, mode) > 0:
                         validated_rows.append((stable, resolved))
                 rows = tuple(validated_rows)
             else:
                 rows = ((None, resolver.resolve_component(component, None, None, owner=document.path)),)
             for row, resolved in rows:
                 token.check()
-                copies = row.copies if row is not None else 1
+                copies = copies_for_mode(row, mode) if row is not None else 1
                 index = len(instances)
                 instance_id = row.instance_id if row is not None else "static"
                 png_name = f"{index + 1:04d}-{_safe_name(component_id)}-{_safe_name(instance_id)}.png"
@@ -336,6 +340,7 @@ class InputSnapshotBuilder:
             staging_directory=staging,
             project=source.model.model_copy(deep=True),
             print_settings=print_settings or source.model.print,
+            mode=mode,
             instances=tuple(instances),
             resources=MappingProxyType(resources),
             input_hashes=MappingProxyType(input_hashes),

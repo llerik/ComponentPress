@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, Qt
 from PySide6.QtGui import QAction, QColor, QCloseEvent, QKeySequence, QUndoGroup
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QFileDialog,
     QGroupBox,
@@ -33,6 +34,7 @@ from componentpress.domain.component import ComponentDefinition, SizeMM
 from componentpress.domain.component import DataBinding
 from componentpress.application.preview_service import ValidationIssues
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.domain.copy_mode import copies_for_mode
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode
 from componentpress.platforms.services import PlatformServices
 from componentpress.domain.tree import (
@@ -142,6 +144,10 @@ class MainWindow(QMainWindow):
         view_menu.addActions([self.zoom_in_action, self.zoom_out_action, self.fit_action])
 
     def _build_ui(self) -> None:
+        self.data_mode = QComboBox()
+        self.data_mode.setObjectName("dataMode")
+        self.data_mode.addItem("Prod", "prod")
+        self.data_mode.addItem("Test", "test")
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setObjectName("mainSplitter")
         self.left_panel = self._left_panel()
@@ -157,7 +163,15 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.right_panel)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([230, 800, 280])
-        self.setCentralWidget(splitter)
+        central = QWidget()
+        central_layout = QVBoxLayout(central)
+        quick = QHBoxLayout()
+        quick.addWidget(QLabel("Режим тиража"))
+        quick.addWidget(self.data_mode)
+        quick.addStretch()
+        central_layout.addLayout(quick)
+        central_layout.addWidget(splitter, 1)
+        self.setCentralWidget(central)
         self.status_project = QLabel("Проект не открыт")
         self.status_zoom = QLabel("")
         self.statusBar().addWidget(self.status_project, 1)
@@ -193,10 +207,6 @@ class MainWindow(QMainWindow):
         self.data_sheet.setObjectName("dataSheet")
         self.data_row = QComboBox()
         self.data_row.setObjectName("dataRow")
-        self.data_mode = QComboBox()
-        self.data_mode.setObjectName("dataMode")
-        self.data_mode.addItem("Prod", "prod")
-        self.data_mode.addItem("Test", "test")
         self.data_column = QComboBox()
         self.data_column.setObjectName("dataColumn")
         self.data_chain = QLabel("Нет привязки")
@@ -204,7 +214,7 @@ class MainWindow(QMainWindow):
         self.data_chain.setWordWrap(True)
         for label, widget in (
             ("Источник проекта", self.data_source), ("Лист компонента", self.data_sheet),
-            ("Режим превью", self.data_mode), ("Строка", self.data_row), ("Столбец", self.data_column),
+            ("Строка", self.data_row), ("Столбец", self.data_column),
         ):
             data_layout.addWidget(QLabel(label))
             data_layout.addWidget(widget)
@@ -214,10 +224,11 @@ class MainWindow(QMainWindow):
         self.data_refresh = QPushButton("Обновить")
         self.data_insert = QPushButton("Вставить {Столбец}")
         self.data_export = QPushButton("Экспорт PNG…")
+        self.data_export_zip = QPushButton("PNG ZIP…")
         self.data_validate = QPushButton("Валидировать")
         self.data_validate_all = QPushButton("Валидировать всё")
         self.data_clear = QPushButton("Удалить XLSX")
-        for button in (self.data_import, self.data_refresh, self.data_insert, self.data_export):
+        for button in (self.data_import, self.data_refresh, self.data_insert, self.data_export, self.data_export_zip):
             data_buttons.addWidget(button)
         data_layout.addLayout(data_buttons)
         validation_buttons = QHBoxLayout()
@@ -327,6 +338,7 @@ class MainWindow(QMainWindow):
         self.data_validate.clicked.connect(self._validate_active)
         self.data_validate_all.clicked.connect(self._validate_all)
         self.data_export.clicked.connect(self._export_instance)
+        self.data_export_zip.clicked.connect(self._export_png_archive)
         self.data_insert.clicked.connect(self._insert_column_binding)
         self.data_row.currentIndexChanged.connect(self._row_changed)
         self.data_sheet.currentIndexChanged.connect(self._data_binding_changed)
@@ -533,8 +545,8 @@ class MainWindow(QMainWindow):
         current = tab.preview_row_number if tab is not None else None
         mode = self.data_mode.currentData() or "prod"
         values = [] if data is None else [
-            (f"{row.instance_id} — строка {row.row_number} — тираж {row.copies if mode == 'prod' else row.test_copies}", row.row_number)
-            for row in data.rows if (row.copies if mode == "prod" else row.test_copies) > 0
+            (f"{row.instance_id} — строка {row.row_number} — тираж {copies_for_mode(row, mode)}", row.row_number)
+            for row in data.rows if copies_for_mode(row, mode) > 0
         ]
         self._fill_combo(self.data_row, values, current)
         if tab is not None and values:
@@ -543,10 +555,20 @@ class MainWindow(QMainWindow):
     def _data_mode_changed(self, _index: int) -> None:
         data = None
         if self.session is not None and self.active_tab is not None and self.controller.preview is not None:
-            data = self.controller.preview.data(self.session.snapshot, self.active_tab.component_id)
+            data = self.controller.preview.cached_data(self.session.snapshot, self.active_tab.component_id)
         self._populate_rows(data)
         if self.active_tab is not None:
-            self._refresh_preview(self.active_tab)
+            is_excel = self.session.documents[self.active_tab.component_id].model.data is not None
+            if data is None and is_excel:
+                self.active_tab.preview_row_number = None
+                self.active_tab.canvas.clear_document()
+                self.statusBar().showMessage("Сначала обновите данные или провалидируйте их, затем выберите экземпляр в текущем режиме", 5000)
+            elif is_excel and data is not None and not any(copies_for_mode(row, str(self.data_mode.currentData())) > 0 for row in data.rows):
+                self.active_tab.preview_row_number = None
+                self.active_tab.canvas.clear_document()
+                self.statusBar().showMessage("В выбранном режиме нет экземпляров", 5000)
+            else:
+                self._refresh_preview(self.active_tab)
 
     def _add_events(self, diagnostics) -> None:
         for diagnostic in diagnostics:
@@ -725,12 +747,70 @@ class MainWindow(QMainWindow):
             return
         self.statusBar().showMessage(f"Экспортировано: {result.png}", 5000)
 
+    def _export_png_archive(self) -> None:
+        if self.session is None or not self.save_all():
+            return
+        choice = QMessageBox(self)
+        choice.setWindowTitle("Экспорт PNG ZIP")
+        choice.setText("Какие компоненты включить в архив?")
+        active_button = choice.addButton("Активный компонент", QMessageBox.ButtonRole.AcceptRole) if self.active_tab is not None else None
+        project_button = choice.addButton("Весь проект", QMessageBox.ButtonRole.AcceptRole)
+        choice.addButton(QMessageBox.StandardButton.Cancel)
+        choice.exec()
+        clicked = choice.clickedButton()
+        if clicked not in (active_button, project_button):
+            return
+        component_ids = (self.active_tab.component_id,) if self.active_tab is not None and clicked is active_button else None
+        target_name = f"{self.active_tab.component_id}-{self.data_mode.currentData()}.zip" if component_ids else f"{self.session.snapshot.model.id}-{self.data_mode.currentData()}.zip"
+        filename, _ = QFileDialog.getSaveFileName(self, "Сохранить PNG ZIP", target_name, "ZIP (*.zip)")
+        if not filename:
+            return
+        try:
+            from componentpress.application.png_archive import export_png_archive
+            from componentpress.execution.cancellation import CancellationToken
+
+            cancellation = CancellationToken()
+            progress = QProgressDialog("Подготовка PNG ZIP…", "Отменить", 0, 0, self)
+            progress.setWindowTitle("Экспорт PNG ZIP")
+            progress.setAutoClose(False)
+            progress.setAutoReset(False)
+            progress.canceled.connect(cancellation.cancel)
+            progress.show()
+
+            def update_progress(done: int, total: int, phase: str) -> None:
+                progress.setRange(0, max(total, 1))
+                progress.setValue(done)
+                progress.setLabelText(phase)
+                QApplication.processEvents()
+
+            result = export_png_archive(
+                self.session.snapshot,
+                Path(filename),
+                mode=str(self.data_mode.currentData() or "prod"),
+                component_ids=component_ids,
+                cancellation=cancellation,
+                on_progress=update_progress,
+            )
+        except ProjectError as exc:
+            if "progress" in locals():
+                progress.close()
+            if exc.diagnostic.code == "BUILD_CANCELLED":
+                self.statusBar().showMessage("Экспорт PNG ZIP отменён", 5000)
+                return
+            self._show_error(exc)
+            return
+        progress.close()
+        self.statusBar().showMessage(
+            f"PNG ZIP создан: {result.path} ({result.png_count} PNG, {result.copies} копий, {result.mode})", 7000
+        )
+
     def _start_build(self, active_only: bool) -> None:
         if self.session is None or self.controller.build is None or self._active_build_job is not None:
             return
         if not self.save_all():
             return
-        dialog = BuildOptionsDialog(self.session.snapshot.model.print, self)
+        mode = str(self.data_mode.currentData() or "prod")
+        dialog = BuildOptionsDialog(self.session.snapshot.model.print, self, mode=mode)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
         component_ids = None
@@ -740,6 +820,7 @@ class MainWindow(QMainWindow):
             component_ids = (self.active_tab.component_id,)
         request = BuildRequest(
             component_ids=component_ids,
+            mode=mode,
             print_settings=dialog.print_settings(),
             max_render_workers=dialog.workers.value(),
         )

@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QLabel,
     QSpinBox,
 )
 
@@ -13,10 +14,11 @@ from componentpress.domain.project import PrintSettings
 
 
 class BuildOptionsDialog(QDialog):
-    def __init__(self, settings: PrintSettings, parent=None):
+    def __init__(self, settings: PrintSettings, parent=None, *, mode: str = "prod"):
         super().__init__(parent)
         self.setWindowTitle("Настройки печатной сборки")
         layout = QFormLayout(self)
+        layout.addRow("Режим тиража", QLabel("Prod" if mode == "prod" else "Test"))
         self.paper = QComboBox()
         self.paper.addItems(["A4", "Letter"])
         self.paper.setCurrentText(settings.paper)

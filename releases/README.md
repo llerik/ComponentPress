@@ -20,5 +20,6 @@ releases/0.0N/ComponentPress-0.0N-win-x64.exe
 | `0.06` | `0.06/ComponentPress-0.06-win-x64.exe` | 53 760 184 байта | `398f4114d6e1755b1b82711eb41513cfa7b0485f128dedef40ab67cd2fbc04ce` | Windows 10 x64 22H2; frozen smoke Excel, двух строк и двух PNG пройден |
 | `0.07` | `0.07/ComponentPress-0.07-win-x64.exe` | 53 824 826 байт | `6dd53de866f6ed76c52dfae5b61dff169de224fe1320e675d9a1e97e84603da9` | Windows 10 x64 22H2; frozen smoke потоковой PDF-сборки, отмены и очистки пройден |
 | `0.08` | `0.08/ComponentPress-0.08-win-x64.exe` | 54 449 633 байта | `99193d0a81f3f73f3ed5a37b19aad4772bd59455fdb572d94ef4abeddef88d58` | Windows 10 x64 22H2; frozen smoke Excel, редактора, Prod/Test превью, PNG/PDF-сборки, отмены и очистки пройден |
+| `0.09` | `0.09/ComponentPress-0.09-win-x64.exe` | 54 462 443 байта | `5370636085e35f22fe04d616d2ed5113f9fc44b094d2442c7f074408ad7641a9` | Windows 10 x64 22H2; frozen smoke Prod/Test-сборок, Test PNG ZIP, отмены и очистки пройден |
 
-Выпуски `0.01` и `0.02`, добавленные в требования ретроспективно, ещё не опубликованы. Выпуски `0.03`–`0.08` не подписаны Authenticode.
+Выпуски `0.01` и `0.02`, добавленные в требования ретроспективно, ещё не опубликованы. Выпуски `0.03`–`0.09` не подписаны Authenticode.

@@ -39,6 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--component", required=True)
     render.add_argument("--output", required=True, type=Path)
     render.add_argument("--dpi", type=int)
+    render.add_argument("--mode", choices=("prod", "test"), default="prod")
     render.add_argument("--pdf", type=Path, help="создать пробный PDF с компонентом на отдельной странице")
     selection = render.add_mutually_exclusive_group()
     selection.add_argument("--row", type=int, help="номер строки Excel")
@@ -47,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("folder", type=Path)
     build.add_argument("--component", help="собрать только один компонент")
     build.add_argument("--workers", type=int, default=2, choices=range(1, 65), metavar="N")
+    build.add_argument("--mode", choices=("prod", "test"), default="prod")
     return parser
 
 
@@ -88,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
             component = None
             if document is not None and document.model.data is not None:
                 resolved = PreviewService(XlsxReader()).select_row(
-                    snapshot, args.component, row_number=args.row, instance_id=args.instance_id
+                    snapshot, args.component, row_number=args.row, instance_id=args.instance_id, mode=args.mode
                 )
                 component = resolved.component
             result = render_component(snapshot, args.component, args.output, component=component, dpi=args.dpi, pdf=args.pdf)
@@ -102,6 +104,7 @@ def main(argv: list[str] | None = None) -> int:
             builder = BuildService(service)
             request = BuildRequest(
                 component_ids=(args.component,) if args.component else None,
+                mode=args.mode,
                 max_render_workers=args.workers,
             )
             result = builder.run(

@@ -33,6 +33,7 @@ class BuildRequest:
     print_settings: PrintSettings | None = None
     max_render_workers: int = 2
     memory_budget_bytes: int = 128 * 1024 * 1024
+    mode: str = "prod"
 
 
 @dataclass(frozen=True)
@@ -54,3 +55,4 @@ class BuildResult:
     diagnostics: tuple[Diagnostic, ...] = ()
     cleanup_state: str = "done"
     statistics: Mapping[str, int] = field(default_factory=dict)
+    mode: str = "prod"

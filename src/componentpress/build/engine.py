@@ -85,6 +85,7 @@ class BuildEngine:
                     "status": "succeeded",
                     "output_directory": relative_output,
                     "statistics": statistics,
+                    "mode": snapshot.mode,
                 })
                 history_written = True
             except Exception as exc:
@@ -115,6 +116,7 @@ class BuildEngine:
                 (*post_publish, *cleanup),
                 "cleanup_pending" if cleanup else "done",
                 statistics,
+                snapshot.mode,
             )
         except Exception as exc:
             if isinstance(exc, ProjectError):
@@ -137,6 +139,7 @@ class BuildEngine:
                 status,
                 diagnostics=(diagnostic, *cleanup),
                 cleanup_state="cleanup_pending" if cleanup else "done",
+                mode=snapshot.mode,
             )
 
     @staticmethod

@@ -11,7 +11,7 @@ from .imposition import ImpositionPlan
 from .input_snapshot import BuildInputSnapshot
 
 
-APPLICATION_VERSION = "0.08"
+APPLICATION_VERSION = "0.09"
 
 
 def sha256(path: Path) -> str:
@@ -31,7 +31,7 @@ def write_report(
 ) -> Path:
     target = snapshot.staging_directory / "build-report.json"
     payload = {
-        "report_version": 1,
+        "report_version": 2,
         "job_id": snapshot.job_id,
         "project_id": snapshot.project.id,
         "game_version": snapshot.project.version,
@@ -41,6 +41,7 @@ def write_report(
         "status": "succeeded",
         "complete": True,
         "print": snapshot.print_settings.model_dump(mode="json"),
+        "mode": snapshot.mode,
         "input_hashes": dict(sorted(snapshot.input_hashes.items())),
         "output_hashes": dict(sorted(output_hashes.items())),
         "complete_files": [*sorted(name for name in output_hashes if name.startswith("images/")), "print.pdf", "build-report.json"],
@@ -59,6 +60,7 @@ def write_report(
         "counts": {
             "instances": len(snapshot.instances),
             "copies": snapshot.total_copies,
+            "png": len(snapshot.instances),
             "pages": len(plan.pages),
         },
         "warnings": [],

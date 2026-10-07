@@ -163,6 +163,15 @@ class ComponentCanvas(QGraphicsView):
             item.setSelected(node_id in node_ids)
         self._syncing_selection = False
 
+    def clear_document(self) -> None:
+        self.scene().clear()
+        self._overlays.clear()
+        self._pixmap_item = None
+        self._component = None
+        self._has_image = False
+        self.selectionChanged.emit(())
+        self.viewport().update()
+
     def clear_selection(self) -> None:
         self.select_ids(())
         self.selectionChanged.emit(())

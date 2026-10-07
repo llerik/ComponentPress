@@ -75,7 +75,7 @@ def test_build_is_deterministic_for_one_two_and_four_workers(tmp_path: Path) -> 
     assert hashes[0] == hashes[1] == hashes[2]
     for result, report in results:
         assert report["complete"] is True
-        assert report["counts"] == {"instances": 3, "copies": 4, "pages": 2}
+        assert report["counts"] == {"instances": 3, "copies": 4, "png": 3, "pages": 2}
         assert [item["component_id"] for item in report["instances"]] == [
             "forest-card", "event-card", "event-card"
         ]
