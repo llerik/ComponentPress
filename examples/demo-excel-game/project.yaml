@@ -1,5 +1,5 @@
 # Пример проекта второго этапа; расширен для демонстрации этапа 6
-schema_version: 3
+schema_version: 4
 id: demo-game
 name: "Лесная игра"
 version: "0.1.0"

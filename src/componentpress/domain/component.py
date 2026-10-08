@@ -26,7 +26,7 @@ class DataBinding(StrictModel):
 
 
 class ComponentDefinition(StrictModel):
-    schema_version: Literal[3]
+    schema_version: Literal[4]
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     size_mm: SizeMM

@@ -9,6 +9,7 @@ from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, Qt
 from PySide6.QtGui import QAction, QColor, QCloseEvent, QKeySequence, QUndoGroup
 from PySide6.QtWidgets import (
     QApplication,
+    QColorDialog,
     QComboBox,
     QFileDialog,
     QGroupBox,
@@ -39,6 +40,8 @@ from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode
 from componentpress.platforms.services import PlatformServices
 from componentpress.domain.tree import (
     TreeOperationError,
+    align_nodes,
+    effectively_locked_ids,
     add_node,
     group_nodes,
     locations,
@@ -281,6 +284,17 @@ class MainWindow(QMainWindow):
             order_buttons.addWidget(button)
         element_layout.addLayout(order_buttons)
         layout.addWidget(elements, 2)
+        self.multi_properties_group = QGroupBox("Выравнивание выделения")
+        multi_layout = QHBoxLayout(self.multi_properties_group)
+        self.align_buttons: dict[str, QPushButton] = {}
+        for edge, label in (("left", "По левому"), ("right", "По правому"), ("top", "По верхнему"), ("bottom", "По нижнему")):
+            button = QPushButton(label)
+            button.setObjectName(f"align{edge.title()}")
+            button.clicked.connect(lambda _checked=False, edge=edge: self._align_selected(edge))
+            self.align_buttons[edge] = button
+            multi_layout.addWidget(button)
+        self.multi_properties_group.hide()
+        layout.addWidget(self.multi_properties_group)
         self.component_properties_group = QGroupBox("Свойства компонента")
         property_layout = QVBoxLayout(self.component_properties_group)
         self.properties = ComponentProperties()
@@ -322,6 +336,7 @@ class MainWindow(QMainWindow):
         self.properties.nameChanged.connect(lambda value: self._edit_active(name=value))
         self.properties.sizeChanged.connect(self._edit_active_size)
         self.properties.backgroundChanged.connect(lambda value: self._edit_active(background=value))
+        self.properties.backgroundColorRequested.connect(self._pick_background_color)
         self.image_tool.clicked.connect(lambda: self._begin_tool("image"))
         self.html_tool.clicked.connect(lambda: self._begin_tool("html"))
         self.layer_up.clicked.connect(lambda: self.reorder_selected(1))
@@ -332,6 +347,7 @@ class MainWindow(QMainWindow):
         self.element_tree.layerDropRequested.connect(self._layer_drop)
         self.element_properties.nodeChanged.connect(self._edit_selected_node)
         self.element_properties.insertImageRequested.connect(self.insert_html_image)
+        self.element_properties.colorRequested.connect(self._pick_node_color)
         self.data_import.clicked.connect(self._import_xlsx)
         self.data_clear.clicked.connect(self._clear_xlsx)
         self.data_refresh.clicked.connect(lambda: self._refresh_data(force=True))
@@ -1035,15 +1051,23 @@ class MainWindow(QMainWindow):
                     columns = data.headers if data is not None else ()
                 except ProjectError:
                     pass
-            self.element_properties.show_node(node, columns)
+            component = self.session.documents[tab.component_id].model
+            self.element_properties.show_node(node, columns, component)
             self.component_properties_group.hide()
+            self.multi_properties_group.hide()
             self.element_properties_group.show()
+            self.element_properties.set_edit_locked(ids[0] in effectively_locked_ids(component))
             self.statusBar().showMessage(f"Выбран элемент: {node.id}", 2500)
         else:
             self.element_properties.show_node(None)
             self.element_properties_group.hide()
-            self.component_properties_group.show()
-            self.properties.show_component(self.session.documents[tab.component_id].model)
+            if len(ids) > 1:
+                self.component_properties_group.hide()
+                self.multi_properties_group.show()
+            else:
+                self.multi_properties_group.hide()
+                self.component_properties_group.show()
+                self.properties.show_component(self.session.documents[tab.component_id].model)
         self._update_actions()
 
     def _edit_active_size(self, width: float, height: float) -> None:
@@ -1053,6 +1077,26 @@ class MainWindow(QMainWindow):
             self._show_error(exc)
             return
         self._edit_active(size_mm=size)
+
+    def _pick_background_color(self) -> None:
+        if self.session is None or self.active_tab is None:
+            return
+        current = self.session.documents[self.active_tab.component_id].model.background
+        color = QColorDialog.getColor(QColor(current), self, "Цвет фона компонента")
+        if color.isValid():
+            self._edit_active(background=color.name(QColor.NameFormat.HexRgb).upper())
+
+    def _pick_node_color(self, current: str) -> None:
+        initial = QColor(current)
+        if not initial.isValid():
+            initial = QColor("#111111")
+        color = QColorDialog.getColor(initial, self, "Цвет текста")
+        if color.isValid():
+            self._edit_selected_node({"color": color.name(QColor.NameFormat.HexRgb).upper()})
+
+    def _align_selected(self, edge: str) -> None:
+        selected = self._selected_ids()
+        self._apply_tree("Выровнять элементы", align_nodes, selected, edge, selected=selected)
 
     def _edit_active(self, **changes: object) -> None:
         tab = self.active_tab
@@ -1507,18 +1551,28 @@ class MainWindow(QMainWindow):
         self.html_tool.setEnabled(visual)
         selected = self._selected_ids()
         has_selection = bool(selected)
-        for widget in (self.layer_up, self.layer_down, self.reparent_button):
+        locked_selection = False
+        if has_tab and self.session is not None and selected:
+            component = self.session.documents[self.active_tab.component_id].model
+            locked_selection = any(node_id in effectively_locked_ids(component) for node_id in selected)
+        # Reordering another layer across a locked sibling is explicitly allowed;
+        # operations that target the selected locked node are disabled.
+        for widget in (self.layer_up, self.layer_down):
             widget.setEnabled(visual and has_selection)
+        self.reparent_button.setEnabled(visual and has_selection and not locked_selection)
+        for button in self.align_buttons.values():
+            button.setEnabled(visual and len(selected) >= 2 and not locked_selection)
         self.element_tree.setEnabled(bool(visual))
         self.properties.setEnabled(bool(visual))
         self.element_properties.setEnabled(bool(visual and has_selection))
-        self.delete_action.setEnabled(visual and has_selection)
-        self.group_action.setEnabled(visual and len(selected) >= 2)
-        self.group_button.setEnabled(visual and len(selected) >= 2)
+        self.delete_action.setEnabled(visual and has_selection and not locked_selection)
+        self.group_action.setEnabled(visual and len(selected) >= 2 and not locked_selection)
+        self.group_button.setEnabled(visual and len(selected) >= 2 and not locked_selection)
         can_ungroup = False
         if has_tab and len(selected) == 1 and self.session is not None:
             node = locations(self.session.documents[self.active_tab.component_id].model).get(selected[0])
             can_ungroup = bool(node and isinstance(node.node, GroupNode))
+        can_ungroup = can_ungroup and not locked_selection
         self.ungroup_action.setEnabled(bool(visual and can_ungroup))
         self.ungroup_button.setEnabled(bool(visual and can_ungroup))
         self._sync_tool_buttons()

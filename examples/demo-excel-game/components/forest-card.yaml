@@ -1,5 +1,5 @@
 # Статический макет с вложенной группой; на этапе 6 к нему добавлены данные Excel
-schema_version: 3
+schema_version: 4
 id: forest-card
 name: "Лесная карта"
 size_mm:

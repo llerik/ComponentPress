@@ -145,18 +145,20 @@ class DocumentTab(QWidget):
 
     def refresh(self, session: ProjectSession, *, component: ComponentDefinition | None = None, fit: bool = False, selected: tuple[str, ...] | None = None) -> bool:
         document = session.documents[self.component_id]
+        active_component = component or document.model
+        if selected is None:
+            selected = self.canvas.selected_ids
         try:
             image = render_component_image(
                 session.snapshot,
                 self.component_id,
-                component=component or document.model,
+                component=active_component,
                 dpi=96,
                 bindings_resolved=component is not None,
             )
         except ProjectError as exc:
+            self.canvas.set_component_model(active_component, selected)
             self.previewError.emit(str(exc.diagnostic))
             return False
-        if selected is None:
-            selected = self.canvas.selected_ids
-        self.canvas.set_document(image, component or document.model, fit=fit, selected=selected)
+        self.canvas.set_document(image, active_component, fit=fit, selected=selected)
         return True

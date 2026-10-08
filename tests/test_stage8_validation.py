@@ -28,7 +28,7 @@ def test_schema_three_rejects_old_project_without_rewriting_files(tmp_path: Path
     root = copy_demo(tmp_path)
     project = root / "project.yaml"
     original = project.read_bytes()
-    project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 3", "schema_version: 2", 1), encoding="utf-8")
+    project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 4", "schema_version: 2", 1), encoding="utf-8")
     old = project.read_bytes()
     with pytest.raises(ProjectError) as caught:
         project_repository().open(root)

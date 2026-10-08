@@ -79,6 +79,6 @@ def migrate_v1_to_v2(root: Path) -> Path | None:
     project_bytes = project_path.read_bytes()
     project_tree = _load(project_bytes.decode("utf-8"), project_path)
     version = project_tree.get("schema_version")
-    if version != 3 or isinstance(version, bool):
+    if type(version) is not int or version != 4:
         raise ProjectError(Diagnostic("SCHEMA_UNSUPPORTED", f"версия схемы {version!r} не поддерживается; автоматическая миграция отключена", project_path, "schema_version"))
     return None

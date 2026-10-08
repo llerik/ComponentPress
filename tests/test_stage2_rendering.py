@@ -49,13 +49,13 @@ def _write_project(root: Path, elements: str, *, width: float = 10, height: floa
     (root / "components").mkdir()
     (root / "assets/images").mkdir(parents=True)
     (root / "project.yaml").write_text(
-        "schema_version: 3\nid: test\nname: Test\nversion: 0.1.0\nvariables: {}\nicons: {}\ndata_source: null\ncopies_columns: {prod: Prod, test: Debug}\n"
+        "schema_version: 4\nid: test\nname: Test\nversion: 0.1.0\nvariables: {}\nicons: {}\ndata_source: null\ncopies_columns: {prod: Prod, test: Debug}\n"
         "components:\n  - id: card\n    path: components/card.yaml\n"
         "print:\n  paper: A4\n  orientation: portrait\n  margin_mm: 5\n  gap_mm: 3\n  dpi: 254\n  cut_lines: true\n  cut_line_width_mm: 0.2\n",
         encoding="utf-8",
     )
     (root / "components/card.yaml").write_text(
-        f'schema_version: 3\nid: card\nname: Card\nsize_mm:\n  width: {width}\n  height: {height}\nbackground: "#FFFFFF"\nelements:\n{elements}',
+        f'schema_version: 4\nid: card\nname: Card\nsize_mm:\n  width: {width}\n  height: {height}\nbackground: "#FFFFFF"\nelements:\n{elements}',
         encoding="utf-8",
     )
 

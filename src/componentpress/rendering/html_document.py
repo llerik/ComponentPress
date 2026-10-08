@@ -4,7 +4,8 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from PySide6.QtCore import QRectF, QSizeF, QUrl
-from PySide6.QtGui import QAbstractTextDocumentLayout, QFont, QImage, QPainter, QTextDocument
+from PySide6.QtGui import QAbstractTextDocumentLayout, QColor, QFont, QImage, QPainter, QTextDocument
+from PySide6.QtCore import Qt
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.nodes import HtmlNode
@@ -54,7 +55,23 @@ def prepare_html(node: HtmlNode, html: str, loader: ProjectResourceLoader, owner
     font = QFont(node.font_family)
     font.setPointSizeF(node.font_size_pt)
     document.setDefaultFont(font)
-    document.setDefaultStyleSheet(f"body, p {{ margin: 0; color: {node.color}; }}")
+    color = QColor(node.color)
+    if not color.isValid():
+        raise ProjectError(Diagnostic("COLOR_INVALID", "ожидается цвет #RRGGBB или #AARRGGBB", owner, f"elements.{node.id}.color"))
+    css_color = (
+        color.name(QColor.NameFormat.HexRgb)
+        if color.alpha() == 255
+        else f"rgba({color.red()}, {color.green()}, {color.blue()}, {color.alphaF():.4f})"
+    )
+    alignment = {
+        "left": Qt.AlignmentFlag.AlignLeft,
+        "center": Qt.AlignmentFlag.AlignHCenter,
+        "right": Qt.AlignmentFlag.AlignRight,
+    }[node.text_align]
+    alignment_css = {"left": "left", "center": "center", "right": "right"}[node.text_align]
+    document.setDefaultStyleSheet(
+        f"body, p {{ margin: 0; color: {css_color}; text-align: {alignment_css}; }}"
+    )
     for source in html_image_sources(html):
         relative = _resource_path(source, owner, f"{field}.img.src")
         loaded = loader.image(relative, owner=owner, field=f"{field}.img.src")

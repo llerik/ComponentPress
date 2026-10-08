@@ -1,7 +1,8 @@
 """Qt item models for component and reverse-layer element trees."""
 
 from PySide6.QtCore import QTimer, Qt, Signal
-from PySide6.QtGui import QStandardItem, QStandardItemModel
+from PySide6.QtGui import QIcon, QStandardItem, QStandardItemModel
+from PySide6.QtWidgets import QApplication, QStyle
 from PySide6.QtWidgets import QAbstractItemView, QTreeView
 
 from componentpress.application.sessions import ProjectSession
@@ -75,7 +76,7 @@ def _node_type(node: Node) -> str:
     return type(node).__name__
 
 
-def _node_row(node: Node) -> list[QStandardItem]:
+def _node_row(node: Node, locked_ids: frozenset[str]) -> list[QStandardItem]:
     name = QStandardItem(_node_label(node))
     kind = QStandardItem(_node_type(node))
     for item in (name, kind):
@@ -84,13 +85,25 @@ def _node_row(node: Node) -> list[QStandardItem]:
         item.setData(node.type, TYPE_ROLE)
     if isinstance(node, GroupNode):
         for child in reversed(node.children):
-            name.appendRow(_node_row(child))
+            name.appendRow(_node_row(child, locked_ids))
+    if node.id in locked_ids:
+        style = QApplication.style()
+        if style is not None:
+            name.setIcon(QIcon(style.standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning)))
+        name.setToolTip("Заблокированная группа" if node.locked and isinstance(node, GroupNode) else "Заблокированный элемент")
+        name.setData(True, LOCKED_ROLE)
     return [name, kind]
+
+
+LOCKED_ROLE = ID_ROLE + 2
 
 
 def element_model(component: ComponentDefinition) -> QStandardItemModel:
     model = QStandardItemModel()
     model.setHorizontalHeaderLabels(["Элемент", "Тип"])
+    from componentpress.domain.tree import effectively_locked_ids
+
+    locked_ids = effectively_locked_ids(component)
     for node in reversed(component.elements):
-        model.appendRow(_node_row(node))
+        model.appendRow(_node_row(node, locked_ids))
     return model

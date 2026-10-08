@@ -64,7 +64,7 @@ class PrintSettings(StrictModel):
 
 
 class ProjectDefinition(StrictModel):
-    schema_version: Literal[3]
+    schema_version: Literal[4]
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     version: str

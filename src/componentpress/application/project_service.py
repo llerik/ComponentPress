@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.application.edits import ensure_visual_edit_respects_locks
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.project import CopiesColumns, DataSource
 import re
@@ -66,6 +67,7 @@ class ProjectService:
         return self.identifiers.create(name, existing, prefix=prefix)
 
     def prepare_model(self, session: ProjectSession, component_id: str, model: ComponentDefinition):
+        ensure_visual_edit_respects_locks(session.documents[component_id].model, model)
         return self.projects.prepare_component(
             session.snapshot, component_id, model, session.documents[component_id].committed
         )

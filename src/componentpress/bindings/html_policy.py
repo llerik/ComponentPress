@@ -8,14 +8,13 @@ from pathlib import Path
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 
 TAGS = {"p", "br", "span", "b", "strong", "i", "em", "u", "ul", "ol", "li", "table", "thead", "tbody", "tfoot", "tr", "td", "th", "img"}
-GLOBAL_ATTRS = {"style", "align"}
+GLOBAL_ATTRS = {"align"}
 ATTRS = {
     "p": {"color"}, "span": {"color"}, "table": {"border", "cellspacing", "cellpadding", "width", "bgcolor"},
     "td": {"width", "bgcolor", "colspan", "rowspan", "valign"},
     "th": {"width", "bgcolor", "colspan", "rowspan", "valign"},
     "img": {"src", "width", "height", "alt", "valign"},
 }
-CSS = {"color", "font-family", "font-size", "font-weight", "font-style", "text-decoration", "text-align", "background-color", "border", "border-color", "border-style", "border-width", "width", "padding", "margin", "margin-top", "margin-right", "margin-bottom", "margin-left", "vertical-align"}
 
 
 class _Validator(HTMLParser):
@@ -43,13 +42,6 @@ class _Validator(HTMLParser):
             name = raw_name.lower()
             if name not in allowed:
                 raise ProjectError(Diagnostic("HTML_UNSUPPORTED", f"атрибут {name!r} тега <{tag}> не поддерживается", self.owner, self.field))
-            if name == "style" and value:
-                for declaration in value.split(";"):
-                    if not declaration.strip():
-                        continue
-                    prop, separator, _ = declaration.partition(":")
-                    if not separator or prop.strip().lower() not in CSS:
-                        raise ProjectError(Diagnostic("HTML_UNSUPPORTED", f"CSS-свойство {prop.strip()!r} не поддерживается", self.owner, self.field))
 
 
 def validate_html(html: str, owner: Path, field: str, *, allow_images: bool = True) -> None:

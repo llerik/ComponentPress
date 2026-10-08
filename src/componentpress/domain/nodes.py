@@ -1,4 +1,5 @@
 from typing import Annotated, Literal, Union
+import re
 
 from pydantic import Field, field_validator, model_validator
 
@@ -10,6 +11,7 @@ class PositionedNode(StrictModel):
     name: str = Field(min_length=1)
     x_mm: float
     y_mm: float
+    locked: bool = False
 
     @field_validator("x_mm", "y_mm", mode="before")
     @classmethod
@@ -54,9 +56,17 @@ class HtmlNode(PositionedNode):
     font_family: str = Field(min_length=1)
     font_size_pt: PositiveMM
     color: str = "#111111"
+    text_align: Literal["left", "center", "right"] = "left"
     html: str
     content_mode: Literal["manual", "column"] = "manual"
     content_column: str | None = None
+
+    @field_validator("color")
+    @classmethod
+    def valid_color(cls, value: str) -> str:
+        if not re.fullmatch(r"#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?", value):
+            raise ValueError("ожидается цвет #RRGGBB или #AARRGGBB")
+        return value
 
     @field_validator("width_mm", "height_mm", "font_size_pt", mode="before")
     @classmethod

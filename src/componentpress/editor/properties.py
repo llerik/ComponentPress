@@ -1,7 +1,10 @@
 """Component properties shown for an active document."""
 
-from PySide6.QtCore import QSignalBlocker, Signal
+from PySide6.QtCore import QSignalBlocker, Qt, Signal
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
+    QButtonGroup,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -22,6 +25,7 @@ class ComponentProperties(QWidget):
     nameChanged = Signal(str)
     sizeChanged = Signal(float, float)
     backgroundChanged = Signal(str)
+    backgroundColorRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -36,17 +40,21 @@ class ComponentProperties(QWidget):
         self.background_edit = QLineEdit()
         self.background_edit.setObjectName("componentBackground")
         self.background_edit.setPlaceholderText("#FFFFFF")
+        self.background_button = QPushButton("Выбрать цвет…")
+        self.background_button.setObjectName("componentBackgroundPicker")
+        background_row = QHBoxLayout()
+        background_row.addWidget(self.background_edit, 1)
+        background_row.addWidget(self.background_button)
         layout.addRow("ID", self.identity)
         layout.addRow("Название", self.name_edit)
         layout.addRow("Ширина, мм", self.width_spin)
         layout.addRow("Высота, мм", self.height_spin)
-        layout.addRow("Фон", self.background_edit)
+        layout.addRow("Фон", background_row)
         self.name_edit.editingFinished.connect(lambda: self.nameChanged.emit(self.name_edit.text()))
+        self.background_edit.editingFinished.connect(lambda: self.backgroundChanged.emit(self.background_edit.text()))
         self.width_spin.editingFinished.connect(self._emit_size)
         self.height_spin.editingFinished.connect(self._emit_size)
-        self.background_edit.editingFinished.connect(
-            lambda: self.backgroundChanged.emit(self.background_edit.text())
-        )
+        self.background_button.clicked.connect(self.backgroundColorRequested)
         self.setEnabled(False)
 
     @staticmethod
@@ -84,6 +92,7 @@ class ElementProperties(QWidget):
 
     nodeChanged = Signal(dict)
     insertImageRequested = Signal()
+    colorRequested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -110,12 +119,39 @@ class ElementProperties(QWidget):
         self.content_mode.addItem("Столбец", "column")
         self.content_column = QComboBox()
         self.content_column.setObjectName("contentColumn")
-        self.font_edit = QLineEdit()
-        self.font_edit.setObjectName("htmlFont")
+        self.font_combo = QComboBox()
+        self.font_combo.setObjectName("htmlFont")
         self.font_spin = self._number("htmlFontSize", 0.001, 1000.0)
         self.color_edit = QLineEdit()
         self.color_edit.setObjectName("htmlColor")
+        self.color_button = QPushButton("Выбрать цвет…")
+        self.color_button.setObjectName("htmlColorPicker")
+        self.color_widget = QWidget()
+        color_row = QHBoxLayout(self.color_widget)
+        color_row.setContentsMargins(0, 0, 0, 0)
+        color_row.addWidget(self.color_edit, 1)
+        color_row.addWidget(self.color_button)
+        self.alignment_group = QButtonGroup(self)
+        self.alignment_group.setExclusive(True)
+        self.alignment_buttons: dict[str, QPushButton] = {}
+        alignment_widget = QWidget()
+        alignment_row = QHBoxLayout(alignment_widget)
+        alignment_row.setContentsMargins(0, 0, 0, 0)
+        for value, label in (("left", "Слева"), ("center", "По центру"), ("right", "Справа")):
+            button = QPushButton(label)
+            button.setObjectName(f"htmlAlign{value.title()}")
+            button.setCheckable(True)
+            button.setProperty("alignment", value)
+            self.alignment_group.addButton(button)
+            self.alignment_buttons[value] = button
+            alignment_row.addWidget(button)
+        self.lock_check = QCheckBox("Заблокирован")
+        self.lock_check.setObjectName("elementLocked")
+        self.group_bounds = QLabel()
+        self.group_bounds.setObjectName("groupBounds")
         form.addRow("Элемент", self.identity)
+        form.addRow("Защита", self.lock_check)
+        form.addRow("Габариты группы, мм", self.group_bounds)
         form.addRow("Название", self.name_edit)
         form.addRow("X, мм", self.x_spin)
         form.addRow("Y, мм", self.y_spin)
@@ -125,9 +161,11 @@ class ElementProperties(QWidget):
         form.addRow("Источник содержимого", self.content_mode)
         form.addRow("Столбец Excel", self.content_column)
         form.addRow("Режим", self.fit_combo)
-        form.addRow("Шрифт", self.font_edit)
+        form.addRow("Шрифт", self.font_combo)
         form.addRow("Размер, pt", self.font_spin)
-        form.addRow("Цвет", self.color_edit)
+        form.addRow("Цвет", self.color_widget)
+        self.alignment_widget = alignment_widget
+        form.addRow("Выравнивание текста", self.alignment_widget)
         outer.addLayout(form)
         self.html_edit = QPlainTextEdit()
         self.html_edit.setObjectName("htmlSource")
@@ -148,9 +186,14 @@ class ElementProperties(QWidget):
         self.content_mode.currentIndexChanged.connect(self._content_mode_changed)
         self.content_column.activated.connect(lambda _index: self._content_column_changed())
         self.fit_combo.currentTextChanged.connect(lambda value: self.nodeChanged.emit({"fit": value}))
-        self.font_edit.editingFinished.connect(lambda: self.nodeChanged.emit({"font_family": self.font_edit.text()}))
+        self.font_combo.currentTextChanged.connect(lambda value: self.nodeChanged.emit({"font_family": value}))
         self.font_spin.editingFinished.connect(lambda: self.nodeChanged.emit({"font_size_pt": self.font_spin.value()}))
         self.color_edit.editingFinished.connect(lambda: self.nodeChanged.emit({"color": self.color_edit.text()}))
+        self.color_button.clicked.connect(lambda: self.colorRequested.emit(self.color_edit.text()))
+        self.lock_check.toggled.connect(lambda checked: self.nodeChanged.emit({"locked": checked}))
+        self.alignment_group.buttonClicked.connect(
+            lambda button: self.nodeChanged.emit({"text_align": button.property("alignment")})
+        )
         self.apply_html.clicked.connect(lambda: self.nodeChanged.emit({"html": self.html_edit.toPlainText()}))
         self.insert_image.clicked.connect(self.insertImageRequested)
         self.setEnabled(False)
@@ -170,23 +213,46 @@ class ElementProperties(QWidget):
             changes.update(width_mm=self.width_spin.value(), height_mm=self.height_spin.value())
         self.nodeChanged.emit(changes)
 
-    def show_node(self, node: Node | None, columns: tuple[str, ...] = ()) -> None:
+    def show_node(self, node: Node | None, columns: tuple[str, ...] = (), component: ComponentDefinition | None = None) -> None:
         self.setEnabled(node is not None)
         if node is None:
             return
         widgets = (
             self.x_spin, self.y_spin, self.width_spin, self.height_spin, self.name_edit,
-            self.source_edit, self.fit_combo, self.font_edit, self.font_spin, self.color_edit,
-            self.html_edit, self.content_mode, self.content_column,
+            self.source_edit, self.fit_combo, self.font_combo, self.font_spin, self.color_edit,
+            self.html_edit, self.content_mode, self.content_column, self.font_combo,
+            self.lock_check, *self.alignment_buttons.values(),
         )
         blockers = [QSignalBlocker(widget) for widget in widgets]
         self.identity.setText(f"{node.id} ({node.type})")
         self._node_type = node.type
+        inherited_lock = False
+        if component is not None:
+            from componentpress.domain.tree import locations
+
+            index = locations(component)
+            parent_id = index[node.id].parent_id
+            while parent_id is not None:
+                if index[parent_id].node.locked:
+                    inherited_lock = True
+                    break
+                parent_id = index[parent_id].parent_id
+        self.lock_check.setChecked(node.locked)
+        self.lock_check.setEnabled(not inherited_lock)
+        self.lock_check.setToolTip("Разблокируйте родительскую группу" if inherited_lock else "Защищает визуальные команды; YAML можно редактировать вручную")
+        self.form.setRowVisible(self.lock_check, True)
         self.x_spin.setValue(node.x_mm)
         self.y_spin.setValue(node.y_mm)
         sized = isinstance(node, (ImageNode, HtmlNode))
         self.form.setRowVisible(self.width_spin, sized)
         self.form.setRowVisible(self.height_spin, sized)
+        is_group = isinstance(node, GroupNode)
+        self.form.setRowVisible(self.group_bounds, is_group)
+        if is_group and component is not None:
+            from componentpress.domain.tree import node_bounds
+
+            _, _, bounds_width, bounds_height = node_bounds(component, node.id)
+            self.group_bounds.setText(f"{bounds_width:.3f} × {bounds_height:.3f}")
         if sized:
             self.width_spin.setValue(node.width_mm)
             self.height_spin.setValue(node.height_mm)
@@ -214,16 +280,40 @@ class ElementProperties(QWidget):
         if column:
             self.content_column.setCurrentText(column)
         self.content_column.setEnabled(mode == "column")
-        for widget in (self.font_edit, self.font_spin, self.color_edit):
+        for widget in (self.font_combo, self.font_spin, self.color_widget):
             self.form.setRowVisible(widget, html)
+        for button in self.alignment_buttons.values():
+            button.setVisible(html)
+        self.alignment_widget.setVisible(html)
         for widget in (self.html_edit, self.insert_image, self.apply_html):
             widget.setVisible(html)
         if html:
-            self.font_edit.setText(node.font_family)
+            self.font_combo.clear()
+            self.font_combo.addItems(sorted(QFontDatabase.families(), key=str.casefold))
+            if self.font_combo.findText(node.font_family, Qt.MatchFlag.MatchFixedString) < 0:
+                self.font_combo.insertItem(0, f"{node.font_family} (недоступен)", node.font_family)
+            self.font_combo.setCurrentText(node.font_family if self.font_combo.findText(node.font_family) >= 0 else f"{node.font_family} (недоступен)")
+            self.font_combo.setToolTip("Семейство будет сохранено без автоматической замены" if self.font_combo.currentIndex() == 0 and "(недоступен)" in self.font_combo.currentText() else "")
             self.font_spin.setValue(node.font_size_pt)
             self.color_edit.setText(node.color)
             self.html_edit.setPlainText(node.html)
+            for value, button in self.alignment_buttons.items():
+                button.setChecked(node.text_align == value)
+        else:
+            self.form.setRowVisible(self.group_bounds, False)
         del blockers
+
+    def set_edit_locked(self, locked: bool) -> None:
+        for widget in (
+            self.name_edit, self.x_spin, self.y_spin, self.width_spin, self.height_spin,
+            self.source_edit, self.fit_combo, self.content_mode, self.content_column,
+            self.font_combo, self.font_spin, self.color_edit, self.color_button,
+            self.html_edit, self.insert_image, self.apply_html,
+            *self.alignment_buttons.values(),
+        ):
+            widget.setEnabled(not locked)
+        if not locked:
+            self.content_column.setEnabled(self.content_mode.currentData() == "column")
 
     def _content_mode_changed(self, _index: int) -> None:
         mode = self.content_mode.currentData()

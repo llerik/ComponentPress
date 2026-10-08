@@ -253,9 +253,9 @@ def test_gui_data_panel_switch_refresh_insert_and_export(tmp_path: Path, qtbot, 
 
 
 def test_dynamic_html_image_missing_keeps_excel_origin(tmp_path: Path) -> None:
-    project = ProjectDefinition(schema_version=3, id="game", name="Game", version="0.1.0")
+    project = ProjectDefinition(schema_version=4, id="game", name="Game", version="0.1.0")
     component = ComponentDefinition(
-        schema_version=3, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
+        schema_version=4, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
         data=DataBinding(source="main", sheet="Лист"),
         elements=(HtmlNode(
             id="body", name="Body", type="html", x_mm=0, y_mm=0,
@@ -280,7 +280,7 @@ def test_missing_and_broken_icon_keep_excel_origin(tmp_path: Path) -> None:
     broken.parent.mkdir(parents=True)
     broken.write_bytes(b"not a png")
     component = ComponentDefinition(
-        schema_version=3, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
+        schema_version=4, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
         data=DataBinding(source="main", sheet="Лист"),
         elements=(HtmlNode(
             id="body", name="Body", type="html", x_mm=0, y_mm=0,
@@ -292,7 +292,7 @@ def test_missing_and_broken_icon_keep_excel_origin(tmp_path: Path) -> None:
         ("ic_broken", "assets/images/broken.png", "RESOURCE_INVALID"),
     ):
         project = ProjectDefinition(
-            schema_version=3, id="game", name="Game", version="0.1.0",
+            schema_version=4, id="game", name="Game", version="0.1.0",
             icons={name: IconDefinition(path=path, width_mm=3, height_mm=3)},
         )
         row = DataRow(2, "2", 1, {"Текст": CellValue(name, "B2")})
@@ -339,9 +339,9 @@ def test_ordinary_excel_error_blocks_html_and_configured_id(tmp_path: Path) -> N
     reader = XlsxReader()
     data = reader.read(path, "Лист", source="main", id_column="ID")
     assert data.rows[0].values["Текст"].formula_state is FormulaState.ERROR
-    project = ProjectDefinition(schema_version=3, id="game", name="Game", version="0.1.0")
+    project = ProjectDefinition(schema_version=4, id="game", name="Game", version="0.1.0")
     component = ComponentDefinition(
-        schema_version=3, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
+        schema_version=4, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
         data=DataBinding(source="main", sheet="Лист", id_column="ID"),
         elements=(HtmlNode(
             id="body", name="Body", type="html", x_mm=0, y_mm=0, width_mm=30,
@@ -371,7 +371,7 @@ def test_ordinary_excel_error_blocks_html_and_configured_id(tmp_path: Path) -> N
 
 
 def test_invalid_dynamic_paths_keep_origin_for_image_and_html(tmp_path: Path) -> None:
-    project = ProjectDefinition(schema_version=3, id="game", name="Game", version="0.1.0")
+    project = ProjectDefinition(schema_version=4, id="game", name="Game", version="0.1.0")
     row = DataRow(2, "2", 1, {"Путь": CellValue("../outside.png", "A2")})
     data = DataSheetSnapshot("main", tmp_path / "data.xlsx", "Лист", "hash", 1, ("Путь",), (row,))
     for node in (
@@ -386,7 +386,7 @@ def test_invalid_dynamic_paths_keep_origin_for_image_and_html(tmp_path: Path) ->
         ),
     ):
         component = ComponentDefinition(
-            schema_version=3, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
+            schema_version=4, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
             data=DataBinding(source="main", sheet="Лист"), elements=(node,),
         )
         try:
@@ -401,11 +401,11 @@ def test_invalid_dynamic_paths_keep_origin_for_image_and_html(tmp_path: Path) ->
 
 def test_template_unescape_never_changes_inserted_excel_or_variable_data(tmp_path: Path) -> None:
     project = ProjectDefinition(
-        schema_version=3, id="game", name="Game", version="0.1.0",
+        schema_version=4, id="game", name="Game", version="0.1.0",
         variables={"literal": r"var \{literal\}"},
     )
     component = ComponentDefinition(
-        schema_version=3, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
+        schema_version=4, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
         data=DataBinding(source="main", sheet="Лист"),
         elements=(HtmlNode(
             id="body", name="Body", type="html", x_mm=0, y_mm=0,

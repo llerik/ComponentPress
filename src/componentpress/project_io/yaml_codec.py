@@ -78,7 +78,7 @@ def _load(text: str, path: Path) -> CommentedMap:
 
 def _validate(tree: CommentedMap, cls: type[Model], path: Path) -> Model:
     version = tree.get("schema_version")
-    if version != 3 or isinstance(version, bool):
+    if type(version) is not int or version != 4:
         raise ProjectError(Diagnostic("SCHEMA_UNSUPPORTED", f"неподдерживаемая версия схемы {version!r}", path, "schema_version", _field_line(tree, ("schema_version",))))
     try:
         return cls.model_validate(tree)
@@ -182,6 +182,9 @@ def parse_project(text: str, path: Path) -> tuple[ProjectDefinition, CommentedMa
 
 def parse_component(text: str, path: Path, variables: dict[str, str] | None = None) -> tuple[ComponentDefinition, CommentedMap]:
     tree = _load(text, path)
+    version = tree.get("schema_version")
+    if type(version) is not int or version != 4:
+        raise ProjectError(Diagnostic("SCHEMA_UNSUPPORTED", f"неподдерживаемая версия схемы {version!r}", path, "schema_version", _field_line(tree, ("schema_version",))))
     model_tree = deepcopy(tree)
     # Keep the application model convenient for the renderer while the public
     # YAML format expresses an explicit manual/column content source.
@@ -205,6 +208,10 @@ def parse_component(text: str, path: Path, variables: dict[str, str] | None = No
                 item["content_mode"] = content.get("mode", "manual")
                 item["content_column"] = content.get("column")
                 item["html"] = content.get("html", "")
+                if item["content_mode"] == "manual":
+                    from componentpress.bindings.html_policy import validate_html
+
+                    validate_html(item["html"], path, f"elements.{item.get('id', '?')}.content.html")
                 del item["content"]
             if item.get("type") == "group":
                 normalize_nodes(item.get("children"))

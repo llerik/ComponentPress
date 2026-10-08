@@ -18,7 +18,7 @@ from .files import atomic_create, atomic_write, file_hash
 from .paths import check_case_collisions, check_exact_case, resolve_project_path
 from .transactions import recover, register_component
 from .migrations import migrate_v1_to_v2, migration_required, recover_migration, recovery_required
-from .yaml_codec import dump_yaml, html_image_sources, parse_component, parse_project, update_tree
+from .yaml_codec import _load, dump_yaml, html_image_sources, parse_component, parse_project, update_tree
 
 
 def _read_text(path: Path) -> tuple[str, str]:
@@ -43,7 +43,7 @@ class FileProjectRepository:
         for folder in ("components", "data", "assets/images", "assets/fonts"):
             (root / folder).mkdir(parents=True, exist_ok=True)
         template = (
-            "schema_version: 3\n"
+            "schema_version: 4\n"
             f"id: {project_id}\n"
             f"name: {json.dumps(name, ensure_ascii=False)}\n"
             'version: "0.1.0"\n'
@@ -65,6 +65,13 @@ class FileProjectRepository:
 
     def open(self, root: Path) -> ProjectSnapshot:
         root = root.resolve()
+        # Reject unsupported formats before recovery can rewrite anything.
+        project_path = root / "project.yaml"
+        project_text, _ = _read_text(project_path)
+        project_tree = _load(project_text, project_path)
+        version = project_tree.get("schema_version")
+        if type(version) is not int or version != 4:
+            raise ProjectError(Diagnostic("SCHEMA_UNSUPPORTED", f"неподдерживаемая версия схемы {version!r}", project_path, "schema_version"))
         if recovery_required(root):
             with ProjectWriteLock(root):
                 recover_migration(root)
@@ -79,7 +86,6 @@ class FileProjectRepository:
             with ProjectWriteLock(root):
                 recover(root)
         check_case_collisions(root)
-        project_path = root / "project.yaml"
         text, disk_hash = _read_text(project_path)
         model, _ = parse_project(text, project_path)
         if model.data_source is not None:
@@ -213,7 +219,7 @@ class FileProjectRepository:
             raise ProjectError(Diagnostic("COMPONENT_ID_DUPLICATE", "компонент уже зарегистрирован", snapshot.root))
         path = f"components/{component_id}.yaml"
         component_text = (
-            f"schema_version: 3\nid: {component_id}\nname: {json.dumps(name, ensure_ascii=False)}\n"
+            f"schema_version: 4\nid: {component_id}\nname: {json.dumps(name, ensure_ascii=False)}\n"
             "size_mm:\n  width: 63\n  height: 88\nbackground: \"#FFFFFF\"\n"
             "elements: []\n"
         )
