@@ -83,7 +83,7 @@ def test_invalid_component_has_diagnostic_and_is_not_rewritten(tmp_path: Path, r
     path = root / "components/forest-card.yaml"
     original = path.read_text(encoding="utf-8")
     if code == "SCHEMA_UNSUPPORTED":
-            broken = original.replace("schema_version: 4", replacement)
+            broken = original.replace("schema_version: 5", replacement)
     elif code == "YAML_SYNTAX":
         broken = original.replace('name: "Лесная карта"', replacement)
     elif code == "DOCUMENT_INVALID":

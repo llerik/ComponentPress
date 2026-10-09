@@ -178,4 +178,5 @@ def test_release_smoke_exercises_saved_gui_workflow(tmp_path: Path, qtbot) -> No
     assert component.size_mm == component.size_mm.model_copy(update={"width": 70.0, "height": 90.0})
     assert component.background == "#DDEEFF"
     assert "# Проверка текстового режима" in reopened.documents["release-smoke"].text
-    assert [node.id for node in component.elements] == ["smoke-group"]
+    assert component.elements[0].id == "smoke-group"
+    assert {node.type for node in component.elements}.issuperset({"group", "rectangle", "ellipse", "line"})

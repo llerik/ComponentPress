@@ -3,11 +3,11 @@
 from pathlib import Path
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QPainter, QPen, QBrush
 
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
-from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
+from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, LineNode, Node, ShapeNode
 from .geometry import HTML_DPI, MM_PER_INCH, image_fit_geometry
 from .html_document import prepare_html
 from .resources import ProjectResourceLoader
@@ -61,6 +61,30 @@ def paint_component(
                 painter.scale(MM_PER_INCH / HTML_DPI, MM_PER_INCH / HTML_DPI)
                 prepared.draw(painter)
                 painter.restore()
+            elif isinstance(node, ShapeNode):
+                painter.save()
+                style = {"solid": Qt.PenStyle.SolidLine, "dash": Qt.PenStyle.DashLine, "dot": Qt.PenStyle.DotLine}[node.stroke_style]
+                pen = QPen(QColor(node.stroke), 0, style)
+                pen.setWidthF(node.stroke_width_mm)
+                painter.setPen(pen)
+                painter.setBrush(QBrush(QColor(node.fill)) if node.fill is not None else Qt.BrushStyle.NoBrush)
+                rect = QRectF(x, y, node.width_mm, node.height_mm)
+                if node.type == "rectangle":
+                    painter.drawRect(rect)
+                else:
+                    painter.drawEllipse(rect)
+                painter.restore()
+            elif isinstance(node, LineNode):
+                painter.save()
+                style = {"solid": Qt.PenStyle.SolidLine, "dash": Qt.PenStyle.DashLine, "dot": Qt.PenStyle.DotLine}[node.stroke_style]
+                pen = QPen(QColor(node.stroke), 0, style)
+                pen.setWidthF(node.stroke_width_mm)
+                painter.setPen(pen)
+                painter.drawLine(x, y, x + node.dx_mm, y + node.dy_mm)
+                painter.restore()
+            elif isinstance(node, ConditionalGroupNode):
+                if node.condition_matches is True:
+                    visit(node.children, x, y)
             elif isinstance(node, GroupNode):
                 visit(node.children, x, y)
             else:

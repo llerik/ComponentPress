@@ -16,8 +16,9 @@ from ruamel.yaml.tokens import AliasToken, AnchorToken, TagToken
 from componentpress.bindings.grammar import GrammarError, parse_references
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
-from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
+from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, Node
 from componentpress.domain.project import ProjectDefinition
+from componentpress.domain.schema import SCHEMA_VERSION
 from .paths import validate_relative_path
 
 
@@ -78,7 +79,7 @@ def _load(text: str, path: Path) -> CommentedMap:
 
 def _validate(tree: CommentedMap, cls: type[Model], path: Path) -> Model:
     version = tree.get("schema_version")
-    if type(version) is not int or version != 4:
+    if type(version) is not int or version != SCHEMA_VERSION:
         raise ProjectError(Diagnostic("SCHEMA_UNSUPPORTED", f"неподдерживаемая версия схемы {version!r}", path, "schema_version", _field_line(tree, ("schema_version",))))
     try:
         return cls.model_validate(tree)
@@ -183,7 +184,7 @@ def parse_project(text: str, path: Path) -> tuple[ProjectDefinition, CommentedMa
 def parse_component(text: str, path: Path, variables: dict[str, str] | None = None) -> tuple[ComponentDefinition, CommentedMap]:
     tree = _load(text, path)
     version = tree.get("schema_version")
-    if type(version) is not int or version != 4:
+    if type(version) is not int or version != SCHEMA_VERSION:
         raise ProjectError(Diagnostic("SCHEMA_UNSUPPORTED", f"неподдерживаемая версия схемы {version!r}", path, "schema_version", _field_line(tree, ("schema_version",))))
     model_tree = deepcopy(tree)
     # Keep the application model convenient for the renderer while the public
@@ -213,7 +214,7 @@ def parse_component(text: str, path: Path, variables: dict[str, str] | None = No
 
                     validate_html(item["html"], path, f"elements.{item.get('id', '?')}.content.html")
                 del item["content"]
-            if item.get("type") == "group":
+            if item.get("type") in ("group", "conditional_group"):
                 normalize_nodes(item.get("children"))
         # The v3 project has one source; components only select a sheet.
     if isinstance(model_tree.get("data"), dict):
@@ -241,6 +242,8 @@ def parse_component(text: str, path: Path, variables: dict[str, str] | None = No
                 elif model.data is None:
                     raise ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", "столбец HTML без привязки к листу", path, field))
             elif isinstance(node, GroupNode):
+                if isinstance(node, ConditionalGroupNode) and model.data is None:
+                    raise ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", "условной группе нужен источник Excel", path, f"{field}.condition_column"))
                 visit(node.children, (*base, "children"))
 
     visit(model.elements, ("elements",))

@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 
 import pytest
+from pydantic import ValidationError
 from PySide6.QtCore import Qt
 
 from componentpress.application.preview_service import PreviewService
@@ -13,6 +14,8 @@ from componentpress.data_sources import XlsxReader
 from componentpress.domain.component import ComponentDefinition, SizeMM
 from componentpress.domain.diagnostics import ProjectError
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode
+from componentpress.domain.project import ProjectDefinition
+from componentpress.domain.schema import SCHEMA_VERSION
 from componentpress.domain.tree import (
     TreeOperationError,
     align_nodes,
@@ -32,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _component() -> ComponentDefinition:
     return ComponentDefinition(
-        schema_version=4,
+        schema_version=5,
         id="card",
         name="Card",
         size_mm=SizeMM(width=63, height=88),
@@ -47,16 +50,17 @@ def _component() -> ComponentDefinition:
     )
 
 
-def test_project_and_new_component_templates_use_schema_four(tmp_path: Path) -> None:
+def test_project_and_new_component_templates_use_shared_schema_five(tmp_path: Path) -> None:
     repository = project_repository()
     snapshot = repository.create(tmp_path / "game", "Game")
-    assert snapshot.model.schema_version == 4
+    assert snapshot.model.schema_version == 5
     snapshot = repository.add_component(snapshot, "card", "Card")
-    assert snapshot.documents["card"].model.schema_version == 4
-    assert "schema_version: 4" in snapshot.documents["card"].text
+    assert snapshot.documents["card"].model.schema_version == 5
+    assert snapshot.model.schema_version == snapshot.documents["card"].model.schema_version == SCHEMA_VERSION == 5
+    assert "schema_version: 5" in snapshot.documents["card"].text
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 5, "4", "true", "4.0"])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 6, "5", "true", "5.0", 5.0])
 def test_old_or_mistyped_project_schema_is_rejected_without_rewriting(tmp_path: Path, version: object) -> None:
     root = tmp_path / "game"
     shutil.copytree(ROOT / "examples" / "demo-game", root)
@@ -65,7 +69,8 @@ def test_old_or_mistyped_project_schema_is_rejected_without_rewriting(tmp_path: 
     scalar = repr(version) if isinstance(version, str) else str(version)
     if version == "true":
         scalar = "true"
-    project.write_text(source.replace("schema_version: 4", f"schema_version: {scalar}", 1), encoding="utf-8")
+    scalar = "true" if version == "true" else scalar
+    project.write_text(source.replace("schema_version: 5", f"schema_version: {scalar}", 1), encoding="utf-8")
     original = project.read_bytes()
     with pytest.raises(ProjectError) as caught:
         project_repository().open(root)
@@ -77,12 +82,24 @@ def test_old_component_schema_is_rejected_without_rewriting(tmp_path: Path) -> N
     root = tmp_path / "game"
     shutil.copytree(ROOT / "examples" / "demo-game", root)
     component = root / "components" / "forest-card.yaml"
-    component.write_text(component.read_text(encoding="utf-8").replace("schema_version: 4", "schema_version: 3", 1), encoding="utf-8")
+    component.write_text(component.read_text(encoding="utf-8").replace("schema_version: 5", "schema_version: 4", 1), encoding="utf-8")
     original = component.read_bytes()
     with pytest.raises(ProjectError) as caught:
         project_repository().open(root)
     assert caught.value.diagnostic.code == "SCHEMA_UNSUPPORTED"
     assert component.read_bytes() == original
+
+
+@pytest.mark.parametrize("model_type", [ProjectDefinition, ComponentDefinition])
+@pytest.mark.parametrize("value", [5.0, "5", True, False, 4, 6])
+def test_document_models_require_schema_version_to_be_strict_integer_five(model_type, value) -> None:
+    document = {"schema_version": value, "id": "card", "name": "Card"}
+    if model_type is ProjectDefinition:
+        document["version"] = "0.1.0"
+    else:
+        document["size_mm"] = {"width": 63, "height": 88}
+    with pytest.raises(ValidationError):
+        model_type.model_validate(document)
 
 
 @pytest.mark.parametrize("markup", [
@@ -94,7 +111,7 @@ def test_old_component_schema_is_rejected_without_rewriting(tmp_path: Path) -> N
 ])
 def test_css_is_rejected_from_manual_component_html(tmp_path: Path, markup: str) -> None:
     owner = tmp_path / "card.yaml"
-    text = f'''schema_version: 4
+    text = f'''schema_version: 5
 id: card
 name: Card
 size_mm: {{width: 63, height: 88}}
@@ -202,7 +219,7 @@ def test_font_picker_preserves_unknown_saved_family_without_emitting_a_change(qt
 
 def test_visual_lock_guard_allows_layer_crossing_and_preserves_yaml_edit_path() -> None:
     component = ComponentDefinition(
-        schema_version=4, id="card", name="Card", size_mm=SizeMM(width=63, height=88),
+        schema_version=5, id="card", name="Card", size_mm=SizeMM(width=63, height=88),
         elements=(
             ImageNode(id="locked", name="Locked", type="image", x_mm=1, y_mm=1, width_mm=2, height_mm=2, source="assets/images/animals/enemy/leaf.png", locked=True),
             ImageNode(id="free", name="Free", type="image", x_mm=4, y_mm=1, width_mm=2, height_mm=2, source="assets/images/animals/enemy/leaf.png"),
@@ -217,7 +234,7 @@ def test_visual_lock_guard_allows_layer_crossing_and_preserves_yaml_edit_path() 
         ensure_visual_edit_respects_locks(component, moved_locked)
     assert caught.value.diagnostic.code == "NODE_LOCKED"
 
-    yaml_text = '''schema_version: 4
+    yaml_text = '''schema_version: 5
 id: card
 name: Card
 size_mm: {width: 63, height: 88}

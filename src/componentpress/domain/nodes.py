@@ -90,5 +90,65 @@ class GroupNode(PositionedNode):
         return tuple(value) if isinstance(value, list) else value
 
 
-Node = Annotated[Union[ImageNode, HtmlNode, GroupNode], Field(discriminator="type")]
+class ConditionalGroupNode(GroupNode):
+    type: Literal["conditional_group"]
+    condition_column: str = Field(min_length=1)
+    condition_value: str
+    condition_matches: bool | None = Field(default=None, exclude=True)
+
+
+class ShapeNode(PositionedNode):
+    type: Literal["rectangle", "ellipse"]
+    width_mm: PositiveMM
+    height_mm: PositiveMM
+    fill: str | None = "#FFFFFF"
+    stroke: str = "#000000"
+    stroke_width_mm: PositiveMM = 0.2
+    stroke_style: Literal["solid", "dash", "dot"] = "solid"
+
+    @field_validator("width_mm", "height_mm", "stroke_width_mm", mode="before")
+    @classmethod
+    def finite_size(cls, value: object) -> float:
+        return _finite(value)
+
+    @field_validator("fill", "stroke")
+    @classmethod
+    def valid_color(cls, value: str | None) -> str | None:
+        if value is not None and not re.fullmatch(r"#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?", value):
+            raise ValueError("ожидается цвет #RRGGBB, #AARRGGBB или пустая заливка")
+        return value
+
+
+class LineNode(PositionedNode):
+    type: Literal["line"]
+    dx_mm: float
+    dy_mm: float
+    stroke: str = "#000000"
+    stroke_width_mm: PositiveMM = 0.2
+    stroke_style: Literal["solid", "dash", "dot"] = "solid"
+
+    @field_validator("dx_mm", "dy_mm", "stroke_width_mm", mode="before")
+    @classmethod
+    def finite_size(cls, value: object) -> float:
+        return _finite(value)
+
+    @field_validator("stroke")
+    @classmethod
+    def valid_color(cls, value: str) -> str:
+        if not re.fullmatch(r"#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?", value):
+            raise ValueError("ожидается цвет #RRGGBB или #AARRGGBB")
+        return value
+
+    @model_validator(mode="after")
+    def nonzero_geometry(self):
+        if self.dx_mm == 0 and self.dy_mm == 0:
+            raise ValueError("у линии должен быть ненулевой размер")
+        return self
+
+
+Node = Annotated[
+    Union[ImageNode, HtmlNode, ConditionalGroupNode, GroupNode, ShapeNode, LineNode],
+    Field(discriminator="type"),
+]
 GroupNode.model_rebuild()
+ConditionalGroupNode.model_rebuild()

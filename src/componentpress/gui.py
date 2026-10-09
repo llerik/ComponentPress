@@ -72,6 +72,12 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
         node_id="smoke-image",
     ):
         return False
+    window._draw_element("rectangle", 40.0, 10.0, 58.0, 18.0)
+    window._draw_element("ellipse", 40.0, 22.0, 58.0, 30.0)
+    window._draw_element("line", 58.0, 35.0, 40.0, 35.0)
+    drawn = window.session.documents[smoke_id].model.elements
+    if not {node.type for node in drawn}.issuperset({"rectangle", "ellipse", "line"}):
+        return False
     window._set_selection(("smoke-title", "smoke-image"), source="tree")
     if not window.group_selected("smoke-group", "Проверка группы"):
         return False
@@ -97,6 +103,8 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     if saved is None or saved.model.size_mm != SizeMM(width=70.0, height=90.0):
         return False
     if saved.model.background != "#DDEEFF" or "# Проверка текстового режима" not in saved.committed.text:
+        return False
+    if saved.model.schema_version != 5 or not {node.type for node in saved.model.elements}.issuperset({"rectangle", "ellipse", "line"}):
         return False
     if not any(node.id == "smoke-group" for node in saved.model.elements):
         return False

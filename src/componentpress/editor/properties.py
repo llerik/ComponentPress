@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from componentpress.domain.component import ComponentDefinition
-from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
+from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, LineNode, Node, ShapeNode
 
 
 class ComponentProperties(QWidget):
@@ -119,6 +119,24 @@ class ElementProperties(QWidget):
         self.content_mode.addItem("Столбец", "column")
         self.content_column = QComboBox()
         self.content_column.setObjectName("contentColumn")
+        self.condition_column = QComboBox()
+        self.condition_column.setObjectName("conditionColumn")
+        self.condition_value = QLineEdit()
+        self.condition_value.setObjectName("conditionValue")
+        self.condition_state = QLabel()
+        self.condition_state.setObjectName("conditionState")
+        self.stroke_color = QLineEdit()
+        self.stroke_color.setObjectName("shapeStroke")
+        self.fill_color = QLineEdit()
+        self.fill_color.setObjectName("shapeFill")
+        self.stroke_width = self._number("shapeStrokeWidth", 0.001, 1000.0)
+        self.stroke_style = QComboBox()
+        self.stroke_style.setObjectName("shapeStrokeStyle")
+        self.stroke_style.addItem("Сплошная", "solid")
+        self.stroke_style.addItem("Штриховая", "dash")
+        self.stroke_style.addItem("Точечная", "dot")
+        self.line_dx = self._number("lineDX", -10000.0, 10000.0)
+        self.line_dy = self._number("lineDY", -10000.0, 10000.0)
         self.font_combo = QComboBox()
         self.font_combo.setObjectName("htmlFont")
         self.font_spin = self._number("htmlFontSize", 0.001, 1000.0)
@@ -164,6 +182,15 @@ class ElementProperties(QWidget):
         form.addRow("Изображение", self.source_edit)
         form.addRow("Источник содержимого", self.content_mode)
         form.addRow("Столбец Excel", self.content_column)
+        form.addRow("Столбец условия", self.condition_column)
+        form.addRow("Значение условия", self.condition_value)
+        form.addRow("Состояние", self.condition_state)
+        form.addRow("Заливка (#RRGGBB)", self.fill_color)
+        form.addRow("Контур", self.stroke_color)
+        form.addRow("Толщина контура, мм", self.stroke_width)
+        form.addRow("Стиль контура", self.stroke_style)
+        form.addRow("Конец линии ΔX, мм", self.line_dx)
+        form.addRow("Конец линии ΔY, мм", self.line_dy)
         form.addRow("Режим", self.fit_combo)
         form.addRow("Шрифт", self.font_combo)
         form.addRow("Размер, pt", self.font_spin)
@@ -183,12 +210,18 @@ class ElementProperties(QWidget):
         buttons.addWidget(self.insert_image)
         buttons.addWidget(self.apply_html)
         outer.addLayout(buttons)
-        for spin in (self.x_spin, self.y_spin, self.width_spin, self.height_spin):
+        for spin in (self.x_spin, self.y_spin, self.width_spin, self.height_spin, self.stroke_width, self.line_dx, self.line_dy):
             spin.editingFinished.connect(self._geometry_changed)
         self.name_edit.editingFinished.connect(lambda: self.nodeChanged.emit({"name": self.name_edit.text()}))
         self.source_edit.editingFinished.connect(lambda: self.nodeChanged.emit({"source": self.source_edit.text()}))
         self.content_mode.currentIndexChanged.connect(self._content_mode_changed)
         self.content_column.activated.connect(lambda _index: self._content_column_changed())
+        self.condition_column.activated.connect(lambda _index: self.nodeChanged.emit({"condition_column": self.condition_column.currentText()}))
+        self.condition_value.editingFinished.connect(lambda: self.nodeChanged.emit({"condition_value": self.condition_value.text()}))
+        self.stroke_color.editingFinished.connect(lambda: self.nodeChanged.emit({"stroke": self.stroke_color.text()}))
+        self.fill_color.editingFinished.connect(lambda: self.nodeChanged.emit({"fill": self.fill_color.text() or None}))
+        self.stroke_width.editingFinished.connect(lambda: self.nodeChanged.emit({"stroke_width_mm": self.stroke_width.value()}))
+        self.stroke_style.currentIndexChanged.connect(lambda _index: self.nodeChanged.emit({"stroke_style": self.stroke_style.currentData()}))
         self.fit_combo.currentTextChanged.connect(lambda value: self.nodeChanged.emit({"fit": value}))
         self.font_combo.currentTextChanged.connect(lambda value: self.nodeChanged.emit({"font_family": value}))
         self.font_spin.editingFinished.connect(lambda: self.nodeChanged.emit({"font_size_pt": self.font_spin.value()}))
@@ -215,9 +248,13 @@ class ElementProperties(QWidget):
         changes: dict[str, float] = {"x_mm": self.x_spin.value(), "y_mm": self.y_spin.value()}
         if self.width_spin.isVisible():
             changes.update(width_mm=self.width_spin.value(), height_mm=self.height_spin.value())
+        if self.line_dx.isVisible():
+            changes.update(dx_mm=self.line_dx.value(), dy_mm=self.line_dy.value())
+        if self.stroke_width.isVisible():
+            changes["stroke_width_mm"] = self.stroke_width.value()
         self.nodeChanged.emit(changes)
 
-    def show_node(self, node: Node | None, columns: tuple[str, ...] = (), component: ComponentDefinition | None = None) -> None:
+    def show_node(self, node: Node | None, columns: tuple[str, ...] = (), component: ComponentDefinition | None = None, condition_matches: bool | None = None) -> None:
         self.setEnabled(node is not None)
         if node is None:
             return
@@ -225,7 +262,9 @@ class ElementProperties(QWidget):
             self.x_spin, self.y_spin, self.width_spin, self.height_spin, self.name_edit,
             self.source_edit, self.fit_combo, self.font_combo, self.font_spin, self.color_edit,
             self.html_edit, self.content_mode, self.content_column, self.font_combo,
-            self.lock_check, *self.alignment_buttons.values(),
+            self.lock_check, self.condition_column, self.condition_value, self.stroke_color,
+            self.fill_color, self.stroke_width, self.stroke_style, self.line_dx, self.line_dy,
+            *self.alignment_buttons.values(),
         )
         blockers = [QSignalBlocker(widget) for widget in widgets]
         self.identity.setText(f"{node.id} ({node.type})")
@@ -250,8 +289,37 @@ class ElementProperties(QWidget):
         sized = isinstance(node, (ImageNode, HtmlNode))
         self.form.setRowVisible(self.width_spin, sized)
         self.form.setRowVisible(self.height_spin, sized)
+        line = isinstance(node, LineNode)
+        shape = isinstance(node, ShapeNode)
+        self.form.setRowVisible(self.line_dx, line)
+        self.form.setRowVisible(self.line_dy, line)
+        self.form.setRowVisible(self.fill_color, shape)
+        self.form.setRowVisible(self.stroke_color, shape or line)
+        self.form.setRowVisible(self.stroke_width, shape or line)
+        self.form.setRowVisible(self.stroke_style, shape or line)
+        if line:
+            self.line_dx.setValue(node.dx_mm)
+            self.line_dy.setValue(node.dy_mm)
+        if shape or line:
+            self.stroke_color.setText(node.stroke)
+            self.stroke_width.setValue(node.stroke_width_mm)
+            self.stroke_style.setCurrentIndex(max(0, self.stroke_style.findData(node.stroke_style)))
+        if shape:
+            self.fill_color.setText(node.fill or "")
         is_group = isinstance(node, GroupNode)
         self.form.setRowVisible(self.group_bounds, is_group)
+        conditional = isinstance(node, ConditionalGroupNode)
+        self.form.setRowVisible(self.condition_column, conditional)
+        self.form.setRowVisible(self.condition_value, conditional)
+        self.form.setRowVisible(self.condition_state, conditional)
+        if conditional:
+            self.condition_column.clear()
+            self.condition_column.addItems(list(columns))
+            if self.condition_column.findText(node.condition_column) < 0:
+                self.condition_column.addItem(node.condition_column)
+            self.condition_column.setCurrentText(node.condition_column)
+            self.condition_value.setText(node.condition_value)
+            self.condition_state.setText("Показывается" if condition_matches is True else "Скрыта" if condition_matches is False else "Нет строки")
         if is_group and component is not None:
             from componentpress.domain.tree import node_bounds
 
@@ -310,6 +378,8 @@ class ElementProperties(QWidget):
     def set_edit_locked(self, locked: bool) -> None:
         for widget in (
             self.name_edit, self.x_spin, self.y_spin, self.width_spin, self.height_spin,
+            self.condition_column, self.condition_value, self.stroke_color, self.fill_color,
+            self.stroke_width, self.stroke_style, self.line_dx, self.line_dy,
             self.source_edit, self.fit_combo, self.content_mode, self.content_column,
             self.font_combo, self.font_spin, self.color_edit, self.color_button,
             self.html_edit, self.insert_image, self.apply_html,

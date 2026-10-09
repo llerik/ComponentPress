@@ -36,7 +36,7 @@ from componentpress.domain.component import DataBinding
 from componentpress.application.preview_service import ValidationIssues
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.copy_mode import copies_for_mode
-from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode
+from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, LineNode, ShapeNode
 from componentpress.rendering.fonts import ProjectFonts
 from componentpress.platforms.services import PlatformServices
 from componentpress.domain.tree import (
@@ -52,6 +52,7 @@ from componentpress.domain.tree import (
     reorder_nodes,
     reparent_nodes,
     resize_node,
+    resize_line_endpoint,
     ungroup_node,
     update_node,
 )
@@ -114,6 +115,7 @@ class MainWindow(QMainWindow):
         self.save_all_action = self._action("Сохранить всё", "Ctrl+Shift+S")
         self.close_tab_action = self._action("Закрыть вкладку", QKeySequence.StandardKey.Close)
         self.exit_action = self._action("Выход", QKeySequence.StandardKey.Quit)
+        self.export_png_zip_action = self._action("Экспорт PNG ZIP…")
         self.add_component_action = self._action("Добавить компонент…", "Ctrl+Shift+N")
         self.project_settings_action = self._action("Настройки проекта…")
         self.undo_action = self.undo_group.createUndoAction(self, "Отменить")
@@ -135,6 +137,8 @@ class MainWindow(QMainWindow):
         file_menu.addActions([self.new_action, self.open_action])
         file_menu.addSeparator()
         file_menu.addActions([self.save_action, self.save_all_action, self.close_tab_action])
+        file_menu.addSeparator()
+        file_menu.addAction(self.export_png_zip_action)
         file_menu.addSeparator()
         file_menu.addAction(self.exit_action)
         edit_menu = self.menuBar().addMenu("Правка")
@@ -255,7 +259,20 @@ class MainWindow(QMainWindow):
         self.image_tool.setObjectName("imageTool")
         self.html_tool = QPushButton("HTML-текст")
         self.html_tool.setObjectName("htmlTool")
-        for button in (self.image_tool, self.html_tool):
+        self.conditional_group_tool = QPushButton("Условная группа")
+        self.conditional_group_tool.setObjectName("conditionalGroupTool")
+        self.rectangle_tool = QPushButton("Прямоугольник")
+        self.rectangle_tool.setObjectName("rectangleTool")
+        self.ellipse_tool = QPushButton("Эллипс")
+        self.ellipse_tool.setObjectName("ellipseTool")
+        self.line_tool = QPushButton("Линия")
+        self.line_tool.setObjectName("lineTool")
+        self.drawing_tools = {
+            "image": self.image_tool, "html": self.html_tool,
+            "conditional_group": self.conditional_group_tool,
+            "rectangle": self.rectangle_tool, "ellipse": self.ellipse_tool, "line": self.line_tool,
+        }
+        for button in self.drawing_tools.values():
             button.setCheckable(True)
             button.setEnabled(False)
             tools_layout.addWidget(button)
@@ -324,6 +341,7 @@ class MainWindow(QMainWindow):
         self.save_all_action.triggered.connect(self.save_all)
         self.close_tab_action.triggered.connect(lambda: self.close_tab(self.tabs.currentIndex()))
         self.exit_action.triggered.connect(self.close)
+        self.export_png_zip_action.triggered.connect(self._export_png_archive)
         self.add_component_action.triggered.connect(self.add_component_dialog)
         self.project_settings_action.triggered.connect(self.project_settings_dialog)
         self.build_all_action.triggered.connect(lambda: self._start_build(False))
@@ -348,6 +366,10 @@ class MainWindow(QMainWindow):
         self.properties.backgroundColorRequested.connect(self._pick_background_color)
         self.image_tool.clicked.connect(lambda: self._begin_tool("image"))
         self.html_tool.clicked.connect(lambda: self._begin_tool("html"))
+        self.conditional_group_tool.clicked.connect(lambda: self._begin_tool("conditional_group"))
+        self.rectangle_tool.clicked.connect(lambda: self._begin_tool("rectangle"))
+        self.ellipse_tool.clicked.connect(lambda: self._begin_tool("ellipse"))
+        self.line_tool.clicked.connect(lambda: self._begin_tool("line"))
         self.layer_up.clicked.connect(lambda: self.reorder_selected(1))
         self.layer_down.clicked.connect(lambda: self.reorder_selected(-1))
         self.group_button.clicked.connect(lambda: self.group_selected())
@@ -487,7 +509,9 @@ class MainWindow(QMainWindow):
         tab.canvas.selectionChanged.connect(self._canvas_selection_changed)
         tab.canvas.moveRequested.connect(self._move_selected)
         tab.canvas.resizeRequested.connect(self._resize_selected)
+        tab.canvas.lineResizeRequested.connect(self._resize_line_selected)
         tab.canvas.placementRequested.connect(self._place_element)
+        tab.canvas.drawRequested.connect(self._draw_element)
         tab.canvas.toolCancelled.connect(self._tool_cancelled)
         tab.canvas.deleteRequested.connect(self.delete_selected)
         self.undo_group.addStack(tab.undo_stack)
@@ -671,6 +695,7 @@ class MainWindow(QMainWindow):
             active_component = document.model
             bindings_resolved = False
         else:
+            tab.resolved_component = None
             try:
                 resolved = self.controller.preview.select_row(
                     self.session.snapshot, tab.component_id, row_number=tab.preview_row_number,
@@ -680,6 +705,8 @@ class MainWindow(QMainWindow):
                 )
             except ProjectError as exc:
                 tab.previewError.emit(str(exc.diagnostic))
+                if self.active_tab is tab and len(tab.canvas.selected_ids) == 1:
+                    self._show_selection(tab.canvas.selected_ids)
                 return False
             tab.preview_row_number = resolved.row.row_number if resolved.row else None
             tab.resolved_component = resolved.component
@@ -1213,7 +1240,9 @@ class MainWindow(QMainWindow):
                 except ProjectError:
                     pass
             component = self.session.documents[tab.component_id].model
-            self.element_properties.show_node(node, columns, component)
+            preview_node = locations(tab.resolved_component).get(node.id) if isinstance(node, ConditionalGroupNode) and tab.resolved_component is not None else None
+            matches = preview_node.node.condition_matches if preview_node is not None and isinstance(preview_node.node, ConditionalGroupNode) else None
+            self.element_properties.show_node(node, columns, component, matches)
             self.element_properties.show_image_quality(
                 item for item in tab.image_quality if item.node_id == node.id
             )
@@ -1366,6 +1395,9 @@ class MainWindow(QMainWindow):
     def _resize_selected(self, node_id: str, width_mm: float, height_mm: float) -> None:
         self._apply_tree("Изменить размер элемента", resize_node, node_id, width_mm, height_mm, selected=(node_id,))
 
+    def _resize_line_selected(self, node_id: str, dx_mm: float, dy_mm: float) -> None:
+        self._apply_tree("Изменить линию", resize_line_endpoint, node_id, dx_mm, dy_mm, selected=(node_id,))
+
     def _edit_selected_node(self, changes: dict) -> None:
         ids = self._selected_ids()
         if len(ids) != 1 or self.session is None or self.active_tab is None:
@@ -1453,7 +1485,8 @@ class MainWindow(QMainWindow):
         tab.canvas.set_tool(None if current == tool else tool)
         self._sync_tool_buttons()
         if tab.canvas.active_tool:
-            self.statusBar().showMessage("Щёлкните внутри листа; Esc или щелчок снаружи отменяет размещение")
+            prompt = "Протяните по листу для рисования; Esc отменяет" if tool in ("rectangle", "ellipse", "line") else "Щёлкните внутри листа; Esc отменяет"
+            self.statusBar().showMessage(prompt)
 
     def _tool_cancelled(self) -> None:
         self._sync_tool_buttons()
@@ -1461,8 +1494,8 @@ class MainWindow(QMainWindow):
 
     def _sync_tool_buttons(self) -> None:
         active = self.active_tab.canvas.active_tool if self.active_tab is not None else None
-        self.image_tool.setChecked(active == "image")
-        self.html_tool.setChecked(active == "html")
+        for name, button in self.drawing_tools.items():
+            button.setChecked(active == name)
 
     def _import_image(self, source: Path, folder: str) -> str:
         if self.session is None:
@@ -1473,7 +1506,27 @@ class MainWindow(QMainWindow):
         if self.session is None:
             return
         root = self.session.snapshot.root
-        if tool == "image":
+        accepted = True
+        if tool == "conditional_group":
+            columns: tuple[str, ...] = ()
+            if self.controller.preview is not None and self.active_tab is not None:
+                try:
+                    data = self.controller.preview.data(self.session.snapshot, self.active_tab.component_id)
+                    columns = data.headers if data is not None else ()
+                except ProjectError:
+                    pass
+            if not columns:
+                self._show_error(ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", "сначала задайте лист Excel и проверьте его заголовки")))
+                accepted = False
+            else:
+                name, accepted = QInputDialog.getText(self, "Условная группа", "Название", text="Условная группа")
+                if accepted and name.strip():
+                    component_id = self.active_tab.component_id
+                    node_id = self.controller.node_id(component_id, name, "condition")
+                    node = ConditionalGroupNode(id=node_id, type="conditional_group", name=name,
+                        x_mm=x_mm, y_mm=y_mm, children=(), condition_column=columns[0], condition_value="")
+                    self._apply_tree("Добавить условную группу", add_node, node, selected=(node_id,))
+        elif tool == "image":
             dialog = ImageAddDialog(root, self._import_image, self)
             accepted = dialog.exec() == dialog.DialogCode.Accepted
             if accepted:
@@ -1481,7 +1534,7 @@ class MainWindow(QMainWindow):
                     dialog.source.text().strip(), x_mm, y_mm,
                     name=dialog.name.text().strip(), fit=dialog.fit.currentText(),
                 )
-        else:
+        elif tool == "html":
             dialog = HtmlAddDialog(root, self._import_image, self)
             accepted = dialog.exec() == dialog.DialogCode.Accepted
             if accepted:
@@ -1494,6 +1547,29 @@ class MainWindow(QMainWindow):
             self.active_tab.canvas.cancel_tool()
         if not accepted:
             self.statusBar().showMessage("Добавление элемента отменено", 2000)
+
+    def _draw_element(self, tool: str, x1: float, y1: float, x2: float, y2: float) -> None:
+        if self.session is None or self.active_tab is None:
+            return
+        component_id = self.active_tab.component_id
+        if tool == "line":
+            dx, dy = x2 - x1, y2 - y1
+            if abs(dx) < 0.01 and abs(dy) < 0.01:
+                return
+            name = "Линия"
+            node_id = self.controller.node_id(component_id, name, "line")
+            node = LineNode(id=node_id, type="line", name=name, x_mm=x1, y_mm=y1, dx_mm=dx, dy_mm=dy)
+        elif tool in ("rectangle", "ellipse"):
+            x, y = min(x1, x2), min(y1, y2)
+            width, height = abs(x2 - x1), abs(y2 - y1)
+            if min(width, height) < 0.01:
+                return
+            name = "Прямоугольник" if tool == "rectangle" else "Эллипс"
+            node_id = self.controller.node_id(component_id, name, tool)
+            node = ShapeNode(id=node_id, type=tool, name=name, x_mm=x, y_mm=y, width_mm=width, height_mm=height)
+        else:
+            return
+        self._apply_tree("Нарисовать элемент", add_node, node, selected=(node_id,))
 
     def add_image(
         self,
@@ -1735,8 +1811,9 @@ class MainWindow(QMainWindow):
         self.close_tab_action.setEnabled(has_tab)
         for action in (self.zoom_in_action, self.zoom_out_action, self.fit_action):
             action.setEnabled(visual)
-        self.image_tool.setEnabled(visual)
-        self.html_tool.setEnabled(visual)
+        for button in self.drawing_tools.values():
+            button.setEnabled(visual)
+        self.export_png_zip_action.setEnabled(has_project and idle)
         selected = self._selected_ids()
         has_selection = bool(selected)
         locked_selection = False

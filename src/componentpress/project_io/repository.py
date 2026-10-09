@@ -12,12 +12,14 @@ from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
 from componentpress.domain.project import ProjectDefinition
+from componentpress.domain.schema import SCHEMA_VERSION
 from componentpress.bindings.grammar import parse_references
 from componentpress.platforms.services import ProjectWriteLock
 from .files import atomic_create, atomic_write, file_hash
 from .paths import check_case_collisions, check_exact_case, resolve_project_path
 from .transactions import recover, register_component
 from .migrations import migrate_v1_to_v2, migration_required, recover_migration, recovery_required
+from .schema_checks import preflight_project_schemas
 from .yaml_codec import _load, dump_yaml, html_image_sources, parse_component, parse_project, update_tree
 
 
@@ -43,7 +45,7 @@ class FileProjectRepository:
         for folder in ("components", "data", "assets/images", "assets/fonts"):
             (root / folder).mkdir(parents=True, exist_ok=True)
         template = (
-            "schema_version: 4\n"
+            f"schema_version: {SCHEMA_VERSION}\n"
             f"id: {project_id}\n"
             f"name: {json.dumps(name, ensure_ascii=False)}\n"
             'version: "0.1.0"\n'
@@ -65,13 +67,8 @@ class FileProjectRepository:
 
     def open(self, root: Path) -> ProjectSnapshot:
         root = root.resolve()
-        # Reject unsupported formats before recovery can rewrite anything.
         project_path = root / "project.yaml"
-        project_text, _ = _read_text(project_path)
-        project_tree = _load(project_text, project_path)
-        version = project_tree.get("schema_version")
-        if type(version) is not int or version != 4:
-            raise ProjectError(Diagnostic("SCHEMA_UNSUPPORTED", f"неподдерживаемая версия схемы {version!r}", project_path, "schema_version"))
+        preflight_project_schemas(root)
         if recovery_required(root):
             with ProjectWriteLock(root):
                 recover_migration(root)
@@ -135,6 +132,7 @@ class FileProjectRepository:
 
     def migrate(self, root: Path) -> ProjectSnapshot:
         root = root.resolve()
+        preflight_project_schemas(root)
         with ProjectWriteLock(root):
             recover_migration(root)
             migrate_v1_to_v2(root)
@@ -219,7 +217,7 @@ class FileProjectRepository:
             raise ProjectError(Diagnostic("COMPONENT_ID_DUPLICATE", "компонент уже зарегистрирован", snapshot.root))
         path = f"components/{component_id}.yaml"
         component_text = (
-            f"schema_version: 4\nid: {component_id}\nname: {json.dumps(name, ensure_ascii=False)}\n"
+            f"schema_version: {SCHEMA_VERSION}\nid: {component_id}\nname: {json.dumps(name, ensure_ascii=False)}\n"
             "size_mm:\n  width: 63\n  height: 88\nbackground: \"#FFFFFF\"\n"
             "elements: []\n"
         )

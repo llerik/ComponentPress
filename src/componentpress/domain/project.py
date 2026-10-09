@@ -4,6 +4,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .schema import SCHEMA_VERSION, require_current_schema
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -64,7 +66,7 @@ class PrintSettings(StrictModel):
 
 
 class ProjectDefinition(StrictModel):
-    schema_version: Literal[4]
+    schema_version: Literal[SCHEMA_VERSION]
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     version: str
@@ -74,6 +76,11 @@ class ProjectDefinition(StrictModel):
     copies_columns: CopiesColumns = Field(default_factory=CopiesColumns)
     components: tuple[ComponentRef, ...] = ()
     print: PrintSettings = Field(default_factory=PrintSettings)
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def strict_schema_version(cls, value: object) -> int:
+        return require_current_schema(value)
 
     @field_validator("components", mode="before")
     @classmethod

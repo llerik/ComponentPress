@@ -15,7 +15,7 @@ from jinja2.sandbox import SandboxedEnvironment
 
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
-from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
+from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, Node
 from componentpress.domain.project import ProjectDefinition
 from componentpress.domain.render_plan import ResolvedComponent
 from componentpress.domain.values import CellValue, DataRow, DataSheetSnapshot, FormulaState, value_to_text
@@ -194,6 +194,21 @@ class BindingResolver:
         sheet = component.data.sheet if component.data else ""
         owner = owner or self.root / f"components/{component.id}.yaml"
 
+        def check_columns(nodes_: tuple[Node, ...]) -> None:
+            for node in nodes_:
+                if isinstance(node, ConditionalGroupNode):
+                    location = BindingLocation(owner, f"elements.{node.id}.condition_column", node.id, source, sheet)
+                    if data is None:
+                        raise ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", "условной группе нужен источник Excel", owner, location.field, node_id=node.id))
+                    normalized = unicodedata.normalize("NFKC", node.condition_column.strip()).casefold()
+                    if not any(unicodedata.normalize("NFKC", name.strip()).casefold() == normalized for name in data.headers):
+                        raise ProjectError(Diagnostic("COLUMN_UNKNOWN", f"нет столбца {node.condition_column!r}", owner, location.field, source=source, sheet=sheet, node_id=node.id))
+                    check_columns(node.children)
+                elif isinstance(node, GroupNode):
+                    check_columns(node.children)
+
+        check_columns(component.elements)
+
         def visit(nodes_: tuple[Node, ...]) -> tuple[Node, ...]:
             resolved: list[Node] = []
             for node in nodes_:
@@ -246,6 +261,17 @@ class BindingResolver:
                     else:
                         html = self.resolve_html(html, row, location)
                     resolved.append(node.model_copy(update={"html": html, "content_mode": "manual", "content_column": None}))
+                elif isinstance(node, ConditionalGroupNode):
+                    condition_matches = None
+                    if row is not None:
+                        location = BindingLocation(owner, f"elements.{node.id}.condition_column", node.id, source, sheet)
+                        cell = self._column_cell(node.condition_column, row, location)
+                        value = self._cell_text(cell, location, node.condition_column)
+                        condition_matches = value == node.condition_value
+                    resolved.append(node.model_copy(update={
+                        "condition_matches": condition_matches,
+                        "children": visit(node.children),
+                    }))
                 elif isinstance(node, GroupNode):
                     resolved.append(node.model_copy(update={"children": visit(node.children)}))
             return tuple(resolved)

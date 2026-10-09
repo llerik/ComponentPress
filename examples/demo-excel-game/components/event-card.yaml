@@ -1,5 +1,5 @@
 # Второй компонент читает другой лист той же книги
-schema_version: 4
+schema_version: 5
 id: event-card
 name: "Карта события"
 size_mm:

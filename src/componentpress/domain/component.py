@@ -5,6 +5,7 @@ from pydantic import Field, field_validator, model_validator
 
 from .nodes import GroupNode, HtmlNode, ImageNode, Node
 from .project import PositiveMM, StrictModel, _finite
+from .schema import SCHEMA_VERSION, require_current_schema
 
 
 class SizeMM(StrictModel):
@@ -26,13 +27,18 @@ class DataBinding(StrictModel):
 
 
 class ComponentDefinition(StrictModel):
-    schema_version: Literal[4]
+    schema_version: Literal[SCHEMA_VERSION]
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     size_mm: SizeMM
     background: str = "#FFFFFF"
     data: DataBinding | None = None
     elements: tuple[Node, ...] = ()
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def strict_schema_version(cls, value: object) -> int:
+        return require_current_schema(value)
 
     @field_validator("elements", mode="before")
     @classmethod

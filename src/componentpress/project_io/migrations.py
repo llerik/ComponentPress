@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.domain.schema import SCHEMA_VERSION
 from .files import atomic_write
 from .paths import resolve_project_path
 from .yaml_codec import _load
@@ -74,11 +75,14 @@ def recover_migration(root: Path) -> None:
 def migrate_v1_to_v2(root: Path) -> Path | None:
     """Retained compatibility entry point; published legacy formats are read-only."""
     root = root.resolve()
+    from .schema_checks import preflight_project_schemas
+
+    preflight_project_schemas(root)
     recover_migration(root)
     project_path = root / "project.yaml"
     project_bytes = project_path.read_bytes()
     project_tree = _load(project_bytes.decode("utf-8"), project_path)
     version = project_tree.get("schema_version")
-    if type(version) is not int or version != 4:
+    if type(version) is not int or version != SCHEMA_VERSION:
         raise ProjectError(Diagnostic("SCHEMA_UNSUPPORTED", f"версия схемы {version!r} не поддерживается; автоматическая миграция отключена", project_path, "schema_version"))
     return None

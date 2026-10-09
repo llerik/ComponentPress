@@ -105,6 +105,10 @@ def main() -> int:
             or "id: smoke-group" not in saved_text
             or "id: smoke-image" not in saved_text
             or "id: smoke-title" not in saved_text
+            or "type: rectangle" not in saved_text
+            or "type: ellipse" not in saved_text
+            or "type: line" not in saved_text
+            or "schema_version: 5" not in saved_text
             or "# Проверка текстового режима" not in saved_text
         ):
             print("Smoke-проверка не сохранила синхронизированный макет", file=sys.stderr)
@@ -130,7 +134,7 @@ def main() -> int:
         if jobs.exists() and any(jobs.iterdir()):
             print("Smoke-проверка оставила временный каталог задания", file=sys.stderr)
             return 10
-        print("Smoke: GUI, Excel, редактор, потоковая сборка PDF, отмена и очистка — успешно")
+        print("Smoke: GUI, schema 5, Excel, фигуры, редактор, PDF/PNG ZIP, отмена и очистка — успешно")
     RELEASE_EXECUTABLE.parent.mkdir(parents=True, exist_ok=True)
     staged.replace(RELEASE_EXECUTABLE)
     print(RELEASE_EXECUTABLE)

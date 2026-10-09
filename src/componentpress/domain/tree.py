@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from componentpress.domain.component import ComponentDefinition
-from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
+from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, LineNode, Node, ShapeNode
 
 
 class TreeOperationError(ValueError):
@@ -146,6 +146,14 @@ def resize_node(component: ComponentDefinition, node_id: str, width_mm: float, h
         raise TreeOperationError("размер группы вычисляется по её содержимому")
     _ensure_unlocked_selection(component, (node_id,), "изменить размер")
     return update_node(component, node_id, width_mm=width_mm, height_mm=height_mm)
+
+
+def resize_line_endpoint(component: ComponentDefinition, node_id: str, dx_mm: float, dy_mm: float) -> ComponentDefinition:
+    item = locations(component).get(node_id)
+    if item is None or not isinstance(item.node, LineNode):
+        raise TreeOperationError("нужно выбрать линию")
+    _ensure_unlocked_selection(component, (node_id,), "изменить размер")
+    return update_node(component, node_id, dx_mm=dx_mm, dy_mm=dy_mm)
 
 
 def remove_nodes(component: ComponentDefinition, node_ids: Iterable[str]) -> ComponentDefinition:
@@ -354,6 +362,11 @@ def node_bounds(component: ComponentDefinition, node_id: str) -> tuple[float, fl
     index = locations(component)
     item = index[node_id]
     node = item.node
+    if isinstance(node, LineNode):
+        left, top = min(0.0, node.dx_mm), min(0.0, node.dy_mm)
+        return item.global_x + left, item.global_y + top, abs(node.dx_mm), abs(node.dy_mm)
+    if isinstance(node, ShapeNode):
+        return item.global_x, item.global_y, node.width_mm, node.height_mm
     if not isinstance(node, GroupNode):
         return item.global_x, item.global_y, node.width_mm, node.height_mm
     if not node.children:

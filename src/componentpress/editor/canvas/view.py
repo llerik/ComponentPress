@@ -4,19 +4,20 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QKeyEvent, QMouseEvent, QPainter, QPen, QPixmap, QWheelEvent
-from PySide6.QtWidgets import QFrame, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsScene, QGraphicsView
+from PySide6.QtWidgets import QFrame, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsScene, QGraphicsView, QGraphicsLineItem
 
 from componentpress.domain.component import ComponentDefinition
-from componentpress.domain.nodes import GroupNode, Node
-from componentpress.domain.tree import effectively_locked_ids, node_bounds
+from componentpress.domain.nodes import GroupNode, LineNode, Node
+from componentpress.domain.tree import effectively_locked_ids, locations, node_bounds
 
 
 class NodeOverlay(QGraphicsRectItem):
-    def __init__(self, node_id: str, is_group: bool, locked: bool, rect: QRectF, z: float):
+    def __init__(self, node_id: str, is_group: bool, locked: bool, rect: QRectF, z: float, line_endpoint: QPointF | None = None):
         super().__init__(rect)
         self.node_id = node_id
         self.is_group = is_group
         self.locked = locked
+        self.line_endpoint = line_endpoint
         self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemIsSelectable, True)
         self.setZValue(z)
         self.setBrush(Qt.BrushStyle.NoBrush)
@@ -37,7 +38,11 @@ class NodeOverlay(QGraphicsRectItem):
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         super().paint(painter, option, widget)
-        if self.isSelected() and not self.is_group:
+        if self.isSelected() and self.line_endpoint is not None:
+            size = 8.0 / max(0.1, painter.transform().m11())
+            point = self.line_endpoint
+            painter.fillRect(QRectF(point.x() - size / 2, point.y() - size / 2, size, size), QColor("#0B78D0"))
+        elif self.isSelected() and not self.is_group:
             size = 7.0 / max(0.1, painter.transform().m11())
             corner = self.rect().bottomRight()
             painter.fillRect(QRectF(corner.x() - size, corner.y() - size, size, size), QColor("#0B78D0"))
@@ -48,7 +53,9 @@ class ComponentCanvas(QGraphicsView):
     selectionChanged = Signal(object)
     moveRequested = Signal(object, float, float)
     resizeRequested = Signal(str, float, float)
+    lineResizeRequested = Signal(str, float, float)
     placementRequested = Signal(str, float, float)
+    drawRequested = Signal(str, float, float, float, float)
     toolCancelled = Signal()
     deleteRequested = Signal()
     nudgeRequested = Signal(object, float, float)
@@ -69,10 +76,13 @@ class ComponentCanvas(QGraphicsView):
         self._component: ComponentDefinition | None = None
         self._overlays: dict[str, NodeOverlay] = {}
         self._tool: str | None = None
+        self._draw_start: QPointF | None = None
+        self._draw_preview = None
         self._drag_start: QPointF | None = None
         self._drag_positions: dict[str, QPointF] = {}
         self._resize_id: str | None = None
         self._resize_rect: QRectF | None = None
+        self._line_resize_id: str | None = None
         self._syncing_selection = False
         self._nudge_key: int | None = None
         self._nudge_ids: tuple[str, ...] = ()
@@ -103,6 +113,10 @@ class ComponentCanvas(QGraphicsView):
     def cancel_tool(self) -> None:
         if self._tool is not None:
             self._tool = None
+            self._draw_start = None
+            if self._draw_preview is not None and self._draw_preview.scene() is self.scene():
+                self.scene().removeItem(self._draw_preview)
+            self._draw_preview = None
             self.viewport().setCursor(Qt.CursorShape.ArrowCursor)
             self.toolCancelled.emit()
 
@@ -156,12 +170,24 @@ class ComponentCanvas(QGraphicsView):
             for node in nodes:
                 order += 1
                 x, y, width, height = node_bounds(component, node.id)
+                node_location = locations(component)[node.id]
+                node_data = node_location.node
+                endpoint = QPointF((node_location.global_x + node_data.dx_mm) * sx, (node_location.global_y + node_data.dy_mm) * sy) if isinstance(node_data, LineNode) else None
+                if isinstance(node_data, LineNode):
+                    bounds = QRectF(x * sx, y * sy, width * sx, height * sy)
+                    if bounds.width() < 8:
+                        bounds.adjust(-4, 0, 4, 0)
+                    if bounds.height() < 8:
+                        bounds.adjust(0, -4, 0, 4)
+                else:
+                    bounds = QRectF(x * sx, y * sy, width * sx, height * sy)
                 overlay = NodeOverlay(
                     node.id,
                     isinstance(node, GroupNode),
                     node.id in locked_ids,
-                    QRectF(x * sx, y * sy, width * sx, height * sy),
+                    bounds,
                     float(order),
+                    endpoint,
                 )
                 scene.addItem(overlay)
                 self._overlays[node.id] = overlay
@@ -254,6 +280,15 @@ class ComponentCanvas(QGraphicsView):
                 return
             x_mm = point.x() / self._world_per_mm_x
             y_mm = point.y() / self._world_per_mm_y
+            if tool in ("rectangle", "ellipse", "line"):
+                self._draw_start = point
+                if tool == "line":
+                    self._draw_preview = self.scene().addLine(point.x(), point.y(), point.x(), point.y(), QPen(QColor("#14A44D"), 0, Qt.PenStyle.DashLine))
+                else:
+                    self._draw_preview = self.scene().addRect(QRectF(point, point), QPen(QColor("#14A44D"), 0, Qt.PenStyle.DashLine))
+                self._draw_preview.setZValue(100000)
+                event.accept()
+                return
             width_mm, height_mm = (30.0, 30.0) if tool == "image" else (40.0, 15.0)
             width_mm = max(0.001, min(width_mm, self._component.size_mm.width - x_mm))
             height_mm = max(0.001, min(height_mm, self._component.size_mm.height - y_mm))
@@ -296,6 +331,12 @@ class ComponentCanvas(QGraphicsView):
         self._drag_positions = {overlay.node_id: overlay.pos() for overlay in selected}
         self._resize_id = None
         self._resize_rect = None
+        self._line_resize_id = None
+        if len(selected) == 1 and selected[0].line_endpoint is not None:
+            tolerance = 10.0 / max(0.1, self.transform().m11())
+            end = selected[0].line_endpoint
+            if abs(point.x() - end.x()) <= tolerance and abs(point.y() - end.y()) <= tolerance:
+                self._line_resize_id = selected[0].node_id
         if len(selected) == 1 and not selected[0].is_group:
             tolerance = 10.0 / max(0.1, self.transform().m11())
             corner = selected[0].sceneBoundingRect().bottomRight()
@@ -305,10 +346,23 @@ class ComponentCanvas(QGraphicsView):
         event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        if self._drag_start is None or not (event.buttons() & Qt.MouseButton.LeftButton):
+        if (self._drag_start is None and self._draw_start is None) or not (event.buttons() & Qt.MouseButton.LeftButton):
             super().mouseMoveEvent(event)
             return
         point = self.mapToScene(event.position().toPoint())
+        if self._draw_start is not None and self._draw_preview is not None:
+            start = self._draw_start
+            if self._tool == "line":
+                self._draw_preview.setLine(start.x(), start.y(), point.x(), point.y())
+            else:
+                self._draw_preview.setRect(QRectF(start, point).normalized())
+            event.accept()
+            return
+        if self._line_resize_id is not None:
+            self._overlays[self._line_resize_id].line_endpoint = point
+            self.viewport().update()
+            event.accept()
+            return
         delta = point - self._drag_start
         if self._resize_id is not None and self._resize_rect is not None:
             overlay = self._overlays[self._resize_id]
@@ -322,6 +376,32 @@ class ComponentCanvas(QGraphicsView):
         event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._draw_start is not None and self._component is not None:
+            start = self._draw_start
+            end = self.mapToScene(event.position().toPoint())
+            sx, sy = self._world_per_mm_x, self._world_per_mm_y
+            tool = self._tool
+            if self._draw_preview is not None and self._draw_preview.scene() is self.scene():
+                self.scene().removeItem(self._draw_preview)
+            self._draw_preview = None
+            self._draw_start = None
+            if tool and (abs(end.x() - start.x()) > 0.01 or abs(end.y() - start.y()) > 0.01):
+                self.drawRequested.emit(tool, start.x() / sx, start.y() / sy, end.x() / sx, end.y() / sy)
+            event.accept()
+            return
+        if self._line_resize_id is not None and self._component is not None:
+            point = self.mapToScene(event.position().toPoint())
+            node_id = self._line_resize_id
+            item = locations(self._component)[node_id]
+            component_before = self._component
+            self.lineResizeRequested.emit(node_id, point.x() / self._world_per_mm_x - item.global_x, point.y() / self._world_per_mm_y - item.global_y)
+            if self._component is component_before and node_id in self._overlays:
+                line = item.node
+                if isinstance(line, LineNode):
+                    self._overlays[node_id].line_endpoint = QPointF((item.global_x + line.dx_mm) * self._world_per_mm_x, (item.global_y + line.dy_mm) * self._world_per_mm_y)
+            self._line_resize_id = None
+            event.accept()
+            return
         if self._drag_start is None or self._component is None or self._pixmap_item is None:
             super().mouseReleaseEvent(event)
             return

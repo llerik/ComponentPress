@@ -31,7 +31,7 @@ EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "demo-game"
 
 def simple_component() -> ComponentDefinition:
     return ComponentDefinition(
-        schema_version=4,
+        schema_version=5,
         id="card",
         name="Карта",
         size_mm=SizeMM(width=63, height=88),
@@ -74,7 +74,7 @@ def test_layer_drop_changes_storage_order_used_by_painter() -> None:
 
 def test_grouping_keeps_comments_attached_to_moved_nodes(tmp_path: Path) -> None:
     path = tmp_path / "card.yaml"
-    text = """schema_version: 4
+    text = """schema_version: 5
 id: card
 name: Card
 size_mm: {width: 63, height: 88}

@@ -51,10 +51,10 @@ def test_quality_inspection_lists_each_inline_image_at_its_effective_size(tmp_pa
     folder.mkdir(parents=True)
     assert image.save(str(folder / "detail.png"), "PNG")
     project = ProjectDefinition.model_validate({
-        "schema_version": 4, "id": "test", "name": "Test", "version": "1.0.0",
+        "schema_version": 5, "id": "test", "name": "Test", "version": "1.0.0",
     })
     component = ComponentDefinition.model_validate({
-        "schema_version": 4, "id": "card", "name": "Card",
+        "schema_version": 5, "id": "card", "name": "Card",
         "size_mm": {"width": 50.8, "height": 50.8},
         "elements": [{
             "id": "text", "name": "Text", "type": "html", "x_mm": 0, "y_mm": 0,
@@ -89,11 +89,11 @@ def test_pdf_images_use_lossless_encoding_and_keep_page_geometry(tmp_path: Path)
         "width_mm": 50.8, "height_mm": 25.4, "source": "assets/images/tile.jpg", "fit": "stretch",
     })
     component = ComponentDefinition(
-        schema_version=4, id="card", name="Card",
+        schema_version=5, id="card", name="Card",
         size_mm=SizeMM(width=50.8, height=25.4), elements=(image_node,),
     )
     project = ProjectDefinition.model_validate({
-        "schema_version": 4, "id": "jpeg", "name": "JPEG", "version": "1.0.0",
+        "schema_version": 5, "id": "jpeg", "name": "JPEG", "version": "1.0.0",
     })
     document = DocumentSnapshot(root / "components" / "card.yaml", "", "", component)
     snapshot = ProjectSnapshot(root, "", "", project, {"card": document})
