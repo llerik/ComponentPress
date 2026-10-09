@@ -149,9 +149,13 @@ class ElementProperties(QWidget):
         self.lock_check.setObjectName("elementLocked")
         self.group_bounds = QLabel()
         self.group_bounds.setObjectName("groupBounds")
+        self.quality_label = QLabel()
+        self.quality_label.setObjectName("imageQuality")
+        self.quality_label.setWordWrap(True)
         form.addRow("Элемент", self.identity)
         form.addRow("Защита", self.lock_check)
         form.addRow("Габариты группы, мм", self.group_bounds)
+        form.addRow("Разрешение рисунков", self.quality_label)
         form.addRow("Название", self.name_edit)
         form.addRow("X, мм", self.x_spin)
         form.addRow("Y, мм", self.y_spin)
@@ -314,6 +318,26 @@ class ElementProperties(QWidget):
             widget.setEnabled(not locked)
         if not locked:
             self.content_column.setEnabled(self.content_mode.currentData() == "column")
+
+    def show_image_quality(self, quality) -> None:
+        items = tuple(quality)
+        if not items:
+            self.quality_label.clear()
+            self.form.setRowVisible(self.quality_label, False)
+            return
+        lines = []
+        has_warning = False
+        for item in items:
+            status = " — ниже 300 dpi" if item.warning else ""
+            has_warning = has_warning or item.warning
+            lines.append(
+                f"{item.source}: {item.pixel_width}×{item.pixel_height} px → "
+                f"{item.width_mm:.2f}×{item.height_mm:.2f} мм; "
+                f"{item.dpi_x:.1f}×{item.dpi_y:.1f} dpi{status}"
+            )
+        self.quality_label.setText("\n".join(lines))
+        self.quality_label.setStyleSheet("color: #A00000" if has_warning else "")
+        self.form.setRowVisible(self.quality_label, True)
 
     def _content_mode_changed(self, _index: int) -> None:
         mode = self.content_mode.currentData()

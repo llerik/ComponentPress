@@ -27,6 +27,7 @@ from componentpress.project_io.files import file_hash
 from componentpress.project_io.paths import check_exact_case, resolve_project_path
 from componentpress.project_io.yaml_codec import html_image_sources
 from componentpress.rendering.resources import LoadedImage, ProjectResourceLoader
+from componentpress.rendering.image_quality import measure_component_images
 from componentpress.execution.cancellation import CancellationToken
 
 
@@ -75,6 +76,7 @@ class BuildInputSnapshot:
     registered_font_ids: tuple[int, ...]
     max_render_workers: int
     memory_budget_bytes: int
+    warnings: tuple[Diagnostic, ...] = ()
 
     @property
     def total_copies(self) -> int:
@@ -333,6 +335,31 @@ class InputSnapshotBuilder:
                 raise ProjectError(Diagnostic("FILE_READ", str(exc), path)) from exc
             if actual != expected:
                 raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "файл изменился во время подготовки снимка", path))
+        image_warnings: list[Diagnostic] = []
+        quality_loader = SnapshotResourceLoader(resources)
+        for instance in instances:
+            owner = instance.document_path
+            data_binding = instance.component.data
+            measurements = measure_component_images(
+                instance.component,
+                source.model,
+                quality_loader,
+                owner,
+                bindings_resolved=True,
+            )
+            for measurement in measurements:
+                warning = measurement.diagnostic(
+                    owner,
+                    source=data_binding.source if data_binding else None,
+                    sheet=data_binding.sheet if data_binding else None,
+                )
+                if warning is not None:
+                    if instance.row_number is not None:
+                        warning = replace(
+                            warning,
+                            message=f"строка Excel {instance.row_number}: {warning.message}",
+                        )
+                    image_warnings.append(warning)
         snapshot = BuildInputSnapshot(
             job_id=job_id,
             root=source.root,
@@ -348,6 +375,7 @@ class InputSnapshotBuilder:
             registered_font_ids=(),
             max_render_workers=max_render_workers,
             memory_budget_bytes=memory_budget_bytes,
+            warnings=tuple(image_warnings),
         )
         return snapshot if defer_font_registration else self.register_snapshot_fonts(snapshot)
 

@@ -138,6 +138,7 @@ class PreviewService:
         row_number: int | None = None, instance_id: str | None = None,
         mode: str = "prod",
         component: ComponentDefinition | None = None,
+        validate_resources: bool = True,
     ) -> ResolvedComponent:
         document, model = self._model(snapshot, component_id, component)
         mode = validate_copy_mode(mode)
@@ -155,7 +156,7 @@ class PreviewService:
                 row = eligible[0]
             if row is None:
                 raise ProjectError(Diagnostic("DATA_ROW_UNKNOWN", "строка предпросмотра не найдена", data.path, source=data.source, sheet=data.sheet))
-        resolver = BindingResolver(snapshot.root, snapshot.model)
+        resolver = BindingResolver(snapshot.root, snapshot.model, validate_resources=validate_resources)
         return resolver.resolve_component(model, data, row, owner=document.path)
 
     def export_png(

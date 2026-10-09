@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from pydantic import ValidationError
-from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, Qt
+from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QThreadPool, QTimer, Qt
 from PySide6.QtGui import QAction, QColor, QCloseEvent, QKeySequence, QUndoGroup
 from PySide6.QtWidgets import (
     QApplication,
@@ -37,6 +37,7 @@ from componentpress.application.preview_service import ValidationIssues
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.copy_mode import copies_for_mode
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode
+from componentpress.rendering.fonts import ProjectFonts
 from componentpress.platforms.services import PlatformServices
 from componentpress.domain.tree import (
     TreeOperationError,
@@ -61,6 +62,7 @@ from .dialogs import HtmlAddDialog, ImageAddDialog, ResourcePickerDialog
 from .build_dialog import BuildOptionsDialog
 from .document_tab import DocumentTab
 from .properties import ComponentProperties, ElementProperties
+from .preview_worker import PreviewFontReadTask, PreviewRequest, PreviewSignals, PreviewTask
 from .qt_models import ID_ROLE, LayerTreeView, component_model, element_model
 
 
@@ -74,6 +76,13 @@ class MainWindow(QMainWindow):
         self._last_build_result: BuildResult | None = None
         self._build_progress: QProgressDialog | None = None
         self._close_after_build = False
+        self._preview_pool = QThreadPool(self)
+        self._preview_pool.setMaxThreadCount(1)
+        self._preview_signals = PreviewSignals(self)
+        self._preview_signals.finished.connect(self._preview_task_finished, Qt.ConnectionType.QueuedConnection)
+        self._preview_active: tuple[DocumentTab, PreviewRequest, ProjectFonts | None] | None = None
+        self._preview_pending: DocumentTab | None = None
+        self._build_retry_scheduled = False
         self.undo_group = QUndoGroup(self)
         self.setObjectName("mainWindow")
         self.setWindowTitle("ComponentPress")
@@ -471,6 +480,7 @@ class MainWindow(QMainWindow):
             return existing
         tab = DocumentTab(component_id)
         tab.zoomChanged.connect(self._zoom_changed)
+        tab.previewRequested.connect(lambda item=tab: self._preview_requested(item))
         tab.previewError.connect(lambda message: (self.statusBar().showMessage(message, 7000), self._add_events((Diagnostic("PREVIEW_ERROR", message),))))
         tab.modeRequested.connect(lambda mode, item=tab: self._request_mode(item, mode))
         tab.draftChanged.connect(lambda text, item=tab: self._draft_changed(item, text))
@@ -493,6 +503,7 @@ class MainWindow(QMainWindow):
         for candidate in self._tabs.values():
             if candidate is not self.active_tab:
                 candidate.canvas.cancel_tool()
+                candidate.canvas.release_preview()
         tab = self.active_tab
         if tab is None or self.session is None:
             self.undo_group.setActiveStack(None)
@@ -512,6 +523,8 @@ class MainWindow(QMainWindow):
             tab.set_text(document.current_text)
             self.status_zoom.setText(f"Масштаб: {tab.canvas.zoom_percent}%")
             self._populate_data_panel()
+            if tab.canvas._pixmap_item is None:
+                self._refresh_preview(tab)
         self._update_actions()
 
     @staticmethod
@@ -655,19 +668,156 @@ class MainWindow(QMainWindow):
         document = self.session.documents[tab.component_id]
         if document.model.data is None or self.controller.preview is None:
             tab.resolved_component = None
-            return tab.refresh(self.session, fit=fit, selected=selected)
-        try:
-            resolved = self.controller.preview.select_row(
-                self.session.snapshot, tab.component_id, row_number=tab.preview_row_number,
-                mode=str(self.data_mode.currentData() or "prod"),
-                component=document.model,
-            )
-        except ProjectError as exc:
-            tab.previewError.emit(str(exc.diagnostic))
-            return False
-        tab.preview_row_number = resolved.row.row_number if resolved.row else None
-        tab.resolved_component = resolved.component
-        return tab.refresh(self.session, component=resolved.component, fit=fit, selected=selected)
+            active_component = document.model
+            bindings_resolved = False
+        else:
+            try:
+                resolved = self.controller.preview.select_row(
+                    self.session.snapshot, tab.component_id, row_number=tab.preview_row_number,
+                    mode=str(self.data_mode.currentData() or "prod"),
+                    component=document.model,
+                    validate_resources=False,
+                )
+            except ProjectError as exc:
+                tab.previewError.emit(str(exc.diagnostic))
+                return False
+            tab.preview_row_number = resolved.row.row_number if resolved.row else None
+            tab.resolved_component = resolved.component
+            active_component = resolved.component
+            bindings_resolved = True
+        dpi = tab._preview_dpi(
+            active_component, tab.canvas.zoom_percent / 100,
+            tab.canvas.viewport().devicePixelRatioF(),
+        )
+        tab.queue_preview(
+            self.session, component=active_component, dpi=dpi, fit=fit,
+            selected=selected, bindings_resolved=bindings_resolved,
+        )
+        return True
+
+    @staticmethod
+    def _preview_font_families(component: ComponentDefinition) -> set[str]:
+        families: set[str] = set()
+
+        def visit(nodes) -> None:
+            for node in nodes:
+                if isinstance(node, HtmlNode):
+                    families.add(node.font_family)
+                elif isinstance(node, GroupNode):
+                    visit(node.children)
+
+        visit(component.elements)
+        return families
+
+    def _preview_requested(self, tab: DocumentTab) -> None:
+        if self._tabs.get(tab.component_id) is not tab or self.session is None:
+            return
+        if self.active_tab is not tab or self._active_build_job is not None:
+            tab.preview_deferred = True
+            return
+        if self._preview_active is not None:
+            self._preview_pending = tab
+            return
+        payload = tab.preview_request_data()
+        if payload is None:
+            return
+        snapshot, component, dpi, bindings_resolved, generation = payload
+        request = PreviewRequest(tab.component_id, generation, snapshot, component, dpi, bindings_resolved, tab.preview_row_number)
+        fonts = ProjectFonts(snapshot.root, self._preview_font_families(component))
+        self._preview_active = (tab, request, fonts)
+        self._preview_pool.start(PreviewFontReadTask(request, self._preview_signals))
+
+    def _preview_task_finished(self, payload) -> None:
+        phase, request, result, error = payload
+        active = self._preview_active
+        if active is None or active[1] != request:
+            return
+        tab, _request, fonts = active
+        if phase == "fonts":
+            try:
+                if error is not None:
+                    raise error
+                assert fonts is not None
+                fonts.register_captured(result)
+                for family in self._preview_font_families(request.component):
+                    fonts.require(family, owner=request.snapshot.root / "project.yaml", field="font_family")
+            except Exception as exc:
+                if fonts is not None:
+                    fonts.close()
+                self._preview_active = None
+                if self._tabs.get(tab.component_id) is tab:
+                    message = str(exc.diagnostic) if isinstance(exc, ProjectError) else str(exc)
+                    tab.fail_preview(message, generation=request.generation)
+                self._start_pending_preview()
+                return
+            self._preview_pool.start(PreviewTask(request, self._preview_signals))
+            return
+        if fonts is not None:
+            fonts.close()
+        self._preview_active = None
+        if self._tabs.get(tab.component_id) is tab and self.session is not None and self.session.snapshot.root == request.snapshot.root:
+            if error is None and self.active_tab is tab:
+                image, quality = result
+                if tab.apply_preview(image, quality, generation=request.generation):
+                    self._update_selected_image_quality(tab)
+                    diagnostics = self._preview_quality_diagnostics(request, quality)
+                    fingerprint = tuple((item.node_id, item.source, item.message, item.cell) for item in diagnostics)
+                    if fingerprint != tab.quality_warning_fingerprint:
+                        tab.quality_warning_fingerprint = fingerprint
+                        if diagnostics:
+                            self._add_events(diagnostics)
+                            self.statusBar().showMessage(
+                                f"Изображений ниже 300 dpi: {len(diagnostics)}; сборка доступна",
+                                6000,
+                            )
+            elif error is not None and self.active_tab is tab and tab.fail_preview(str(error.diagnostic) if isinstance(error, ProjectError) else str(error), generation=request.generation):
+                self.event_list.setCurrentRow(self.event_list.count() - 1)
+                self.event_list.setFocus()
+            elif self.active_tab is not tab:
+                tab.preview_deferred = True
+        self._start_pending_preview()
+
+    def _preview_quality_diagnostics(self, request: PreviewRequest, quality) -> tuple[Diagnostic, ...]:
+        document = request.snapshot.documents[request.component_id]
+        binding = document.model.data
+        data = None
+        row = None
+        if binding is not None and self.controller.preview is not None:
+            data = self.controller.preview.cached_data(request.snapshot, request.component_id, component=document.model)
+            if data is not None:
+                row = next((item for item in data.rows if item.row_number == request.row_number), None)
+        source = binding.source if binding is not None else None
+        sheet = binding.sheet if binding is not None else None
+        indexed = locations(document.model)
+        diagnostics = []
+        for item in quality:
+            warning = item.diagnostic(document.path, source=source, sheet=sheet)
+            if warning is None:
+                continue
+            found = indexed.get(item.node_id)
+            if row is not None and found is not None:
+                node = found.node
+                column = (
+                    node.source_column if isinstance(node, ImageNode) and node.source_mode == "column"
+                    else node.content_column if isinstance(node, HtmlNode) and node.content_mode == "column"
+                    else None
+                )
+                cell = next((value.coordinate for name, value in row.values.items() if column and name.strip().casefold() == column.strip().casefold()), None)
+                warning = Diagnostic(
+                    warning.code, f"строка Excel {row.row_number}: {warning.message}",
+                    warning.path, warning.field, warning.line, warning.severity,
+                    warning.source, warning.sheet, cell, warning.node_id,
+                )
+            diagnostics.append(warning)
+        return tuple(diagnostics)
+
+    def _start_pending_preview(self) -> None:
+        pending, self._preview_pending = self._preview_pending, None
+        if pending is not None and self._tabs.get(pending.component_id) is pending:
+            if self.active_tab is pending and self._active_build_job is None:
+                self._preview_requested(pending)
+            else:
+                pending.preview_deferred = True
 
     def _row_changed(self, _index: int) -> None:
         tab = self.active_tab
@@ -823,6 +973,12 @@ class MainWindow(QMainWindow):
     def _start_build(self, active_only: bool) -> None:
         if self.session is None or self.controller.build is None or self._active_build_job is not None:
             return
+        if self._preview_active is not None or self._preview_pool.activeThreadCount():
+            if not self._build_retry_scheduled:
+                self._build_retry_scheduled = True
+                self.statusBar().showMessage("Предпросмотр завершает подготовку; сборка начнётся сразу после неё")
+                QTimer.singleShot(50, lambda: (setattr(self, "_build_retry_scheduled", False), self._start_build(active_only)))
+            return
         if not self.save_all():
             return
         mode = str(self.data_mode.currentData() or "prod")
@@ -883,6 +1039,11 @@ class MainWindow(QMainWindow):
             message = "\n".join(str(item) for item in result.diagnostics) or f"Сборка: {result.status}"
             QMessageBox.warning(self, "Сборка не завершена", message)
         self._update_actions()
+        if self.active_tab is not None and self.active_tab.canvas._pixmap_item is None:
+            self._refresh_preview(self.active_tab)
+        if self.active_tab is not None and self.active_tab.preview_deferred:
+            self.active_tab.preview_deferred = False
+            self._refresh_preview(self.active_tab)
         if self._close_after_build:
             self._close_after_build = False
             self.close()
@@ -1053,6 +1214,9 @@ class MainWindow(QMainWindow):
                     pass
             component = self.session.documents[tab.component_id].model
             self.element_properties.show_node(node, columns, component)
+            self.element_properties.show_image_quality(
+                item for item in tab.image_quality if item.node_id == node.id
+            )
             self.component_properties_group.hide()
             self.multi_properties_group.hide()
             self.element_properties_group.show()
@@ -1069,6 +1233,13 @@ class MainWindow(QMainWindow):
                 self.component_properties_group.show()
                 self.properties.show_component(self.session.documents[tab.component_id].model)
         self._update_actions()
+
+    def _update_selected_image_quality(self, tab: DocumentTab) -> None:
+        if tab is self.active_tab and len(tab.canvas.selected_ids) == 1:
+            node_id = tab.canvas.selected_ids[0]
+            self.element_properties.show_image_quality(
+                item for item in tab.image_quality if item.node_id == node_id
+            )
 
     def _edit_active_size(self, width: float, height: float) -> None:
         try:
@@ -1163,7 +1334,19 @@ class MainWindow(QMainWindow):
         self._update_actions()
 
     def _selected_ids(self) -> tuple[str, ...]:
-        return self.active_tab.canvas.selected_ids if self.active_tab is not None else ()
+        if self.active_tab is None:
+            return ()
+        selected = self.active_tab.canvas.selected_ids
+        if selected:
+            return selected
+        model = self.element_tree.selectionModel()
+        if model is None:
+            return ()
+        return tuple(
+            str(index.data(ID_ROLE))
+            for index in model.selectedRows()
+            if index.data(ID_ROLE) is not None
+        )
 
     def _apply_tree(self, label: str, operation, *args, selected: tuple[str, ...] | None = None, **kwargs) -> bool:
         tab = self.active_tab
@@ -1438,6 +1621,8 @@ class MainWindow(QMainWindow):
             return True
         if not self._confirm_document(tab.component_id):
             return False
+        tab.preview_timer.stop()
+        tab.preview_generation += 1
         self._tabs.pop(tab.component_id, None)
         self.undo_group.removeStack(tab.undo_stack)
         self.tabs.removeTab(index)
@@ -1489,9 +1674,12 @@ class MainWindow(QMainWindow):
             for component_id in tuple(self.session.documents):
                 self.controller.revert_document(component_id)
         for tab in self._tabs.values():
+            tab.preview_timer.stop()
+            tab.preview_generation += 1
             self.undo_group.removeStack(tab.undo_stack)
         self.tabs.clear()
         self._tabs.clear()
+        self._preview_pending = None
 
     def _refresh_component_tree(self) -> None:
         if self.session is None:
@@ -1586,6 +1774,10 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(message, 7000)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        for tab in self._tabs.values():
+            tab.preview_timer.stop()
+            tab.preview_generation += 1
+        self._preview_pool.waitForDone(10000)
         if self._active_build_job is not None:
             choice = QMessageBox.question(
                 self,

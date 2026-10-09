@@ -39,6 +39,7 @@ def write_print_pdf(
         scale = snapshot.print_settings.dpi / 25.4
         pen = QPen(QColor("#000000"))
         pen.setWidthF(snapshot.print_settings.cut_line_width_mm * scale)
+        painter.setRenderHint(QPainter.RenderHint.LosslessImageRendering, True)
         try:
             for page_number, page in enumerate(plan.pages):
                 cancellation.check()

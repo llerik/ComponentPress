@@ -79,6 +79,7 @@ def _save_pdf(image: QImage, target: Path, width_mm: float, height_mm: float, dp
         if not painter.isActive():
             raise ProjectError(Diagnostic("PDF_WRITE", "Qt не смог начать запись PDF", target))
         try:
+            painter.setRenderHint(QPainter.RenderHint.LosslessImageRendering, True)
             target_rect = QRectF(0, 0, writer.width(), writer.height())
             painter.drawImage(target_rect, image)
         finally:
@@ -99,6 +100,9 @@ def render_component_image(
     component: ComponentDefinition | None = None,
     dpi: int = 96,
     bindings_resolved: bool | None = None,
+    register_fonts: bool = True,
+    resource_loader: ProjectResourceLoader | None = None,
+    preserve_logical_size: bool = False,
 ) -> QImage:
     """Render an unpublished image for the editor or other in-memory previews."""
     ensure_gui_application()
@@ -117,16 +121,21 @@ def render_component_image(
     dpm = round(dpi / 0.0254)
     image.setDotsPerMeterX(dpm)
     image.setDotsPerMeterY(dpm)
+    # Keep the scene's logical 96-DPI geometry stable while retaining the
+    # higher-resolution backing pixels needed by the current zoom/DPR.
+    if preserve_logical_size:
+        image.setDevicePixelRatio(dpi / 96.0)
     image.fill(0)
-    loader = ProjectResourceLoader(snapshot.root)
-    with ProjectFonts(snapshot.root) as fonts:
+    loader = resource_loader or ProjectResourceLoader(snapshot.root)
+    def draw(fonts: ProjectFonts | None) -> None:
         def check_fonts(nodes: tuple[Node, ...]) -> None:
             for node in nodes:
                 if isinstance(node, HtmlNode):
                     fonts.require(node.font_family, owner=document.path, field=f"elements.{node.id}.font_family")
                 elif isinstance(node, GroupNode):
                     check_fonts(node.children)
-        check_fonts(rendered.elements)
+        if fonts is not None:
+            check_fonts(rendered.elements)
         painter = QPainter(image)
         if not painter.isActive():
             raise ProjectError(Diagnostic("RENDER_INIT", "не удалось создать растровый холст", document.path))
@@ -140,6 +149,11 @@ def render_component_image(
             )
         finally:
             painter.end()
+    if register_fonts:
+        with ProjectFonts(snapshot.root) as fonts:
+            draw(fonts)
+    else:
+        draw(None)
     return image
 
 

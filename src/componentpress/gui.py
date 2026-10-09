@@ -26,7 +26,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
         return False
     first_id = component_ids[0]
     first_tab = window.open_component(first_id)
-    if first_tab is None or not window._refresh_preview(first_tab):
+    if first_tab is None or not window._refresh_preview(first_tab) or not _wait_for_preview(first_tab):
         return False
     if window.session.documents[first_id].model.data is not None:
         if window.controller.preview is None:
@@ -105,7 +105,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     if first_tab is None or smoke_tab is None or window.tabs.count() != 2:
         return False
     window.tabs.setCurrentWidget(first_tab)
-    if not window._refresh_preview(first_tab):
+    if not window._refresh_preview(first_tab) or not _wait_for_preview(first_tab):
         return False
     if window.controller.build is None:
         window.controller.build = BuildService(window.controller.service)
@@ -144,6 +144,24 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     loop.exec()
     jobs = root / ".componentpress" / "jobs"
     return bool(cancelled and cancelled[0].status == "cancelled" and not any(jobs.iterdir()))
+
+
+def _wait_for_preview(tab, timeout_ms: int = 20000) -> bool:
+    expected = tab.preview_generation
+    if tab.displayed_generation >= expected and tab.canvas._pixmap_item is not None:
+        return True
+    loop = QEventLoop()
+    timer = QTimer()
+    timer.setInterval(10)
+    timer.timeout.connect(lambda: loop.quit() if tab.displayed_generation >= expected else None)
+    timeout = QTimer()
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(loop.quit)
+    timer.start()
+    timeout.start(timeout_ms)
+    loop.exec()
+    timer.stop()
+    return tab.displayed_generation >= expected and tab.canvas._pixmap_item is not None
 
 
 def main(argv: list[str] | None = None) -> int:

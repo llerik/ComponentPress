@@ -11,7 +11,7 @@ from .imposition import ImpositionPlan
 from .input_snapshot import BuildInputSnapshot
 
 
-APPLICATION_VERSION = "0.10"
+APPLICATION_VERSION = "0.11"
 
 
 def sha256(path: Path) -> str:
@@ -63,7 +63,20 @@ def write_report(
             "png": len(snapshot.instances),
             "pages": len(plan.pages),
         },
-        "warnings": [],
+        "warnings": [
+            {
+                "code": item.code,
+                "severity": item.severity,
+                "message": item.message,
+                "path": str(item.path) if item.path else None,
+                "field": item.field,
+                "node_id": item.node_id,
+                "source": item.source,
+                "sheet": item.sheet,
+                "cell": item.cell,
+            }
+            for item in snapshot.warnings
+        ],
     }
     atomic_write(target, (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
     return target

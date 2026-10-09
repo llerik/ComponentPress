@@ -41,10 +41,11 @@ class BindingLocation:
 
 
 class BindingResolver:
-    def __init__(self, root: Path, project: ProjectDefinition, loader: ProjectResourceLoader | None = None):
+    def __init__(self, root: Path, project: ProjectDefinition, loader: ProjectResourceLoader | None = None, *, validate_resources: bool = True):
         self.root = root
         self.project = project
         self.loader = loader if loader is not None else ProjectResourceLoader(root)
+        self.validate_resources = validate_resources
         self.environment = SandboxedEnvironment(undefined=StrictUndefined, autoescape=False)
 
     def _expression(self, kind: str, name: str, context: dict[str, object]) -> str:
@@ -141,10 +142,11 @@ class BindingResolver:
             validate_relative_path(value)
         except ProjectError as exc:
             raise self._resource_error(exc, location, source_cell) from exc
-        try:
-            self.loader.image(value, owner=location.owner, field=location.field)
-        except ProjectError as exc:
-            raise self._resource_error(exc, location, source_cell) from exc
+        if self.validate_resources:
+            try:
+                self.loader.image(value, owner=location.owner, field=location.field)
+            except ProjectError as exc:
+                raise self._resource_error(exc, location, source_cell) from exc
         return value
 
     def resolve_html(self, template: str, row: DataRow | None, location: BindingLocation) -> str:
@@ -154,15 +156,16 @@ class BindingResolver:
         html = "".join(parser.output)
         validate_html(html, location.owner, location.field)
         # One common resource boundary for static, variable and column paths.
-        for source, cell in parser.resources:
-            try:
-                self.loader.image(source, owner=location.owner, field=f"{location.field}.img.src")
-            except ProjectError as exc:
-                attr_location = BindingLocation(
-                    location.owner, f"{location.field}.img.src", location.node_id,
-                    location.source, location.sheet,
-                )
-                raise self._resource_error(exc, attr_location, cell) from exc
+        if self.validate_resources:
+            for source, cell in parser.resources:
+                try:
+                    self.loader.image(source, owner=location.owner, field=f"{location.field}.img.src")
+                except ProjectError as exc:
+                    attr_location = BindingLocation(
+                        location.owner, f"{location.field}.img.src", location.node_id,
+                        location.source, location.sheet,
+                    )
+                    raise self._resource_error(exc, attr_location, cell) from exc
         return html
 
     @staticmethod
@@ -202,7 +205,8 @@ class BindingResolver:
                         path_template = self._cell_text(cell, location, node.source_column or "")
                         try:
                             validate_relative_path(path_template)
-                            self.loader.image(path_template, owner=owner, field=location.field)
+                            if self.validate_resources:
+                                self.loader.image(path_template, owner=owner, field=location.field)
                         except ProjectError as exc:
                             raise self._resource_error(exc, location, cell) from exc
                         resolved_path = path_template
@@ -228,7 +232,7 @@ class BindingResolver:
                         if parse_references(html):
                             raise ProjectError(Diagnostic("COLUMN_TEMPLATE_FORBIDDEN", "содержимое Excel не может содержать подстановки", owner, location.field, source=source, sheet=sheet, cell=cell.coordinate, node_id=node.id))
                         html = expand_html_icons(
-                            html, self.project.icons, loader=self.loader, owner=owner,
+                            html, self.project.icons, loader=self.loader if self.validate_resources else None, owner=owner,
                             field=location.field, source=source, sheet=sheet,
                             cell=cell.coordinate, node_id=node.id,
                         )

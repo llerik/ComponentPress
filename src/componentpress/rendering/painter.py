@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor, QPainter
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
-from .geometry import HTML_DPI, MM_PER_INCH
+from .geometry import HTML_DPI, MM_PER_INCH, image_fit_geometry
 from .html_document import prepare_html
 from .resources import ProjectResourceLoader
 
@@ -19,26 +19,10 @@ def _draw_image(painter: QPainter, node: ImageNode, loader: ProjectResourceLoade
     target = QRectF(x, y, node.width_mm, node.height_mm)
     painter.save()
     painter.setClipRect(target, Qt.ClipOperation.IntersectClip)
-    if node.fit == "stretch":
-        painter.drawImage(target, image)
-    else:
-        source_ratio = image.width() / image.height()
-        target_ratio = node.width_mm / node.height_mm
-        if node.fit == "contain":
-            if source_ratio > target_ratio:
-                width, height = node.width_mm, node.width_mm / source_ratio
-            else:
-                width, height = node.height_mm * source_ratio, node.height_mm
-            fitted = QRectF(x + (node.width_mm - width) / 2, y + (node.height_mm - height) / 2, width, height)
-            painter.drawImage(fitted, image)
-        else:
-            if source_ratio > target_ratio:
-                crop_width = image.height() * target_ratio
-                source_rect = QRectF((image.width() - crop_width) / 2, 0, crop_width, image.height())
-            else:
-                crop_height = image.width() / target_ratio
-                source_rect = QRectF(0, (image.height() - crop_height) / 2, image.width(), crop_height)
-            painter.drawImage(target, image, source_rect)
+    tx, ty, tw, th, sx, sy, sw, sh = image_fit_geometry(
+        image.width(), image.height(), x, y, node.width_mm, node.height_mm, node.fit
+    )
+    painter.drawImage(QRectF(tx, ty, tw, th), image, QRectF(sx, sy, sw, sh))
     painter.restore()
 
 

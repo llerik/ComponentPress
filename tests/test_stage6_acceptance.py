@@ -340,6 +340,7 @@ def test_cli_preview_export_and_gui_canvas_use_same_resolved_pixels(tmp_path: Pa
     assert tab is not None
     fox_index = window.data_row.findData(3)
     window.data_row.setCurrentIndex(fox_index)
+    qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
     canvas_image = tab.canvas._pixmap_item.pixmap().toImage()
     exported_image = QImage(str(expected))
     assert canvas_image.size() == exported_image.size()
@@ -439,6 +440,7 @@ def test_static_gui_canvas_matches_static_cli_export_with_project_variables(tmp_
     window.load_session(project_service().open_session(root))
     tab = window.open_component("forest-card")
     assert tab is not None
+    qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
     canvas_image = tab.canvas._pixmap_item.pixmap().toImage()
     exported_image = QImage(str(exported))
     assert canvas_image.size() == exported_image.size()

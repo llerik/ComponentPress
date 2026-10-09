@@ -124,6 +124,7 @@ def editor(tmp_path: Path, qtbot) -> tuple[MainWindow, Path]:
     window.show()
     tab = window.open_component("forest-card")
     assert tab is not None
+    qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
     return window, root
 
 

@@ -63,6 +63,7 @@ class ComponentCanvas(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         self._has_image = False
         self._pixmap_item: QGraphicsPixmapItem | None = None
         self._component: ComponentDefinition | None = None
@@ -77,6 +78,8 @@ class ComponentCanvas(QGraphicsView):
         self._nudge_ids: tuple[str, ...] = ()
         self._nudge_delta = QPointF()
         self._nudge_starts: dict[str, QPointF] = {}
+        self._world_per_mm_x = 96.0 / 25.4
+        self._world_per_mm_y = 96.0 / 25.4
         self.scene().selectionChanged.connect(self._scene_selection_changed)
 
     @property
@@ -144,8 +147,8 @@ class ComponentCanvas(QGraphicsView):
         if self._pixmap_item is None:
             self._syncing_selection = False
             return
-        sx = self._pixmap_item.pixmap().width() / component.size_mm.width
-        sy = self._pixmap_item.pixmap().height() / component.size_mm.height
+        sx = self._pixmap_item.boundingRect().width() / component.size_mm.width
+        sy = self._pixmap_item.boundingRect().height() / component.size_mm.height
         order = 0
 
         def add(nodes: tuple[Node, ...]) -> None:
@@ -200,6 +203,14 @@ class ComponentCanvas(QGraphicsView):
         self.selectionChanged.emit(())
         self.viewport().update()
 
+    def release_preview(self) -> None:
+        """Drop the high-resolution backing image while retaining scene/model state."""
+        if self._pixmap_item is not None and self._pixmap_item.scene() is self.scene():
+            self.scene().removeItem(self._pixmap_item)
+        self._pixmap_item = None
+        self._has_image = False
+        self.viewport().update()
+
     def clear_selection(self) -> None:
         self.select_ids(())
         self.selectionChanged.emit(())
@@ -241,13 +252,13 @@ class ComponentCanvas(QGraphicsView):
                 self.cancel_tool()
                 event.accept()
                 return
-            x_mm = point.x() * self._component.size_mm.width / self._pixmap_item.pixmap().width()
-            y_mm = point.y() * self._component.size_mm.height / self._pixmap_item.pixmap().height()
+            x_mm = point.x() / self._world_per_mm_x
+            y_mm = point.y() / self._world_per_mm_y
             width_mm, height_mm = (30.0, 30.0) if tool == "image" else (40.0, 15.0)
             width_mm = max(0.001, min(width_mm, self._component.size_mm.width - x_mm))
             height_mm = max(0.001, min(height_mm, self._component.size_mm.height - y_mm))
-            sx = self._pixmap_item.pixmap().width() / self._component.size_mm.width
-            sy = self._pixmap_item.pixmap().height() / self._component.size_mm.height
+            sx = self._world_per_mm_x
+            sy = self._world_per_mm_y
             pending = self.scene().addRect(
                 QRectF(x_mm * sx, y_mm * sy, width_mm * sx, height_mm * sy),
                 QPen(QColor("#14A44D"), 0, Qt.PenStyle.DashLine),
@@ -316,8 +327,8 @@ class ComponentCanvas(QGraphicsView):
             return
         point = self.mapToScene(event.position().toPoint())
         delta = point - self._drag_start
-        sx = self._component.size_mm.width / self._pixmap_item.pixmap().width()
-        sy = self._component.size_mm.height / self._pixmap_item.pixmap().height()
+        sx = 1 / self._world_per_mm_x
+        sy = 1 / self._world_per_mm_y
         if self._resize_id is not None and self._resize_rect is not None:
             rect = self._overlays[self._resize_id].rect()
             component_before = self._component
@@ -373,8 +384,8 @@ class ComponentCanvas(QGraphicsView):
                     dx *= amount / 0.1
                 if dy:
                     dy *= amount / 0.1
-                sx = self._pixmap_item.pixmap().width() / self._component.size_mm.width
-                sy = self._pixmap_item.pixmap().height() / self._component.size_mm.height
+                sx = self._world_per_mm_x
+                sy = self._world_per_mm_y
                 self._nudge_delta += QPointF(dx * sx, dy * sy)
                 for node_id, start in self._nudge_starts.items():
                     self._overlays[node_id].setPos(start + self._nudge_delta)
@@ -393,8 +404,8 @@ class ComponentCanvas(QGraphicsView):
         if self._nudge_key is None:
             return
         if self._component is not None and self._pixmap_item is not None and (self._nudge_delta.x() or self._nudge_delta.y()):
-            sx = self._component.size_mm.width / self._pixmap_item.pixmap().width()
-            sy = self._component.size_mm.height / self._pixmap_item.pixmap().height()
+            sx = 1 / self._world_per_mm_x
+            sy = 1 / self._world_per_mm_y
             component_before = self._component
             starts = dict(self._nudge_starts)
             self.nudgeRequested.emit(self._nudge_ids, self._nudge_delta.x() * sx, self._nudge_delta.y() * sy)
@@ -418,13 +429,13 @@ class ComponentCanvas(QGraphicsView):
         self.zoomChanged.emit(self.zoom_percent)
 
     def actual_size(self) -> None:
-        if not self._has_image:
+        if self._component is None:
             return
         self.resetTransform()
         self.zoomChanged.emit(100)
 
     def zoom_by(self, factor: float) -> None:
-        if not self._has_image:
+        if self._component is None:
             return
         current = self.transform().m11()
         target = min(8.0, max(0.1, current * factor))
