@@ -27,6 +27,22 @@ class PreviewService:
         self._versions: dict[tuple[object, ...], int] = {}
         self._requested: dict[tuple[Path, str], int] = {}
 
+    def invalidate(self, root: Path | None = None) -> None:
+        """Drop validated data when the project settings or source change."""
+        if root is None:
+            self._data.clear()
+            self._versions.clear()
+            self._requested.clear()
+            return
+        resolved = root.resolve()
+        for key in tuple(self._data):
+            if key[0] == resolved:
+                self._data.pop(key, None)
+                self._versions.pop(key, None)
+        for key in tuple(self._requested):
+            if key[0] == resolved:
+                self._requested.pop(key, None)
+
     def begin_refresh(self, root: Path, component_id: str) -> int:
         key = (root.resolve(), component_id)
         request = self._requested.get(key, 0) + 1

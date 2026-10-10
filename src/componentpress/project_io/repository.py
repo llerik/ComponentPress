@@ -17,7 +17,7 @@ from componentpress.bindings.grammar import parse_references
 from componentpress.platforms.services import ProjectWriteLock
 from .files import atomic_create, atomic_write, file_hash
 from .paths import check_case_collisions, check_exact_case, resolve_project_path
-from .transactions import recover, register_component
+from .transactions import change_component_membership, recover, recover_component_membership, register_component
 from .migrations import migrate_v1_to_v2, migration_required, recover_migration, recovery_required
 from .schema_checks import preflight_project_schemas
 from .yaml_codec import _load, dump_yaml, html_image_sources, parse_component, parse_project, update_tree
@@ -88,6 +88,9 @@ class FileProjectRepository:
         if (root / ".componentpress" / "transactions" / "add-component.json").exists():
             with ProjectWriteLock(root):
                 recover(root)
+        if (root / ".componentpress" / "transactions" / "component-membership.json").exists():
+            with ProjectWriteLock(root):
+                recover_component_membership(root)
         check_case_collisions(root)
         text, disk_hash = _read_text(project_path)
         model, _ = parse_project(text, project_path)
@@ -216,17 +219,26 @@ class FileProjectRepository:
             atomic_write(checked.path, checked.text.encode("utf-8"), snapshot.documents[component_id].disk_hash)
         return self.open(snapshot.root)
 
-    def add_component(self, snapshot: ProjectSnapshot, component_id: str, name: str) -> ProjectSnapshot:
+    def add_component(self, snapshot: ProjectSnapshot, component_id: str, name: str, **values: object) -> ProjectSnapshot:
         if not re.fullmatch(r"[a-z][a-z0-9-]*", component_id):
             raise ProjectError(Diagnostic("COMPONENT_ID", "ID: строчные латинские буквы, цифры и дефис", snapshot.root))
         if component_id in snapshot.documents:
             raise ProjectError(Diagnostic("COMPONENT_ID_DUPLICATE", "компонент уже зарегистрирован", snapshot.root))
         path = f"components/{component_id}.yaml"
-        component_text = (
-            f"schema_version: {SCHEMA_VERSION}\nid: {component_id}\nname: {json.dumps(name, ensure_ascii=False)}\n"
-            "size_mm:\n  width: 63\n  height: 88\nbackground: \"#FFFFFF\"\n"
-            "elements: []\n"
+        from componentpress.domain.component import ComponentDefinition, DataBinding, SizeMM
+        width_mm = float(values.get("width_mm", 63))
+        height_mm = float(values.get("height_mm", 88))
+        binding = values.get("data")
+        component = ComponentDefinition(
+            schema_version=SCHEMA_VERSION, id=component_id, name=name,
+            size_mm=SizeMM(width=width_mm, height=height_mm),
+            data=binding if isinstance(binding, DataBinding) else None,
         )
+        from ruamel.yaml import YAML
+        from io import StringIO
+        stream = StringIO()
+        YAML().dump(component.model_dump(mode="json", exclude_none=True), stream)
+        component_text = stream.getvalue()
         project_model, tree = parse_project(snapshot.text, snapshot.root / "project.yaml")
         parse_component(component_text, snapshot.root / path, project_model.variables)
         tree["components"].append({"id": component_id, "path": path})
@@ -235,3 +247,72 @@ class FileProjectRepository:
         with ProjectWriteLock(snapshot.root):
             register_component(snapshot.root, path, component_text.encode("utf-8"), project_text.encode("utf-8"), snapshot.disk_hash)
         return self.open(snapshot.root)
+
+    def remove_component(self, snapshot: ProjectSnapshot, component_id: str, *, backup_path: str) -> tuple[ProjectSnapshot, bytes, int, str]:
+        reference = next((item for item in snapshot.model.components if item.id == component_id), None)
+        document = snapshot.documents.get(component_id)
+        if reference is None or document is None:
+            raise ProjectError(Diagnostic("COMPONENT_UNKNOWN", "компонент не найден", snapshot.root))
+        if len(snapshot.model.components) <= 1:
+            raise ProjectError(Diagnostic("COMPONENT_LAST", "нельзя удалить последний компонент проекта", snapshot.root))
+        raw = document.path.read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        project_model, tree = parse_project(snapshot.text, snapshot.root / "project.yaml")
+        position = next(i for i, item in enumerate(project_model.components) if item.id == component_id)
+        tree["components"].pop(position)
+        new_text = dump_yaml(tree)
+        parse_project(new_text, snapshot.root / "project.yaml")
+        with ProjectWriteLock(snapshot.root):
+            if file_hash(snapshot.root / "project.yaml") != snapshot.disk_hash:
+                raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "описание проекта изменено после чтения", snapshot.root / "project.yaml"))
+            if file_hash(document.path) != document.disk_hash:
+                raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "компонент изменён после чтения", document.path))
+            change_component_membership(
+                snapshot.root, operation="remove", relative_path=reference.path, backup_path=backup_path,
+                project_bytes=new_text.encode("utf-8"), old_project_hash=snapshot.disk_hash, component_hash=digest,
+            )
+        checked_project, _ = parse_project(new_text, snapshot.root / "project.yaml")
+        documents = dict(snapshot.documents)
+        documents.pop(component_id)
+        committed = ProjectSnapshot(
+            snapshot.root, new_text, hashlib.sha256(new_text.encode("utf-8")).hexdigest(),
+            checked_project, MappingProxyType(documents),
+        )
+        return committed, raw, position, reference.path
+
+    def restore_component(self, snapshot: ProjectSnapshot, component_id: str, *, reference_path: str,
+                          backup_path: str, component_hash: str, position: int) -> ProjectSnapshot:
+        from .paths import resolve_project_path
+        backup = resolve_project_path(snapshot.root, backup_path)
+        if not backup.is_file() or file_hash(backup) != component_hash:
+            raise ProjectError(Diagnostic("COMPONENT_HISTORY", "снимок удалённого компонента отсутствует или изменён", backup))
+        component_bytes = backup.read_bytes()
+        component_text = component_bytes.decode("utf-8")
+        component_model, _ = parse_component(component_text, snapshot.root / reference_path, snapshot.model.variables)
+        if component_id in snapshot.documents or any(ref.path.casefold() == reference_path.casefold() for ref in snapshot.model.components):
+            raise ProjectError(Diagnostic("COMPONENT_HISTORY_CONFLICT", "ID или путь компонента уже используется", snapshot.root / reference_path))
+        from ruamel.yaml.comments import CommentedMap
+        project_model, tree = parse_project(snapshot.text, snapshot.root / "project.yaml")
+        refs = tree["components"]
+        index = max(0, min(position, len(refs)))
+        ref = CommentedMap(id=component_id, path=reference_path)
+        refs.insert(index, ref)
+        new_text = dump_yaml(tree)
+        parse_project(new_text, snapshot.root / "project.yaml")
+        with ProjectWriteLock(snapshot.root):
+            if file_hash(snapshot.root / "project.yaml") != snapshot.disk_hash:
+                raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "описание проекта изменено после чтения", snapshot.root / "project.yaml"))
+            change_component_membership(
+                snapshot.root, operation="restore", relative_path=reference_path, backup_path=backup_path,
+                project_bytes=new_text.encode("utf-8"), old_project_hash=snapshot.disk_hash, component_hash=component_hash,
+            )
+        checked_project, _ = parse_project(new_text, snapshot.root / "project.yaml")
+        documents = dict(snapshot.documents)
+        component_snapshot = DocumentSnapshot(
+            snapshot.root / reference_path, component_text, component_hash, component_model,
+        )
+        documents[component_id] = component_snapshot
+        return ProjectSnapshot(
+            snapshot.root, new_text, hashlib.sha256(new_text.encode("utf-8")).hexdigest(),
+            checked_project, MappingProxyType(documents),
+        )

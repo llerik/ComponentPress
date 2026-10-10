@@ -223,6 +223,7 @@ def test_gui_data_panel_switch_refresh_insert_and_export(tmp_path: Path, qtbot, 
     window.show()
     tab = window.open_component("forest-card")
     assert tab is not None
+    window._validate_active()
     assert window.data_source.currentData() == "main"
     assert window.data_sheet.currentData() == "Карты"
     assert window.data_row.count() == 1
@@ -429,13 +430,16 @@ def test_gui_applied_yaml_binding_uses_new_sheet_not_cached_data(tmp_path: Path,
     window.load_session(project_service().open_session(root))
     window.show()
     tab = window.open_component("event-card")
-    assert tab is not None and tab.resolved_component is not None
+    assert tab is not None and tab.resolved_component is None
+    window._validate_active()
+    assert tab.resolved_component is not None
     assert "Лесной дождь" in repr(tab.resolved_component)
 
     window._request_mode(tab, "text")
     tab.text_editor.setPlainText(tab.text_editor.toPlainText().replace('sheet: "События"', 'sheet: "Карты"'))
     assert window._apply_draft("event-card")
     window._request_mode(tab, "layout")
+    window._validate_active()
     assert tab.resolved_component is not None
     assert "Волк" in repr(tab.resolved_component)
     current = window.session.documents["event-card"].model

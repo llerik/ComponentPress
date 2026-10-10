@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "componentpress"
-version = "0.1.0"
+version = "0.14"
 description = "Редактор печатных компонентов настольных игр"
 requires-python = ">=3.14"
 dependencies = [

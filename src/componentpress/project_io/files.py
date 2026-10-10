@@ -51,3 +51,15 @@ def atomic_create(path: Path, data: bytes) -> str:
         if temporary and Path(temporary).exists():
             Path(temporary).unlink()
     return hashlib.sha256(data).hexdigest()
+
+
+def atomic_move(source: Path, target: Path) -> None:
+    """Move one owned file without replacing an existing target."""
+    if target.exists():
+        raise ProjectError(Diagnostic("FILE_EXISTS", "файл уже существует", target))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.link(source, target)
+        source.unlink()
+    except OSError as exc:
+        raise ProjectError(Diagnostic("FILE_WRITE", str(exc), source)) from exc

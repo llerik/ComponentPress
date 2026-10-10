@@ -59,6 +59,20 @@ def preflight_project_schemas(root: Path) -> None:
                     if exc.diagnostic.code not in {"YAML_STRUCTURE", "YAML_SYNTAX", "YAML_UNSUPPORTED", "TEXT_ENCODING"}:
                         raise
 
+    membership_journal = root / ".componentpress" / "transactions" / "component-membership.json"
+    if membership_journal.is_file():
+        import json
+
+        try:
+            record = json.loads(membership_journal.read_text(encoding="utf-8"))
+            backup_path = record.get("backup")
+            if isinstance(backup_path, str):
+                backup = resolve_project_path(root, backup_path)
+                if backup.is_file():
+                    check_schema(backup)
+        except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+            return  # Recovery reports malformed transaction state without writing.
+
     # An interrupted migration may restore an old YAML document from its backup.
     migration_journal = root / ".componentpress" / "migrations" / "v1-to-v2-active.json"
     if migration_journal.is_file():

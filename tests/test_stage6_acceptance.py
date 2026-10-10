@@ -338,6 +338,7 @@ def test_cli_preview_export_and_gui_canvas_use_same_resolved_pixels(tmp_path: Pa
     window.load_session(project_service().open_session(root))
     tab = window.open_component("forest-card")
     assert tab is not None
+    window._validate_active()
     fox_index = window.data_row.findData(3)
     window.data_row.setCurrentIndex(fox_index)
     qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
@@ -502,7 +503,9 @@ def test_gui_prod_test_preview_filters_validated_snapshot(tmp_path: Path, qtbot)
     window.load_session(project_service().open_session(root))
     try:
         tab = window.open_component("forest-card")
-        assert tab is not None and tab.preview_row_number == 2
+        assert tab is not None and tab.preview_row_number is None
+        window._validate_active()
+        assert tab.preview_row_number == 2
         data = controller.preview.data(window.session.snapshot, "forest-card")
         assert data is not None and len(data.rows) == 2
         window.data_mode.setCurrentIndex(1)

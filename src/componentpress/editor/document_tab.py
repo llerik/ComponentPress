@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QVBoxLayout,
     QWidget,
+    QStyle,
 )
 
 from componentpress.application.sessions import ProjectSession
@@ -81,6 +82,13 @@ class DocumentTab(QWidget):
         for button in (self.layout_mode, self.text_mode):
             button.setCheckable(True)
             self.mode_group.addButton(button)
+            button.setToolTip("Перетаскивание" if button is self.layout_mode else "Текст")
+            button.setAccessibleName(button.toolTip())
+            button.setText("")
+            button.setIcon(self.style().standardIcon(
+                QStyle.StandardPixmap.SP_FileDialogDetailedView if button is self.layout_mode
+                else QStyle.StandardPixmap.SP_FileDialogContentsView
+            ))
             controls.addWidget(button)
         self.layout_mode.setChecked(True)
         controls.addStretch()
@@ -96,6 +104,7 @@ class DocumentTab(QWidget):
         self.zoom_label.setObjectName("zoomLabel")
         for widget in (minus, plus, fit, actual, self.zoom_label):
             controls.addWidget(widget)
+        self.zoom_controls = (minus, plus, fit, actual, self.zoom_label)
         layout.addLayout(controls)
         self.canvas = ComponentCanvas()
         self.preview_timer = QTimer(self)
@@ -140,6 +149,8 @@ class DocumentTab(QWidget):
         self.pages.setCurrentIndex(1 if text else 0)
         self.text_mode.setChecked(text)
         self.layout_mode.setChecked(not text)
+        for widget in self.zoom_controls:
+            widget.setVisible(not text)
 
     def set_text(self, text: str) -> None:
         if self.text_editor.toPlainText() == text:

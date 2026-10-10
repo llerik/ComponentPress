@@ -192,6 +192,7 @@ def test_gui_mode_switch_uses_cached_excel_snapshot(tmp_path: Path, monkeypatch:
     window.load_session(session)
     tab = window.open_component("forest-card")
     assert tab is not None and window.controller.preview is not None
+    window._validate_active()
 
     def fail_read(*_args, **_kwargs):
         raise AssertionError("GUI mode switch attempted an XLSX read")

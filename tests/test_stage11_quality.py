@@ -119,7 +119,7 @@ def test_low_resolution_image_is_reported_without_blocking_build(tmp_path: Path)
     assert result.status == "succeeded", result.diagnostics
     assert result.report_path is not None
     report = json.loads(result.report_path.read_text(encoding="utf-8"))
-    assert report["application_version"] == "0.11"
+    assert report["application_version"] == "0.14"
     warnings = [item for item in report["warnings"] if item["code"] == "IMAGE_DPI_LOW"]
     assert warnings and all(item["severity"] == "warning" for item in warnings)
     assert all("эффективное разрешение" in item["message"] for item in warnings)

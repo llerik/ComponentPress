@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
+from types import MappingProxyType
+import hashlib
 
 from pydantic import ValidationError
 from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QThreadPool, QTimer, Qt
-from PySide6.QtGui import QAction, QColor, QCloseEvent, QKeySequence, QUndoGroup
+from PySide6.QtGui import QAction, QColor, QCloseEvent, QKeySequence, QUndoGroup, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QColorDialog,
@@ -24,6 +27,12 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QSplitter,
     QTabWidget,
+    QDockWidget,
+    QToolBar,
+    QToolButton,
+    QMenu,
+    QScrollArea,
+    QStyle,
     QTreeView,
     QVBoxLayout,
     QWidget,
@@ -68,6 +77,9 @@ from .properties import ComponentProperties, ElementProperties
 from .preview_worker import PreviewFontReadTask, PreviewRequest, PreviewSignals, PreviewTask
 from .version_worker import VersionTask
 from .qt_models import ID_ROLE, LayerTreeView, component_model, element_model
+from .component_dialog import ComponentDialog
+from .ui_state import UiState
+from .project_settings_dialog import ProjectSettingsDialog
 
 
 class MainWindow(QMainWindow):
@@ -86,6 +98,8 @@ class MainWindow(QMainWindow):
         self._preview_signals.finished.connect(self._preview_task_finished, Qt.ConnectionType.QueuedConnection)
         self._preview_active: tuple[DocumentTab, PreviewRequest, ProjectFonts | None] | None = None
         self._preview_pending: DocumentTab | None = None
+        self._preview_frames: dict[tuple[str, int, int | None], object] = {}
+        self._preview_zoom = 1.0
         self._build_retry_scheduled = False
         self._version_pool = QThreadPool(self)
         self._version_pool.setMaxThreadCount(1)
@@ -95,11 +109,16 @@ class MainWindow(QMainWindow):
         self._version_cancellation: CancellationToken | None = None
         self._version_progress: QProgressDialog | None = None
         self.undo_group = QUndoGroup(self)
+        self._component_history: list[dict] = []
+        self._component_history_index = 0
+        self._project_history_focus = False
+        self.ui_state = UiState()
         self.setObjectName("mainWindow")
         self.setWindowTitle("ComponentPress")
         self.resize(1280, 800)
         self._build_actions()
         self._build_ui()
+        self.ui_state.restore(self)
         self._connect_signals()
         self._update_actions()
 
@@ -130,11 +149,11 @@ class MainWindow(QMainWindow):
         self.export_png_zip_action = self._action("Экспорт PNG ZIP…")
         self.add_component_action = self._action("Добавить компонент…", "Ctrl+Shift+N")
         self.project_settings_action = self._action("Настройки проекта…")
-        self.undo_action = self.undo_group.createUndoAction(self, "Отменить")
-        self.undo_action.setShortcut(QKeySequence.StandardKey.Undo)
-        self.redo_action = self.undo_group.createRedoAction(self, "Повторить")
-        self.redo_action.setShortcut(QKeySequence.StandardKey.Redo)
+        self.about_action = self._action("О программе")
+        self.undo_action = self._action("Отменить", QKeySequence.StandardKey.Undo)
+        self.redo_action = self._action("Повторить", QKeySequence.StandardKey.Redo)
         self.delete_action = self._action("Удалить элементы", QKeySequence.StandardKey.Delete)
+        self.delete_component_action = self._action("Удалить компонент…")
         self.group_action = self._action("Сгруппировать", "Ctrl+G")
         self.ungroup_action = self._action("Разгруппировать", "Ctrl+Shift+G")
         self.zoom_in_action = self._action("Увеличить", QKeySequence.StandardKey.ZoomIn)
@@ -145,65 +164,94 @@ class MainWindow(QMainWindow):
         self.cancel_build_action = self._action("Отменить сборку")
         self.open_build_action = self._action("Открыть папку результата")
         self.open_pdf_action = self._action("Открыть печатный PDF")
-        file_menu = self.menuBar().addMenu("Файл")
-        file_menu.addActions([self.new_action, self.open_action, self.import_project_archive_action])
-        file_menu.addSeparator()
-        file_menu.addActions([self.save_action, self.save_all_action, self.close_tab_action])
-        file_menu.addSeparator()
-        file_menu.addActions([self.export_png_zip_action, self.export_project_archive_action])
-        file_menu.addSeparator()
-        file_menu.addAction(self.exit_action)
-        edit_menu = self.menuBar().addMenu("Правка")
-        edit_menu.addActions([self.undo_action, self.redo_action])
-        edit_menu.addSeparator()
-        edit_menu.addActions([self.delete_action, self.group_action, self.ungroup_action])
-        project_menu = self.menuBar().addMenu("Проект")
-        project_menu.addAction(self.add_component_action)
-        project_menu.addAction(self.project_settings_action)
-        build_menu = self.menuBar().addMenu("Сборка")
-        build_menu.addActions([
+        self.validate_active_action = self._action("Проверить активный лист")
+        self.validate_all_action = self._action("Проверить все листы")
+        self.file_menu = self.menuBar().addMenu("Файл")
+        self.file_menu.addActions([self.new_action, self.open_action])
+        self.file_menu.addSeparator()
+        self.import_menu = self.file_menu.addMenu("Импорт")
+        self.import_menu.addAction(self.import_project_archive_action)
+        self.export_menu = self.file_menu.addMenu("Экспорт")
+        self.export_menu.addActions([self.export_png_zip_action, self.export_project_archive_action])
+        self.file_menu.addSeparator()
+        self.file_menu.addActions([self.project_settings_action, self.add_component_action])
+        self.file_menu.addSeparator()
+        self.file_menu.addActions([self.save_action, self.save_all_action, self.close_tab_action])
+        self.file_menu.addSeparator()
+        self.file_menu.addAction(self.exit_action)
+        self.edit_menu = self.menuBar().addMenu("Правка")
+        self.edit_menu.addActions([self.undo_action, self.redo_action])
+        self.edit_menu.addSeparator()
+        self.edit_menu.addActions([self.delete_action, self.delete_component_action, self.group_action, self.ungroup_action])
+        self.build_menu = self.menuBar().addMenu("Сборка")
+        self.build_menu.addActions([
             self.build_all_action,
             self.build_active_action,
             self.cancel_build_action,
             self.open_build_action,
             self.open_pdf_action,
         ])
-        view_menu = self.menuBar().addMenu("Вид")
-        view_menu.addActions([self.zoom_in_action, self.zoom_out_action, self.fit_action])
+        self.about_menu = self.menuBar().addMenu("О программе")
+        self.about_menu.addAction(self.about_action)
 
     def _build_ui(self) -> None:
         self.data_mode = QComboBox()
         self.data_mode.setObjectName("dataMode")
         self.data_mode.addItem("Prod", "prod")
         self.data_mode.addItem("Test", "test")
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setObjectName("mainSplitter")
-        self.left_panel = self._left_panel()
-        splitter.addWidget(self.left_panel)
         self.tabs = QTabWidget()
         self.tabs.setObjectName("documentTabs")
         self.tabs.setTabsClosable(True)
         self.tabs.setMovable(True)
         self.tabs.setDocumentMode(True)
-        self.tabs.setMinimumWidth(500)
-        splitter.addWidget(self.tabs)
+        self.tabs.setMinimumWidth(0)
+        self.setCentralWidget(self.tabs)
         self.right_panel = self._right_panel()
-        splitter.addWidget(self.right_panel)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([230, 800, 280])
-        central = QWidget()
-        central_layout = QVBoxLayout(central)
-        quick = QHBoxLayout()
-        quick.addWidget(QLabel("Режим тиража"))
-        quick.addWidget(self.data_mode)
-        quick.addStretch()
-        central_layout.addLayout(quick)
-        central_layout.addWidget(splitter, 1)
-        self.setCentralWidget(central)
+        self.toolbox_dock = QDockWidget("Инструменты", self)
+        self.toolbox_dock.setObjectName("toolboxDock")
+        self.right_dock = QDockWidget("Рабочие панели", self)
+        self.right_dock.setObjectName("rightDock")
+        self.right_dock.setWidget(self.right_panel)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.right_dock)
+        self.left_panel = self._left_panel()
+        self.toolbox_dock.setWidget(self.left_panel)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.toolbox_dock)
+        self.events_dock = QDockWidget("События", self)
+        self.events_dock.setObjectName("eventsDock")
+        self.events_dock.setWidget(self._events_panel())
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.events_dock)
+        self.preview_dock = QDockWidget("Превью", self)
+        self.preview_dock.setObjectName("previewDock")
+        self.preview_dock.setWidget(self._preview_panel())
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.preview_dock)
+        self.splitDockWidget(self.events_dock, self.preview_dock, Qt.Orientation.Horizontal)
+        self.quick_toolbar = QToolBar("Быстрые действия", self)
+        self.quick_toolbar.setObjectName("quickActions")
+        self.quick_toolbar.setMovable(False)
+        self.quick_toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.quick_toolbar)
+        self.quick_toolbar.addWidget(QLabel("Тираж"))
+        self.quick_toolbar.addWidget(self.data_mode)
+        self.quick_toolbar.addSeparator()
+        for action in (self.validate_active_action, self.validate_all_action, self.build_active_action, self.build_all_action, self.cancel_build_action):
+            self.quick_toolbar.addAction(action)
+        quick_icons = {
+            self.validate_active_action: QStyle.StandardPixmap.SP_DialogApplyButton,
+            self.validate_all_action: QStyle.StandardPixmap.SP_DialogYesButton,
+            self.build_active_action: QStyle.StandardPixmap.SP_MediaPlay,
+            self.build_all_action: QStyle.StandardPixmap.SP_DialogSaveButton,
+            self.cancel_build_action: QStyle.StandardPixmap.SP_DialogCancelButton,
+        }
+        for action, icon in quick_icons.items():
+            action.setIcon(self.style().standardIcon(icon))
+            action.setToolTip(action.text())
+            action.setProperty("accessibleName", action.text())
+        self._build_icon_toolbar()
         self.status_project = QLabel("Проект не открыт")
         self.status_zoom = QLabel("")
         self.statusBar().addWidget(self.status_project, 1)
         self.statusBar().addPermanentWidget(self.status_zoom)
+        self._update_project_visibility()
         for panel in (self.left_panel, self.right_panel):
             panel.installEventFilter(self)
             for child in panel.findChildren(QWidget):
@@ -220,13 +268,12 @@ class MainWindow(QMainWindow):
     def _left_panel(self) -> QWidget:
         panel = QWidget()
         layout = QVBoxLayout(panel)
-        components = QGroupBox("Компоненты")
-        component_layout = QVBoxLayout(components)
+        layout.setContentsMargins(3, 5, 3, 5)
         self.component_tree = QTreeView()
         self.component_tree.setObjectName("componentTree")
         self.component_tree.setHeaderHidden(False)
-        component_layout.addWidget(self.component_tree)
-        layout.addWidget(components, 1)
+        # Kept as a child for compatibility with existing data-selection handlers;
+        # project source settings now live in the single project dialog.
         data = QGroupBox("Данные Excel")
         data_layout = QVBoxLayout(data)
         self.data_source = QComboBox()
@@ -264,7 +311,9 @@ class MainWindow(QMainWindow):
         validation_buttons.addWidget(self.data_validate_all)
         validation_buttons.addWidget(self.data_clear)
         data_layout.addLayout(validation_buttons)
-        layout.addWidget(data)
+        data.setParent(panel)
+        self.compat_data_panel = data
+        data.hide()
         tools = QGroupBox("Инструменты")
         tools_layout = QVBoxLayout(tools)
         self.image_tool = QPushButton("Изображение")
@@ -279,38 +328,146 @@ class MainWindow(QMainWindow):
         self.ellipse_tool.setObjectName("ellipseTool")
         self.line_tool = QPushButton("Линия")
         self.line_tool.setObjectName("lineTool")
+        self.select_tool = QPushButton("Выбор")
         self.drawing_tools = {
-            "image": self.image_tool, "html": self.html_tool,
+            "select": self.select_tool, "image": self.image_tool, "html": self.html_tool,
             "conditional_group": self.conditional_group_tool,
             "rectangle": self.rectangle_tool, "ellipse": self.ellipse_tool, "line": self.line_tool,
         }
         for button in self.drawing_tools.values():
             button.setCheckable(True)
             button.setEnabled(False)
+            button.setToolTip(button.text())
+            button.setAccessibleName(button.text())
+            button.setIcon(self._style_icon(button))
+            button.setText("")
+            button.setFixedSize(34, 34)
             tools_layout.addWidget(button)
         layout.addWidget(tools)
-        events = QGroupBox("События")
-        events_layout = QVBoxLayout(events)
+        actions = QGroupBox("Слои")
+        action_layout = QVBoxLayout(actions)
+        for button in (self.layer_up, self.layer_down, self.group_button, self.ungroup_button, self.reparent_button):
+            action_layout.addWidget(button)
+        layout.addWidget(actions)
+        for button, icon in ((self.layer_up, QStyle.StandardPixmap.SP_ArrowUp), (self.layer_down, QStyle.StandardPixmap.SP_ArrowDown)):
+            button.setAccessibleName(button.text())
+            button.setToolTip(button.text())
+            button.setText("")
+            button.setIcon(self.style().standardIcon(icon))
+        for button in (self.group_button, self.ungroup_button, self.reparent_button):
+            button.setAccessibleName(button.text())
+            button.setToolTip(button.text())
+            button.setIcon(self._style_icon(button))
+            button.setText("")
+        layout.addStretch(1)
+        return panel
+
+    def _events_panel(self) -> QWidget:
+        panel = QWidget()
+        events_layout = QVBoxLayout(panel)
         self.event_search = QLineEdit()
         self.event_search.setPlaceholderText("Поиск событий")
         self.event_list = QListWidget()
         clear_events = QPushButton("Очистить")
+        clear_events.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogResetButton))
         clear_events.clicked.connect(self.event_list.clear)
         events_layout.addWidget(self.event_search)
         events_layout.addWidget(self.event_list, 1)
         events_layout.addWidget(clear_events)
-        layout.addWidget(events, 1)
         return panel
+
+    def _preview_panel(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        self.preview_image = QLabel("Выберите компонент и проверьте данные")
+        self.preview_image.setObjectName("previewImage")
+        self.preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_image.setMinimumHeight(120)
+        self.preview_image.setStyleSheet("background: palette(base); border: 1px solid palette(mid);")
+        layout.addWidget(self.preview_image, 1)
+        controls = QHBoxLayout()
+        self.preview_previous = QPushButton("Предыдущий")
+        self.preview_next = QPushButton("Следующий")
+        self.preview_zoom_out = QPushButton("−")
+        self.preview_zoom_in = QPushButton("+")
+        self.preview_fit = QPushButton("По размеру")
+        for button in (self.preview_previous, self.preview_next, self.preview_zoom_out, self.preview_zoom_in, self.preview_fit):
+            button.setMaximumWidth(105)
+            controls.addWidget(button)
+        layout.addLayout(controls)
+        return panel
+
+    def _style_icon(self, widget: QWidget) -> QIcon:
+        mapping = {
+            "Изображение": QStyle.StandardPixmap.SP_FileIcon,
+            "HTML-текст": QStyle.StandardPixmap.SP_FileDialogDetailedView,
+            "Условная группа": QStyle.StandardPixmap.SP_DirLinkIcon,
+            "Прямоугольник": QStyle.StandardPixmap.SP_TitleBarShadeButton,
+            "Эллипс": QStyle.StandardPixmap.SP_TitleBarMaxButton,
+            "Линия": QStyle.StandardPixmap.SP_ArrowForward,
+            "Вверх": QStyle.StandardPixmap.SP_ArrowUp,
+            "Вниз": QStyle.StandardPixmap.SP_ArrowDown,
+            "Создать группу": QStyle.StandardPixmap.SP_DirIcon,
+            "Разгруппировать": QStyle.StandardPixmap.SP_DirOpenIcon,
+            "Переместить…": QStyle.StandardPixmap.SP_ArrowRight,
+        }
+        return self.style().standardIcon(mapping.get(widget.text(), QStyle.StandardPixmap.SP_FileIcon))
+
+    def _build_icon_toolbar(self) -> None:
+        self.icon_toolbar = QToolBar("Инструменты редактирования", self)
+        self.icon_toolbar.setObjectName("editTools")
+        self.icon_toolbar.setMovable(False)
+        self.icon_toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, self.icon_toolbar)
+        for action in (self.add_component_action, self.project_settings_action, self.save_action, self.undo_action, self.redo_action,
+                       self.delete_action, self.group_action, self.ungroup_action, self.zoom_in_action, self.zoom_out_action, self.fit_action):
+            action_icons = {
+                self.add_component_action: QStyle.StandardPixmap.SP_FileDialogNewFolder,
+                self.project_settings_action: QStyle.StandardPixmap.SP_FileDialogInfoView,
+                self.save_action: QStyle.StandardPixmap.SP_DialogSaveButton,
+                self.undo_action: QStyle.StandardPixmap.SP_ArrowBack,
+                self.redo_action: QStyle.StandardPixmap.SP_ArrowForward,
+                self.delete_action: QStyle.StandardPixmap.SP_TrashIcon,
+                self.group_action: QStyle.StandardPixmap.SP_DirLinkIcon,
+                self.ungroup_action: QStyle.StandardPixmap.SP_DirOpenIcon,
+                self.zoom_in_action: QStyle.StandardPixmap.SP_DesktopIcon,
+                self.zoom_out_action: QStyle.StandardPixmap.SP_ComputerIcon,
+                self.fit_action: QStyle.StandardPixmap.SP_TitleBarNormalButton,
+            }
+            action.setIcon(self.style().standardIcon(action_icons[action]))
+            action.setToolTip(action.text())
+            action.setProperty("accessibleName", action.text())
+            self.icon_toolbar.addAction(action)
+
 
     def _right_panel(self) -> QWidget:
         panel = QWidget()
         layout = QVBoxLayout(panel)
+        self.right_tabs = QTabWidget()
+        self.right_tabs.setObjectName("rightPanelTabs")
+        components = QWidget()
+        component_layout = QVBoxLayout(components)
+        component_header = QHBoxLayout()
+        component_header.addWidget(QLabel("Компоненты"), 1)
+        add_component = QToolButton()
+        add_component.setText("+")
+        add_component.setToolTip("Добавить компонент")
+        add_component.setAccessibleName("Добавить компонент")
+        add_component.clicked.connect(self.add_component_dialog)
+        component_header.addWidget(add_component)
+        component_layout.addLayout(component_header)
+        self.component_tree = QTreeView()
+        self.component_tree.setObjectName("componentTree")
+        self.component_tree.setHeaderHidden(True)
+        component_layout.addWidget(self.component_tree)
+        self.component_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.component_tree.customContextMenuRequested.connect(self._component_context_menu)
+        self.right_tabs.addTab(components, "Компоненты")
         elements = QGroupBox("Элементы (передний план сверху)")
         element_layout = QVBoxLayout(elements)
         self.element_tree = LayerTreeView()
         self.element_tree.setObjectName("elementTree")
         element_layout.addWidget(self.element_tree)
-        order_buttons = QHBoxLayout()
         self.layer_up = QPushButton("Вверх")
         self.layer_up.setObjectName("layerUp")
         self.layer_down = QPushButton("Вниз")
@@ -318,10 +475,8 @@ class MainWindow(QMainWindow):
         self.group_button = QPushButton("Создать группу")
         self.ungroup_button = QPushButton("Разгруппировать")
         self.reparent_button = QPushButton("Переместить…")
-        for button in (self.layer_up, self.layer_down, self.group_button, self.ungroup_button, self.reparent_button):
-            order_buttons.addWidget(button)
-        element_layout.addLayout(order_buttons)
-        layout.addWidget(elements, 2)
+        self.right_tabs.addTab(elements, "Элементы")
+        layout.addWidget(self.right_tabs, 2)
         self.multi_properties_group = QGroupBox("Выравнивание выделения")
         multi_layout = QHBoxLayout(self.multi_properties_group)
         self.align_buttons: dict[str, QPushButton] = {}
@@ -344,7 +499,71 @@ class MainWindow(QMainWindow):
         element_property_layout.addWidget(self.element_properties)
         self.element_properties_group.hide()
         layout.addWidget(self.element_properties_group, 2)
-        return panel
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidget(panel)
+        scroll.setMinimumWidth(220)
+        scroll.setMaximumWidth(360)
+        return scroll
+
+    def _update_project_visibility(self) -> None:
+        has_project = self.session is not None
+        self.edit_menu.menuAction().setVisible(has_project)
+        self.build_menu.menuAction().setVisible(has_project)
+        self.quick_toolbar.setVisible(has_project)
+        self.icon_toolbar.setVisible(has_project)
+        for dock in (self.toolbox_dock, self.right_dock, self.events_dock, self.preview_dock):
+            dock.setVisible(has_project)
+        self.import_menu.menuAction().setVisible(has_project)
+        self.export_menu.menuAction().setVisible(has_project)
+
+    def _component_context_menu(self, point) -> None:
+        index = self.component_tree.indexAt(point)
+        component_id = index.data(ID_ROLE) if index.isValid() else None
+        if not component_id or self.session is None:
+            return
+        menu = QMenu(self)
+        open_action = menu.addAction("Открыть")
+        properties_action = menu.addAction("Свойства…")
+        menu.addSeparator()
+        delete_action = menu.addAction("Удалить…")
+        chosen = menu.exec(self.component_tree.viewport().mapToGlobal(point))
+        if chosen is open_action:
+            self.open_component(component_id)
+        elif chosen is properties_action:
+            self.edit_component_dialog(component_id)
+        elif chosen is delete_action:
+            self.delete_component(component_id)
+
+    def _tab_context_menu(self, point) -> None:
+        index = self.tabs.tabBar().tabAt(point)
+        tab = self.tabs.widget(index) if index >= 0 else None
+        if not isinstance(tab, DocumentTab):
+            return
+        menu = QMenu(self)
+        properties_action = menu.addAction("Свойства…")
+        delete_action = menu.addAction("Удалить компонент…")
+        chosen = menu.exec(self.tabs.tabBar().mapToGlobal(point))
+        if chosen is properties_action:
+            self.edit_component_dialog(tab.component_id)
+        elif chosen is delete_action:
+            self.delete_component(tab.component_id)
+
+    def _select_tool(self) -> None:
+        if self.active_tab is not None:
+            self.active_tab.canvas.cancel_tool()
+            self.active_tab.canvas.set_tool(None)
+            self._sync_tool_buttons()
+
+    def _show_about(self) -> None:
+        from componentpress.build.report import APPLICATION_VERSION
+        from componentpress.domain.schema import SCHEMA_VERSION
+        QMessageBox.about(self, "О программе", f"ComponentPress {APPLICATION_VERSION}\nРедактор печатных компонентов настольных игр\nПоддерживаемая схема проекта и компонентов: {SCHEMA_VERSION}")
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._rescale_preview_frame()
 
     def _connect_signals(self) -> None:
         self.new_action.triggered.connect(self.new_project_dialog)
@@ -358,21 +577,29 @@ class MainWindow(QMainWindow):
         self.export_png_zip_action.triggered.connect(self._export_png_archive)
         self.add_component_action.triggered.connect(self.add_component_dialog)
         self.project_settings_action.triggered.connect(self.project_settings_dialog)
+        self.about_action.triggered.connect(self._show_about)
+        self.validate_active_action.triggered.connect(self._validate_active)
+        self.validate_all_action.triggered.connect(self._validate_all)
         self.build_all_action.triggered.connect(lambda: self._start_build(False))
         self.build_active_action.triggered.connect(lambda: self._start_build(True))
         self.cancel_build_action.triggered.connect(self._cancel_build)
         self.open_build_action.triggered.connect(lambda: self._open_build_result(False))
         self.open_pdf_action.triggered.connect(lambda: self._open_build_result(True))
-        self.undo_action.triggered.connect(self._after_undo_redo)
-        self.redo_action.triggered.connect(self._after_undo_redo)
+        self.undo_action.triggered.connect(self._undo)
+        self.redo_action.triggered.connect(self._redo)
         self.delete_action.triggered.connect(self.delete_selected)
+        self.delete_component_action.triggered.connect(lambda: self.active_tab and self.delete_component(self.active_tab.component_id))
         self.group_action.triggered.connect(lambda: self.group_selected())
         self.ungroup_action.triggered.connect(lambda: self.ungroup_selected())
         self.zoom_in_action.triggered.connect(lambda: self._zoom_active(1.2))
         self.zoom_out_action.triggered.connect(lambda: self._zoom_active(1 / 1.2))
         self.fit_action.triggered.connect(lambda: self.active_tab and self.active_tab.canvas.fit_page())
         self.component_tree.doubleClicked.connect(self._open_component_index)
+        self.component_tree.clicked.connect(self._open_component_index)
         self.tabs.currentChanged.connect(self._active_tab_changed)
+        self.tabs.tabBar().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tabs.tabBar().customContextMenuRequested.connect(self._tab_context_menu)
+        self.select_tool.clicked.connect(self._select_tool)
         self.tabs.tabCloseRequested.connect(self.close_tab)
         self.properties.nameChanged.connect(lambda value: self._edit_active(name=value))
         self.properties.sizeChanged.connect(self._edit_active_size)
@@ -406,14 +633,23 @@ class MainWindow(QMainWindow):
         self.data_column.currentIndexChanged.connect(self._update_data_chain)
         self.data_mode.currentIndexChanged.connect(self._data_mode_changed)
         self.event_search.textChanged.connect(self._filter_events)
+        self.preview_next.clicked.connect(lambda: self._step_preview(1))
+        self.preview_previous.clicked.connect(lambda: self._step_preview(-1))
+        self.preview_zoom_in.clicked.connect(lambda: self._scale_preview(1.2))
+        self.preview_zoom_out.clicked.connect(lambda: self._scale_preview(1 / 1.2))
+        self.preview_fit.clicked.connect(lambda: self._scale_preview(1.0, fit=True))
 
     def load_session(self, session: ProjectSession) -> None:
         """Install an already opened session; useful to bootstrap and to test the UI."""
         self._clear_tabs(discard=True)
         self.controller.set_session(session)
+        self._component_history.clear()
+        self._component_history_index = 0
+        self._project_history_focus = False
         self._refresh_component_tree()
         self.setWindowTitle(f"{session.snapshot.model.name} — ComponentPress")
         self.status_project.setText(str(session.snapshot.root))
+        self._update_project_visibility()
         if self.controller.recovery_diagnostics:
             details = "; ".join(item.message for item in self.controller.recovery_diagnostics)
             self.statusBar().showMessage(f"Восстановление операций: {details}", 15000)
@@ -609,46 +845,70 @@ class MainWindow(QMainWindow):
         if self.session is None:
             return
         model = self.session.snapshot.model
-        name, accepted = QInputDialog.getText(self, "Настройки проекта", "Название", text=model.name)
-        if not accepted:
+        dialog = ProjectSettingsDialog(self.session, self.controller.preview, self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
             return
-        version, accepted = QInputDialog.getText(self, "Настройки проекта", "Версия игры", text=model.version)
-        if not accepted:
-            return
+        values = dialog.values()
         try:
             old_parts = tuple(int(part) for part in model.version.split("."))
-            new_parts = tuple(int(part) for part in version.split("."))
+            new_parts = tuple(int(part) for part in values["version"].split("."))
             if len(new_parts) == 3 and new_parts < old_parts:
                 answer = QMessageBox.warning(
-                    self,
-                    "Понижение версии",
-                    "Понижение версии может привести к конфликту имени архива. Продолжить?",
+                    self, "Понижение версии", "Понижение версии может привести к конфликту имени архива. Продолжить?",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                     QMessageBox.StandardButton.Cancel,
                 )
                 if answer != QMessageBox.StandardButton.Yes:
                     return
-        except ValueError:
-            pass
-        prod, accepted = QInputDialog.getText(self, "Столбцы тиража", "Prod", text=model.copies_columns.prod)
-        if not accepted:
-            return
-        test, accepted = QInputDialog.getText(self, "Столбцы тиража", "Test", text=model.copies_columns.test)
-        if not accepted:
-            return
-        try:
-            self.controller.service.set_project_details(self.session, name=name, version=version)
-            self.controller.service.set_copies_columns(self.session, prod=prod, test=test)
-            self.setWindowTitle(f"{name} — ComponentPress")
+            self.controller.update_project_settings(
+                name=values["name"], version=values["version"], prod=values["prod"], test=values["test"],
+                data_source_file=values["source_file"],
+                clear_data_source=not values["source"] and values["source_file"] is None,
+            )
+            self.setWindowTitle(f"{values['name']} — ComponentPress")
+            self._invalidate_preview_cache()
+            self._active_tab_changed(self.tabs.currentIndex())
         except (ProjectError, ValidationError) as exc:
             self._show_error(exc if isinstance(exc, ProjectError) else ProjectError(Diagnostic("PROJECT_SETTINGS", str(exc))))
+            return
 
     def add_component_dialog(self) -> None:
         if self.session is None:
             return
-        name, accepted = QInputDialog.getText(self, "Новый компонент", "Название")
-        if accepted:
-            self.add_component(name)
+        sheets = self._available_sheets()
+        dialog = ComponentDialog(self, sheets=sheets)
+        if dialog.exec() == dialog.DialogCode.Accepted:
+            self._create_component(dialog.definition())
+
+    def _available_sheets(self) -> tuple[str, ...]:
+        if self.session is None or self.controller.preview is None or self.session.snapshot.model.data_source is None:
+            return ()
+        from componentpress.project_io.paths import resolve_project_path
+        try:
+            return tuple(self.controller.preview.reader.sheet_names(resolve_project_path(
+                self.session.snapshot.root, self.session.snapshot.model.data_source.path)))
+        except ProjectError as exc:
+            self._add_events((exc.diagnostic,))
+            return ()
+
+    def _create_component(self, values: dict, component_id: str | None = None) -> bool:
+        if self.session is None:
+            return False
+        try:
+            component_id = self.controller.add_component(
+                values["name"], component_id, width_mm=values["width"], height_mm=values["height"], data=values["data"]
+            )
+        except (ProjectError, RuntimeError, ValidationError) as exc:
+            self._show_error(exc)
+            return False
+        self._refresh_component_tree()
+        self._update_project_visibility()
+        self.open_component(component_id)
+        document = self.session.documents[component_id]
+        self._push_component_history("create", component_id, document)
+        self._project_history_focus = True
+        self._update_actions()
+        return True
 
     def add_component(self, component_id: str | None = None, name: str | None = None) -> bool:
         # The two-argument form remains available to automated legacy scenarios;
@@ -664,9 +924,212 @@ class MainWindow(QMainWindow):
             self._show_error(exc)
             return False
         self._refresh_component_tree()
+        self._update_project_visibility()
         self.open_component(component_id)
+        self._push_component_history("create", component_id, self.session.documents[component_id])
+        self._project_history_focus = True
         self.statusBar().showMessage("Компонент добавлен", 3000)
         return True
+
+    def edit_component_dialog(self, component_id: str) -> None:
+        if self.session is None or component_id not in self.session.documents:
+            return
+        document = self.session.documents[component_id]
+        if document.has_invalid_draft:
+            self._show_error(ProjectError(Diagnostic("INVALID_DRAFT", "Исправьте черновик в режиме «Текст» перед изменением свойств компонента", document.source.path)))
+            tab = self._tabs.get(component_id)
+            if tab is not None:
+                self.tabs.setCurrentWidget(tab)
+                tab.set_mode("text")
+            return
+        dialog = ComponentDialog(self, component=document.model, sheets=self._available_sheets())
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        values = dialog.definition(document.model)
+        updated = document.model.model_copy(update={
+            "name": values["name"], "size_mm": SizeMM(width=values["width"], height=values["height"]),
+            "data": values["data"],
+        })
+        self._commit_component("Изменить свойства компонента", updated)
+
+    def _make_component_history(self, operation: str, component_id: str, document) -> dict:
+        assert self.session is not None
+        ref_index = next(i for i, ref in enumerate(self.session.snapshot.model.components) if ref.id == component_id)
+        ref = self.session.snapshot.model.components[ref_index]
+        return {
+            "operation": operation, "component_id": component_id, "reference_path": ref.path,
+            "position": ref_index, "document": document, "tab": self._tabs.get(component_id),
+            "root": self.session.snapshot.root,
+            "component_hash": document.source.disk_hash,
+            "backup_path": f".componentpress/transactions/component-history/{uuid4().hex}.yaml",
+        }
+
+    def _push_component_history(self, operation: str, component_id: str, document) -> None:
+        if self.session is None:
+            return
+        entry = self._make_component_history(operation, component_id, document)
+        self._append_component_history(entry)
+
+    def _append_component_history(self, entry: dict) -> None:
+        while len(self._component_history) > self._component_history_index:
+            self._discard_history_backup(self._component_history.pop())
+        self._component_history.append(entry)
+        if len(self._component_history) > 64:
+            self._discard_history_backup(self._component_history.pop(0))
+        self._component_history_index = len(self._component_history)
+
+    def _discard_history_backup(self, entry: dict) -> None:
+        from componentpress.project_io.paths import resolve_project_path
+        try:
+            backup = resolve_project_path(entry["root"], entry["backup_path"])
+            if backup.is_file():
+                backup.unlink()
+        except (OSError, ProjectError):
+            pass
+        tab = entry.get("tab")
+        if tab is not None and self._tabs.get(entry["component_id"]) is not tab:
+            tab.deleteLater()
+
+    def delete_component(self, component_id: str, *, confirm: bool = True) -> bool:
+        if self.session is None or component_id not in self.session.documents:
+            return False
+        if len(self.session.documents) <= 1:
+            self.statusBar().showMessage("Нельзя удалить последний компонент проекта", 5000)
+            return False
+        if self._active_build_job is not None or self._version_task is not None:
+            self.statusBar().showMessage("Дождитесь завершения текущей операции", 5000)
+            return False
+        document = self.session.documents[component_id]
+        if confirm:
+            answer = QMessageBox.question(
+                self, "Удалить компонент", f"Удалить «{document.model.name}»? Операцию можно отменить.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return False
+        if document.draft_diagnostics:
+            answer = QMessageBox.warning(
+                self, "Черновик компонента", "В компоненте есть некорректный черновик. Он сохранится в истории отмены.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return False
+        entry = self._make_component_history("remove", component_id, document)
+        try:
+            self._apply_component_membership(entry, remove=True)
+        except (ProjectError, OSError) as exc:
+            self._show_error(exc)
+            return False
+        self._append_component_history(entry)
+        self._project_history_focus = True
+        self.statusBar().showMessage("Компонент удалён; действие можно отменить", 4000)
+        return True
+
+    def _apply_component_membership(self, entry: dict, *, remove: bool) -> None:
+        assert self.session is not None
+        component_id = entry["component_id"]
+        if remove:
+            session = self.session.documents[component_id]
+            tab = self._tabs.get(component_id)
+            snapshot, raw, position, path = self.controller.remove_component_for_history(
+                component_id, backup_path=entry["backup_path"]
+            )
+            if tab is not None:
+                tab.preview_timer.stop()
+                tab.preview_generation += 1
+                tab.canvas.release_preview()
+                index = self.tabs.indexOf(tab)
+                if index >= 0:
+                    self.tabs.removeTab(index)
+                self.undo_group.removeStack(tab.undo_stack)
+                self._tabs.pop(component_id, None)
+            entry["position"] = position
+            entry["reference_path"] = path
+            entry["component_hash"] = hashlib.sha256(raw).hexdigest()
+            entry["document"] = session
+            entry["tab"] = tab or entry.get("tab")
+            self.session.snapshot = snapshot
+            self.session.documents.pop(component_id, None)
+            if self._preview_active and self._preview_active[0].component_id == component_id:
+                self._preview_pending = None
+        else:
+            snapshot = self.controller.restore_component_from_history(
+                component_id, reference_path=entry["reference_path"], backup_path=entry["backup_path"],
+                component_hash=entry["component_hash"], position=entry["position"],
+            )
+            self.session.snapshot = snapshot
+            self.session.documents[component_id] = entry["document"]
+            tab = entry.get("tab")
+            if tab is not None:
+                self._tabs[component_id] = tab
+                self.undo_group.addStack(tab.undo_stack)
+                self.tabs.addTab(tab, self.session.documents[component_id].model.name)
+                self._update_tab_title(component_id)
+            self._refresh_component_tree()
+            self._update_project_visibility()
+        self._refresh_component_tree()
+        self._active_tab_changed(self.tabs.currentIndex())
+        self._update_actions()
+
+    def _undo(self) -> None:
+        tab = self.active_tab
+        if tab is not None and tab.mode == "text":
+            tab.text_editor.undo()
+        elif self._project_history_focus and self._component_history_index > 0:
+            entry = self._component_history[self._component_history_index - 1]
+            try:
+                self._apply_component_membership(entry, remove=entry["operation"] == "create")
+            except (ProjectError, OSError) as exc:
+                self._show_error(exc)
+                return
+            self._component_history_index -= 1
+            self._project_history_focus = True
+        elif tab is not None and tab.undo_stack.canUndo():
+            tab.undo_stack.undo()
+            self._project_history_focus = False
+        elif self._component_history_index > 0:
+            entry = self._component_history[self._component_history_index - 1]
+            try:
+                self._apply_component_membership(entry, remove=entry["operation"] == "create")
+            except (ProjectError, OSError) as exc:
+                self._show_error(exc)
+                return
+            self._component_history_index -= 1
+            self._project_history_focus = True
+        elif tab is not None:
+            tab.undo_stack.undo()
+        self._update_actions()
+
+    def _redo(self) -> None:
+        tab = self.active_tab
+        if tab is not None and tab.mode == "text":
+            tab.text_editor.redo()
+        elif self._project_history_focus and self._component_history_index < len(self._component_history):
+            entry = self._component_history[self._component_history_index]
+            try:
+                self._apply_component_membership(entry, remove=entry["operation"] == "remove")
+            except (ProjectError, OSError) as exc:
+                self._show_error(exc)
+                return
+            self._component_history_index += 1
+            self._project_history_focus = True
+        elif tab is not None and tab.undo_stack.canRedo():
+            tab.undo_stack.redo()
+            self._project_history_focus = False
+        elif self._component_history_index < len(self._component_history):
+            entry = self._component_history[self._component_history_index]
+            try:
+                self._apply_component_membership(entry, remove=entry["operation"] == "remove")
+            except (ProjectError, OSError) as exc:
+                self._show_error(exc)
+                return
+            self._component_history_index += 1
+            self._project_history_focus = True
+        elif tab is not None:
+            tab.undo_stack.redo()
+        self._update_actions()
 
     def _open_component_index(self, index: QModelIndex) -> None:
         component_id = index.data(ID_ROLE)
@@ -717,6 +1180,11 @@ class MainWindow(QMainWindow):
             self.component_properties_group.show()
             self.element_properties_group.hide()
             self.status_zoom.setText("")
+            self._preview_source = None
+            self.preview_image.setPixmap(QPixmap())
+            self.preview_image.setText("Выберите компонент")
+            self.preview_next.setEnabled(False)
+            self.preview_previous.setEnabled(False)
         else:
             self.undo_group.setActiveStack(tab.undo_stack)
             document = self.session.documents[tab.component_id]
@@ -727,8 +1195,8 @@ class MainWindow(QMainWindow):
             tab.set_text(document.current_text)
             self.status_zoom.setText(f"Масштаб: {tab.canvas.zoom_percent}%")
             self._populate_data_panel()
-            if tab.canvas._pixmap_item is None:
-                self._refresh_preview(tab)
+            self._project_history_focus = False
+            self._refresh_preview(tab)
         self._update_actions()
 
     @staticmethod
@@ -799,14 +1267,44 @@ class MainWindow(QMainWindow):
             elif is_excel and data is not None and not any(copies_for_mode(row, str(self.data_mode.currentData())) > 0 for row in data.rows):
                 self.active_tab.preview_row_number = None
                 self.active_tab.canvas.clear_document()
+                self.preview_image.setPixmap(QPixmap())
+                self.preview_image.setText("В выбранном режиме нет экземпляров")
+                self.preview_next.setEnabled(False)
+                self.preview_previous.setEnabled(False)
                 self.statusBar().showMessage("В выбранном режиме нет экземпляров", 5000)
             else:
                 self._refresh_preview(self.active_tab)
 
     def _add_events(self, diagnostics) -> None:
+        reveal = False
         for diagnostic in diagnostics:
             self.event_list.addItem(str(diagnostic))
+            if getattr(diagnostic, "severity", "error") != "info":
+                reveal = True
         self._filter_events(self.event_search.text())
+        if reveal:
+            self.events_dock.show()
+
+    def _snapshot_for_current_documents(self):
+        if self.session is None:
+            return None
+        documents = {}
+        for component_id, document in self.session.documents.items():
+            if document.has_invalid_draft:
+                diagnostic = document.draft_diagnostics[0]
+                self._add_events((diagnostic,))
+                return None
+            if document.draft_text is not None:
+                try:
+                    documents[component_id] = self.controller.prepare_text(component_id, document.draft_text)
+                except ProjectError as exc:
+                    self._add_events((exc.diagnostic,))
+                    return None
+            else:
+                documents[component_id] = document.committed
+        from componentpress.application.contracts import ProjectSnapshot
+        base = self.session.snapshot
+        return ProjectSnapshot(base.root, base.text, base.disk_hash, base.model, MappingProxyType(documents))
 
     def _filter_events(self, query: str) -> None:
         needle = query.casefold().strip()
@@ -822,7 +1320,10 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("У компонента не выбран лист Excel", 5000)
             return
         try:
-            data = self.controller.preview.refresh(self.session.snapshot, component_id)
+            snapshot = self._snapshot_for_current_documents()
+            if snapshot is None:
+                return
+            data = self.controller.preview.refresh(snapshot, component_id, component=self.session.documents[component_id].model)
         except ValidationIssues as exc:
             self._add_events(exc.diagnostics)
             self.statusBar().showMessage(f"Ошибок: {len(exc.diagnostics)}; подробности в панели событий", 7000)
@@ -833,11 +1334,15 @@ class MainWindow(QMainWindow):
             return
         self._add_events((Diagnostic("VALIDATION_OK", f"Лист {data.sheet} проверен; строк: {len(data.rows)}", data.path, source="main", sheet=data.sheet, severity="info"),))
         self._populate_data_panel()
+        self._refresh_preview(self.active_tab)
 
     def _validate_all(self) -> None:
         if self.session is None or self.controller.preview is None:
             return
-        diagnostics = self.controller.preview.validate_all(self.session.snapshot)
+        snapshot = self._snapshot_for_current_documents()
+        if snapshot is None:
+            return
+        diagnostics = self.controller.preview.validate_all(snapshot)
         self._add_events(diagnostics or (Diagnostic("VALIDATION_OK", "Все листы проекта проверены", self.session.snapshot.root, severity="info"),))
         if diagnostics:
             self.statusBar().showMessage(f"Ошибок: {len(diagnostics)}; подробности в панели событий", 7000)
@@ -852,7 +1357,7 @@ class MainWindow(QMainWindow):
             return None
         try:
             component = self.session.documents[tab.component_id].model
-            data = self.controller.preview.refresh(self.session.snapshot, tab.component_id, component=component) if force else self.controller.preview.data(self.session.snapshot, tab.component_id, component=component)
+            data = self.controller.preview.refresh(self.session.snapshot, tab.component_id, component=component) if force else self.controller.preview.cached_data(self.session.snapshot, tab.component_id, component=component)
         except ProjectError as exc:
             self._add_events(exc.diagnostics if isinstance(exc, ValidationIssues) else (exc.diagnostic,))
             self.statusBar().showMessage(str(exc.diagnostic), 10000)
@@ -876,6 +1381,25 @@ class MainWindow(QMainWindow):
             bindings_resolved = False
         else:
             tab.resolved_component = None
+            cached = self.controller.preview.cached_data(self.session.snapshot, tab.component_id, component=document.model)
+            if cached is None:
+                tab.canvas.clear_document()
+                self.preview_image.setText("Проверьте данные Excel, чтобы увидеть экземпляры")
+                self.preview_image.setPixmap(QPixmap())
+                self.preview_next.setEnabled(False)
+                self.preview_previous.setEnabled(False)
+                return False
+            eligible = [row for row in cached.rows if copies_for_mode(row, str(self.data_mode.currentData())) > 0]
+            if not eligible:
+                tab.preview_row_number = None
+                tab.canvas.clear_document()
+                self.preview_image.setPixmap(QPixmap())
+                self.preview_image.setText("В выбранном режиме нет экземпляров")
+                self.preview_next.setEnabled(False)
+                self.preview_previous.setEnabled(False)
+                return False
+            if tab.preview_row_number not in {row.row_number for row in eligible}:
+                tab.preview_row_number = eligible[0].row_number
             try:
                 resolved = self.controller.preview.select_row(
                     self.session.snapshot, tab.component_id, row_number=tab.preview_row_number,
@@ -900,7 +1424,81 @@ class MainWindow(QMainWindow):
             self.session, component=active_component, dpi=dpi, fit=fit,
             selected=selected, bindings_resolved=bindings_resolved,
         )
+        self.preview_image.setText("Подготовка превью…")
         return True
+
+    def _step_preview(self, direction: int) -> None:
+        tab = self.active_tab
+        if self.session is None or tab is None or tab.resolved_component is None or self.controller.preview is None:
+            return
+        component = self.session.documents[tab.component_id].model
+        if component.data is None:
+            return
+        data = self.controller.preview.cached_data(self.session.snapshot, tab.component_id, component=component)
+        if data is None:
+            return
+        eligible = [row for row in data.rows if copies_for_mode(row, str(self.data_mode.currentData())) > 0]
+        if not eligible:
+            return
+        current = next((i for i, row in enumerate(eligible) if row.row_number == tab.preview_row_number), 0)
+        next_index = current + direction
+        if not 0 <= next_index < len(eligible):
+            return
+        tab.preview_row_number = eligible[next_index].row_number
+        self._populate_rows(data)
+        self._refresh_preview(tab)
+
+    def _scale_preview(self, factor: float, *, fit: bool = False) -> None:
+        if fit:
+            self._preview_zoom = 1.0
+        else:
+            self._preview_zoom = min(8.0, max(0.1, self._preview_zoom * factor))
+        self._rescale_preview_frame()
+
+    def _invalidate_preview_cache(self) -> None:
+        if self.controller.preview is not None and self.session is not None:
+            self.controller.preview.invalidate(self.session.snapshot.root)
+        self._preview_source = None
+        self.preview_image.setPixmap(QPixmap())
+        if self.active_tab is not None:
+            self._refresh_preview(self.active_tab)
+
+    def _display_preview_frame(self, component_id: str, image, row_number: int | None) -> None:
+        tab = self.active_tab
+        if tab is None or tab.component_id != component_id:
+            return
+        self._preview_source = image
+        self._preview_row_display = row_number
+        self._rescale_preview_frame()
+        self._update_preview_navigation()
+
+    def _rescale_preview_frame(self) -> None:
+        image = getattr(self, "_preview_source", None)
+        if image is None:
+            return
+        pixmap = QPixmap.fromImage(image)
+        width = max(1, self.preview_image.width() - 12)
+        height = max(1, self.preview_image.height() - 12)
+        pixmap = pixmap.scaled(
+            max(1, int(width * self._preview_zoom)), max(1, int(height * self._preview_zoom)),
+            Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation,
+        )
+        self.preview_image.setPixmap(pixmap)
+        self.preview_image.setText("")
+
+    def _update_preview_navigation(self) -> None:
+        tab = self.active_tab
+        data = None
+        if self.session is not None and tab is not None and self.controller.preview is not None:
+            data = self.controller.preview.cached_data(self.session.snapshot, tab.component_id)
+        if data is None or tab is None or tab.resolved_component is None:
+            self.preview_next.setEnabled(False)
+            self.preview_previous.setEnabled(False)
+            return
+        eligible = [row for row in data.rows if copies_for_mode(row, str(self.data_mode.currentData())) > 0]
+        index = next((i for i, row in enumerate(eligible) if row.row_number == tab.preview_row_number), -1)
+        self.preview_previous.setEnabled(index > 0)
+        self.preview_next.setEnabled(0 <= index < len(eligible) - 1)
 
     @staticmethod
     def _preview_font_families(component: ComponentDefinition) -> set[str]:
@@ -966,6 +1564,7 @@ class MainWindow(QMainWindow):
             if error is None and self.active_tab is tab:
                 image, quality = result
                 if tab.apply_preview(image, quality, generation=request.generation):
+                    self._display_preview_frame(request.component_id, image, request.row_number)
                     self._update_selected_image_quality(tab)
                     diagnostics = self._preview_quality_diagnostics(request, quality)
                     fingerprint = tuple((item.node_id, item.source, item.message, item.cell) for item in diagnostics)
@@ -978,6 +1577,8 @@ class MainWindow(QMainWindow):
                                 6000,
                             )
             elif error is not None and self.active_tab is tab and tab.fail_preview(str(error.diagnostic) if isinstance(error, ProjectError) else str(error), generation=request.generation):
+                self.preview_image.setPixmap(QPixmap())
+                self.preview_image.setText("Не удалось подготовить превью")
                 self.event_list.setCurrentRow(self.event_list.count() - 1)
                 self.event_list.setFocus()
             elif self.active_tab is not tab:
@@ -1415,7 +2016,7 @@ class MainWindow(QMainWindow):
             columns = ()
             if self.controller.preview is not None:
                 try:
-                    data = self.controller.preview.data(self.session.snapshot, tab.component_id)
+                    data = self.controller.preview.cached_data(self.session.snapshot, tab.component_id)
                     columns = data.headers if data is not None else ()
                 except ProjectError:
                     pass
@@ -1523,6 +2124,8 @@ class MainWindow(QMainWindow):
         if self.session is None:
             return
         tab = self._tabs.get(component_id)
+        if self.controller.preview is not None:
+            self.controller.preview.invalidate(self.session.snapshot.root)
         if tab is not None:
             current_ids = locations(self.session.documents[component_id].model)
             if selected is None:
@@ -1675,12 +2278,21 @@ class MainWindow(QMainWindow):
     def _sync_tool_buttons(self) -> None:
         active = self.active_tab.canvas.active_tool if self.active_tab is not None else None
         for name, button in self.drawing_tools.items():
-            button.setChecked(active == name)
+            button.setChecked(active == name if name != "select" else active is None)
 
     def _import_image(self, source: Path, folder: str) -> str:
         if self.session is None:
             raise RuntimeError("проект не открыт")
         return self.controller.service.import_image(self.session.snapshot.root, source, folder)
+
+    def _cached_columns(self) -> tuple[str, ...]:
+        if self.session is None or self.controller.preview is None or self.active_tab is None:
+            return ()
+        try:
+            data = self.controller.preview.cached_data(self.session.snapshot, self.active_tab.component_id)
+        except ProjectError:
+            return ()
+        return data.headers if data is not None else ()
 
     def _place_element(self, tool: str, x_mm: float, y_mm: float) -> None:
         if self.session is None:
@@ -1691,7 +2303,7 @@ class MainWindow(QMainWindow):
             columns: tuple[str, ...] = ()
             if self.controller.preview is not None and self.active_tab is not None:
                 try:
-                    data = self.controller.preview.data(self.session.snapshot, self.active_tab.component_id)
+                    data = self.controller.preview.cached_data(self.session.snapshot, self.active_tab.component_id)
                     columns = data.headers if data is not None else ()
                 except ProjectError:
                     pass
@@ -1707,21 +2319,26 @@ class MainWindow(QMainWindow):
                         x_mm=x_mm, y_mm=y_mm, children=(), condition_column=columns[0], condition_value="")
                     self._apply_tree("Добавить условную группу", add_node, node, selected=(node_id,))
         elif tool == "image":
-            dialog = ImageAddDialog(root, self._import_image, self)
+            columns = self._cached_columns()
+            dialog = ImageAddDialog(root, self._import_image, self, columns=columns)
             accepted = dialog.exec() == dialog.DialogCode.Accepted
             if accepted:
                 self.add_image(
                     dialog.source.text().strip(), x_mm, y_mm,
                     name=dialog.name.text().strip(), fit=dialog.fit.currentText(),
+                    source_mode=dialog.content_mode.currentData(),
+                    source_column=dialog.content_column.currentText() or None,
                 )
         elif tool == "html":
-            dialog = HtmlAddDialog(root, self._import_image, self)
+            dialog = HtmlAddDialog(root, self._import_image, self, columns=self._cached_columns())
             accepted = dialog.exec() == dialog.DialogCode.Accepted
             if accepted:
                 self.add_html(
                     dialog.html.toPlainText(), x_mm, y_mm,
                     name=dialog.name.text().strip(),
                     font_family=dialog.font.text(), font_size_pt=dialog.font_size.value(), color=dialog.color.text(),
+                    content_mode=dialog.content_mode.currentData(),
+                    content_column=dialog.content_column.currentText() or None,
                 )
         if self.active_tab is not None:
             self.active_tab.canvas.cancel_tool()
@@ -1759,6 +2376,8 @@ class MainWindow(QMainWindow):
         *,
         name: str = "Изображение",
         fit: str = "contain",
+        source_mode: str = "manual",
+        source_column: str | None = None,
         node_id: str | None = None,
     ) -> bool:
         if self.session is None or self.active_tab is None:
@@ -1768,7 +2387,7 @@ class MainWindow(QMainWindow):
         width = max(0.001, min(30.0, component.size_mm.width - x_mm))
         height = max(0.001, min(30.0, component.size_mm.height - y_mm))
         try:
-            node = ImageNode(id=node_id, name=name, type="image", x_mm=x_mm, y_mm=y_mm, width_mm=width, height_mm=height, source=source, fit=fit)
+            node = ImageNode(id=node_id, name=name, type="image", x_mm=x_mm, y_mm=y_mm, width_mm=width, height_mm=height, source=source, source_mode=source_mode, source_column=source_column, fit=fit)
         except ValidationError as exc:
             self._show_error(exc)
             return False
@@ -1784,6 +2403,8 @@ class MainWindow(QMainWindow):
         font_family: str = "Arial",
         font_size_pt: float = 10.0,
         color: str = "#111111",
+        content_mode: str = "manual",
+        content_column: str | None = None,
         node_id: str | None = None,
     ) -> bool:
         if self.session is None or self.active_tab is None:
@@ -1797,6 +2418,7 @@ class MainWindow(QMainWindow):
                 id=node_id, name=name, type="html", x_mm=x_mm, y_mm=y_mm,
                 width_mm=width, height_mm=height, font_family=font_family,
                 font_size_pt=font_size_pt, color=color, html=html,
+                content_mode=content_mode, content_column=content_column,
             )
         except ValidationError as exc:
             self._show_error(exc)
@@ -1926,6 +2548,11 @@ class MainWindow(QMainWindow):
         return True
 
     def _clear_tabs(self, *, discard: bool = False) -> None:
+        for entry in self._component_history:
+            self._discard_history_backup(entry)
+        self._component_history.clear()
+        self._component_history_index = 0
+        self._project_history_focus = False
         if discard and self.session is not None:
             for component_id in tuple(self.session.documents):
                 self.controller.revert_document(component_id)
@@ -1941,7 +2568,15 @@ class MainWindow(QMainWindow):
         if self.session is None:
             self.component_tree.setModel(None)
             return
-        self.component_tree.setModel(component_model(self.session))
+        selected_id = self.active_tab.component_id if self.active_tab is not None else None
+        model = component_model(self.session)
+        self.component_tree.setModel(model)
+        if selected_id:
+            for row in range(model.rowCount()):
+                index = model.index(row, 0)
+                if index.data(ID_ROLE) == selected_id:
+                    self.component_tree.setCurrentIndex(index)
+                    break
         self.component_tree.resizeColumnToContents(0)
 
     def _update_tab_title(self, component_id: str) -> None:
@@ -1971,10 +2606,20 @@ class MainWindow(QMainWindow):
         visual = has_tab and self.active_tab.mode == "layout"
         active_stack = self.active_tab.undo_stack if self.active_tab is not None else None
         # In text mode Ctrl+Z/Ctrl+Y belong to QPlainTextEdit's local history.
-        self.undo_action.setEnabled(bool(visual and active_stack and active_stack.canUndo()))
-        self.redo_action.setEnabled(bool(visual and active_stack and active_stack.canRedo()))
+        project_undo = self._component_history_index > 0
+        project_redo = self._component_history_index < len(self._component_history)
+        document_undo = bool(visual and active_stack and active_stack.canUndo())
+        document_redo = bool(visual and active_stack and active_stack.canRedo())
+        text_mode = bool(has_tab and self.active_tab.mode == "text")
+        self.undo_action.setText("Отменить")
+        self.redo_action.setText("Повторить")
+        text_undo = bool(text_mode and self.active_tab.text_editor.document().isUndoAvailable())
+        text_redo = bool(text_mode and self.active_tab.text_editor.document().isRedoAvailable())
+        self.undo_action.setEnabled(bool(text_undo or project_undo or document_undo))
+        self.redo_action.setEnabled(bool(text_redo or project_redo or document_redo))
         self.add_component_action.setEnabled(has_project)
         idle = self._active_build_job is None and self._version_task is None
+        self.delete_component_action.setEnabled(has_project and len(self.session.documents) > 1 and idle)
         self.build_all_action.setEnabled(has_project and idle)
         self.build_active_action.setEnabled(has_tab and idle)
         self.cancel_build_action.setEnabled(not idle)
@@ -2059,6 +2704,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         if self._confirm_all_dirty():
+            self.ui_state.save(self)
             event.accept()
         else:
             event.ignore()

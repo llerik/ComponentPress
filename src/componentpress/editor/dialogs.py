@@ -87,7 +87,7 @@ class ResourcePickerDialog(QDialog):
 
 
 class ImageAddDialog(QDialog):
-    def __init__(self, root: Path, importer: Callable[[Path, str], str], parent=None):
+    def __init__(self, root: Path, importer: Callable[[Path, str], str], parent=None, *, columns: tuple[str, ...] = ()):
         super().__init__(parent)
         self.root = root
         self.importer = importer
@@ -96,6 +96,12 @@ class ImageAddDialog(QDialog):
         form = QFormLayout()
         self.name = QLineEdit("Изображение")
         self.name.setObjectName("newImageName")
+        self.content_mode = QComboBox()
+        self.content_mode.addItem("Файл проекта", "manual")
+        self.content_mode.addItem("Столбец Excel", "column")
+        self.content_mode.setEnabled(bool(columns))
+        self.content_column = QComboBox()
+        self.content_column.addItems(list(columns))
         row = QHBoxLayout()
         self.source = QLineEdit()
         self.source.setObjectName("newImageSource")
@@ -105,16 +111,22 @@ class ImageAddDialog(QDialog):
         self.fit = QComboBox()
         self.fit.addItems(["contain", "cover", "stretch"])
         form.addRow("Название", self.name)
+        form.addRow("Источник", self.content_mode)
         form.addRow("Ресурс", row)
+        form.addRow("Столбец", self.content_column)
         form.addRow("Режим", self.fit)
         layout.addLayout(form)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         layout.addWidget(buttons)
         choose.clicked.connect(self._choose)
+        self.content_mode.currentIndexChanged.connect(self._sync_content_mode)
+        self._sync_content_mode()
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
 
     def _choose(self) -> None:
+        if self.content_mode.currentData() != "manual":
+            return
         picker = ResourcePickerDialog(self.root, self.importer, self)
         if picker.exec() == QDialog.DialogCode.Accepted:
             self.source.setText(picker.selected_path)
@@ -123,14 +135,22 @@ class ImageAddDialog(QDialog):
         if not self.name.text().strip():
             QMessageBox.information(self, "Новое изображение", "Введите название.")
             return
-        if not self.source.text().strip():
+        if self.content_mode.currentData() == "manual" and not self.source.text().strip():
             QMessageBox.information(self, "Новое изображение", "Выберите изображение.")
+            return
+        if self.content_mode.currentData() == "column" and not self.content_column.currentText():
+            QMessageBox.information(self, "Новое изображение", "Проверьте Excel и выберите столбец.")
             return
         self.accept()
 
+    def _sync_content_mode(self, _index: int = 0) -> None:
+        manual = self.content_mode.currentData() == "manual"
+        self.source.setEnabled(manual)
+        self.content_column.setEnabled(not manual)
+
 
 class HtmlAddDialog(QDialog):
-    def __init__(self, root: Path, importer: Callable[[Path, str], str], parent=None):
+    def __init__(self, root: Path, importer: Callable[[Path, str], str], parent=None, *, columns: tuple[str, ...] = ()):
         super().__init__(parent)
         self.root = root
         self.importer = importer
@@ -140,12 +160,20 @@ class HtmlAddDialog(QDialog):
         form = QFormLayout()
         self.name = QLineEdit("HTML-текст")
         self.name.setObjectName("newHtmlName")
+        self.content_mode = QComboBox()
+        self.content_mode.addItem("Ручной HTML", "manual")
+        self.content_mode.addItem("Столбец Excel", "column")
+        self.content_mode.setEnabled(bool(columns))
+        self.content_column = QComboBox()
+        self.content_column.addItems(list(columns))
         self.font = QLineEdit("Arial")
         self.font_size = QDoubleSpinBox()
         self.font_size.setRange(0.001, 1000)
         self.font_size.setValue(10)
         self.color = QLineEdit("#111111")
         form.addRow("Название", self.name)
+        form.addRow("Источник", self.content_mode)
+        form.addRow("Столбец", self.content_column)
         form.addRow("Шрифт", self.font)
         form.addRow("Размер, pt", self.font_size)
         form.addRow("Цвет", self.color)
@@ -158,10 +186,14 @@ class HtmlAddDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         layout.addWidget(buttons)
         insert.clicked.connect(self._insert_image)
+        self.content_mode.currentIndexChanged.connect(self._sync_content_mode)
+        self._sync_content_mode()
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
 
     def _insert_image(self) -> None:
+        if self.content_mode.currentData() != "manual":
+            return
         picker = ResourcePickerDialog(self.root, self.importer, self)
         if picker.exec() != QDialog.DialogCode.Accepted:
             return
@@ -183,4 +215,12 @@ class HtmlAddDialog(QDialog):
         if not self.name.text().strip():
             QMessageBox.information(self, "Новый HTML-текст", "Введите название.")
             return
+        if self.content_mode.currentData() == "column" and not self.content_column.currentText():
+            QMessageBox.information(self, "Новый HTML-текст", "Проверьте Excel и выберите столбец.")
+            return
         self.accept()
+
+    def _sync_content_mode(self, _index: int = 0) -> None:
+        manual = self.content_mode.currentData() == "manual"
+        self.content_column.setEnabled(not manual)
+        self.html.setEnabled(manual)

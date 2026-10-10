@@ -57,10 +57,20 @@ class ProjectController:
             raise RuntimeError("проект не открыт")
         return self.session.documents[component_id]
 
-    def add_component(self, name: str, component_id: str | None = None) -> str:
+    def add_component(self, name: str, component_id: str | None = None, *, width_mm: float = 63, height_mm: float = 88, data=None) -> str:
         if self.session is None:
             raise RuntimeError("проект не открыт")
-        return self.service.add_to_session(self.session, name, component_id)
+        return self.service.add_to_session(self.session, name, component_id, width_mm=width_mm, height_mm=height_mm, data=data)
+
+    def remove_component_for_history(self, component_id: str, *, backup_path: str):
+        if self.session is None:
+            raise RuntimeError("проект не открыт")
+        return self.service.remove_component_for_history(self.session, component_id, backup_path=backup_path)
+
+    def restore_component_from_history(self, component_id: str, **values: object):
+        if self.session is None:
+            raise RuntimeError("проект не открыт")
+        return self.service.restore_component_from_history(self.session, component_id, **values)
 
     def update_component(self, component_id: str, **changes: object) -> None:
         document = self.document(component_id)
@@ -106,6 +116,11 @@ class ProjectController:
         if self.session is None:
             raise RuntimeError("проект не открыт")
         return self.service.import_data(self.session, source)
+
+    def update_project_settings(self, **values: object) -> None:
+        if self.session is None:
+            raise RuntimeError("проект не открыт")
+        self.service.update_project_settings(self.session, **values)
 
     def start_build(self, request: BuildRequest, *, on_progress=None, on_finished=None) -> str:
         if self.session is None or self.build is None:

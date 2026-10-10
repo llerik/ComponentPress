@@ -58,11 +58,17 @@ class ProjectService:
         component_id = component_id or self.identifiers.create(name, snapshot.documents, prefix="component")
         return self.projects.add_component(snapshot, component_id, name)
 
-    def add_to_session(self, session: ProjectSession, name: str, component_id: str | None = None) -> str:
+    def add_to_session(self, session: ProjectSession, name: str, component_id: str | None = None, *, width_mm: float = 63, height_mm: float = 88, data=None) -> str:
         component_id = component_id or self.identifiers.create(name, session.documents, prefix="component")
-        snapshot = self.projects.add_component(session.snapshot, component_id, name)
+        snapshot = self.projects.add_component(session.snapshot, component_id, name, width_mm=width_mm, height_mm=height_mm, data=data)
         session.replace_snapshot(snapshot)
         return component_id
+
+    def remove_component_for_history(self, session: ProjectSession, component_id: str, *, backup_path: str):
+        return self.projects.remove_component(session.snapshot, component_id, backup_path=backup_path)
+
+    def restore_component_from_history(self, session: ProjectSession, component_id: str, **values: object):
+        return self.projects.restore_component(session.snapshot, component_id, **values)
 
     def node_id(self, session: ProjectSession, component_id: str, name: str, prefix: str) -> str:
         existing = locations(session.documents[component_id].model)
@@ -109,6 +115,49 @@ class ProjectService:
         updated = self.projects.save_project(session.snapshot, data_source=DataSource(path=relative))
         session.replace_snapshot(updated)
         return "main"
+
+    def update_project_settings(self, session: ProjectSession, *, name: str, version: str,
+                                prod: str, test: str, data_source_file: Path | None = None,
+                                clear_data_source: bool = False) -> None:
+        from componentpress.project_io.files import file_hash
+        from componentpress.project_io.paths import resolve_project_path
+        source_path = session.snapshot.model.data_source.path if session.snapshot.model.data_source else None
+        created_path: Path | None = None
+        created_hash: str | None = None
+        original_project_hash = session.snapshot.disk_hash
+        if data_source_file is not None:
+            with self.write_lock(session.snapshot.root):
+                relative = self.resources.import_data(session.snapshot.root, data_source_file)
+            created_path = resolve_project_path(session.snapshot.root, relative)
+            created_hash = file_hash(created_path)
+            source_path = relative
+        elif clear_data_source:
+            source_path = None
+        try:
+            if source_path is None and any(document.model.data is not None for document in session.documents.values()):
+                raise ProjectError(Diagnostic("DATA_SOURCE_IN_USE", "сначала отвяжите листы компонентов от Excel", session.snapshot.root))
+            current = session.snapshot.model
+            from componentpress.domain.project import CopiesColumns, DataSource, ProjectDefinition
+            candidate = ProjectDefinition.model_validate(current.model_dump(mode="python") | {
+                "name": name, "version": version,
+                "data_source": DataSource(path=source_path) if source_path else None,
+                "copies_columns": CopiesColumns(prod=prod, test=test),
+            })
+            updated = self.projects.save_project(
+                session.snapshot, name=candidate.name, version=candidate.version,
+                data_source=candidate.data_source, copies_columns=candidate.copies_columns,
+            )
+        except Exception:
+            project_path = session.snapshot.root / "project.yaml"
+            if (created_path is not None and created_path.exists() and created_hash is not None
+                    and file_hash(created_path) == created_hash
+                    and file_hash(project_path) == original_project_hash):
+                try:
+                    created_path.unlink()
+                except OSError:
+                    pass
+            raise
+        session.replace_snapshot(updated)
 
     def clear_data_source(self, session: ProjectSession) -> None:
         if any(item.model.data is not None for item in session.documents.values()):
