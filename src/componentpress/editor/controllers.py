@@ -7,7 +7,7 @@ from componentpress.application.preview_service import PreviewService
 from componentpress.application.build_service import BuildService
 from componentpress.application.contracts import BuildRequest
 from componentpress.application.sessions import DocumentSession, ProjectSession
-from componentpress.domain.diagnostics import Diagnostic
+from componentpress.domain.diagnostics import Diagnostic, ProjectError
 
 
 class ProjectController:
@@ -25,12 +25,28 @@ class ProjectController:
 
     def open(self, root: Path) -> ProjectSession:
         self.session = self.service.open_session(root)
-        self.recovery_diagnostics = self.build.recover(root) if self.build is not None else ()
+        version_diagnostics = getattr(self.service.projects, "version_recovery_diagnostics", ())
+        build_diagnostics = self.build.recover(root) if self.build is not None else ()
+        self.recovery_diagnostics = (*version_diagnostics, *build_diagnostics)
         return self.session
 
     def migrate(self, root: Path) -> ProjectSession:
         self.recovery_diagnostics = ()
         self.session = self.service.migrate_session(root)
+        return self.session
+
+    def import_project_version(self, archive_path: Path, destination: Path) -> ProjectSession:
+        if self.session is not None:
+            try:
+                destination.resolve().relative_to(self.session.snapshot.root.resolve())
+            except ValueError:
+                pass
+            else:
+                raise ProjectError(Diagnostic("ARCHIVE_DESTINATION", "восстанавливайте проект в отдельную папку вне открытого проекта", destination))
+        self.session = self.service.import_project_version(archive_path, destination)
+        version_diagnostics = getattr(self.service.projects, "version_recovery_diagnostics", ())
+        build_diagnostics = self.build.recover(destination) if self.build is not None else ()
+        self.recovery_diagnostics = (*version_diagnostics, *build_diagnostics)
         return self.session
 
     def set_session(self, session: ProjectSession) -> None:

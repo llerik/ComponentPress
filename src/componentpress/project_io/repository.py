@@ -34,6 +34,9 @@ def _read_text(path: Path) -> tuple[str, str]:
 
 
 class FileProjectRepository:
+    def __init__(self) -> None:
+        self.version_recovery_diagnostics: tuple[Diagnostic, ...] = ()
+
     def create(self, root: Path, name: str) -> ProjectSnapshot:
         root = root.resolve()
         if root.exists() and any(root.iterdir()):
@@ -69,6 +72,9 @@ class FileProjectRepository:
         root = root.resolve()
         project_path = root / "project.yaml"
         preflight_project_schemas(root)
+        from componentpress.application.version_service import recover_project_versions
+
+        self.version_recovery_diagnostics = recover_project_versions(root)
         if recovery_required(root):
             with ProjectWriteLock(root):
                 recover_migration(root)

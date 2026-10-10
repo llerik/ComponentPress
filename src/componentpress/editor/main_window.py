@@ -34,7 +34,9 @@ from componentpress.application.contracts import BuildRequest, BuildResult, Buil
 from componentpress.domain.component import ComponentDefinition, SizeMM
 from componentpress.domain.component import DataBinding
 from componentpress.application.preview_service import ValidationIssues
+from componentpress.execution.cancellation import CancellationToken
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.project_io.paths import validate_relative_path
 from componentpress.domain.copy_mode import copies_for_mode
 from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, LineNode, ShapeNode
 from componentpress.rendering.fonts import ProjectFonts
@@ -64,6 +66,7 @@ from .build_dialog import BuildOptionsDialog
 from .document_tab import DocumentTab
 from .properties import ComponentProperties, ElementProperties
 from .preview_worker import PreviewFontReadTask, PreviewRequest, PreviewSignals, PreviewTask
+from .version_worker import VersionTask
 from .qt_models import ID_ROLE, LayerTreeView, component_model, element_model
 
 
@@ -84,6 +87,13 @@ class MainWindow(QMainWindow):
         self._preview_active: tuple[DocumentTab, PreviewRequest, ProjectFonts | None] | None = None
         self._preview_pending: DocumentTab | None = None
         self._build_retry_scheduled = False
+        self._version_pool = QThreadPool(self)
+        self._version_pool.setMaxThreadCount(1)
+        self._version_task = None
+        self._version_task_kind: str | None = None
+        self._version_task_payload = None
+        self._version_cancellation: CancellationToken | None = None
+        self._version_progress: QProgressDialog | None = None
         self.undo_group = QUndoGroup(self)
         self.setObjectName("mainWindow")
         self.setWindowTitle("ComponentPress")
@@ -115,6 +125,8 @@ class MainWindow(QMainWindow):
         self.save_all_action = self._action("Сохранить всё", "Ctrl+Shift+S")
         self.close_tab_action = self._action("Закрыть вкладку", QKeySequence.StandardKey.Close)
         self.exit_action = self._action("Выход", QKeySequence.StandardKey.Quit)
+        self.import_project_archive_action = self._action("Импорт архива проекта…")
+        self.export_project_archive_action = self._action("Архив версии проекта…")
         self.export_png_zip_action = self._action("Экспорт PNG ZIP…")
         self.add_component_action = self._action("Добавить компонент…", "Ctrl+Shift+N")
         self.project_settings_action = self._action("Настройки проекта…")
@@ -134,11 +146,11 @@ class MainWindow(QMainWindow):
         self.open_build_action = self._action("Открыть папку результата")
         self.open_pdf_action = self._action("Открыть печатный PDF")
         file_menu = self.menuBar().addMenu("Файл")
-        file_menu.addActions([self.new_action, self.open_action])
+        file_menu.addActions([self.new_action, self.open_action, self.import_project_archive_action])
         file_menu.addSeparator()
         file_menu.addActions([self.save_action, self.save_all_action, self.close_tab_action])
         file_menu.addSeparator()
-        file_menu.addAction(self.export_png_zip_action)
+        file_menu.addActions([self.export_png_zip_action, self.export_project_archive_action])
         file_menu.addSeparator()
         file_menu.addAction(self.exit_action)
         edit_menu = self.menuBar().addMenu("Правка")
@@ -341,6 +353,8 @@ class MainWindow(QMainWindow):
         self.save_all_action.triggered.connect(self.save_all)
         self.close_tab_action.triggered.connect(lambda: self.close_tab(self.tabs.currentIndex()))
         self.exit_action.triggered.connect(self.close)
+        self.import_project_archive_action.triggered.connect(self._import_project_archive)
+        self.export_project_archive_action.triggered.connect(self._export_project_archive)
         self.export_png_zip_action.triggered.connect(self._export_png_archive)
         self.add_component_action.triggered.connect(self.add_component_dialog)
         self.project_settings_action.triggered.connect(self.project_settings_dialog)
@@ -402,7 +416,7 @@ class MainWindow(QMainWindow):
         self.status_project.setText(str(session.snapshot.root))
         if self.controller.recovery_diagnostics:
             details = "; ".join(item.message for item in self.controller.recovery_diagnostics)
-            self.statusBar().showMessage(f"Восстановление сборок: {details}", 15000)
+            self.statusBar().showMessage(f"Восстановление операций: {details}", 15000)
         self._update_actions()
 
     def open_path(self, root: Path) -> bool:
@@ -440,6 +454,157 @@ class MainWindow(QMainWindow):
         if folder:
             self.open_path(Path(folder))
 
+    def _import_project_archive(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(self, "Импорт архива проекта", "", "Архив проекта (*.zip)")
+        if not filename:
+            return
+        parent = QFileDialog.getExistingDirectory(self, "Папка для восстановления архива")
+        if not parent:
+            return
+        folder_name, accepted = QInputDialog.getText(self, "Имя восстановленного проекта", "Новая папка проекта")
+        if not accepted or not folder_name.strip():
+            return
+        try:
+            validate_relative_path(folder_name)
+            if "/" in folder_name:
+                raise ValueError("нужно указать имя одной папки")
+        except (ProjectError, ValueError) as exc:
+            self._show_error(exc)
+            return
+        destination = Path(parent) / folder_name.strip()
+        if destination.exists():
+            QMessageBox.warning(self, "Импорт архива", f"Папка уже существует:\n{destination}")
+            return
+        if not self.save_all():
+            return
+        self._start_version_task(
+            "import",
+            (Path(filename), destination),
+            lambda cancellation, progress: self.controller.service.versions.restore_path(
+                Path(filename), destination, cancellation=cancellation, on_progress=progress
+            ),
+        )
+
+    def _export_project_archive(self) -> None:
+        if self.session is None or self._active_build_job is not None or self._version_task is not None:
+            return
+        if not self.save_all():
+            return
+        version = self.session.snapshot.model.version
+        default_name = f"{self.session.snapshot.model.id}-{version}.zip"
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Архив версии проекта", str(self.session.snapshot.root / "archive" / default_name), "ZIP (*.zip)"
+        )
+        if not filename:
+            return
+        target = Path(filename)
+        snapshot = self.session.snapshot
+        self._start_version_task(
+            "export",
+            (snapshot, target, False),
+            lambda cancellation, progress: self.controller.service.versions.export(
+                snapshot, target, cancellation=cancellation, on_progress=progress
+            ),
+        )
+
+    def _start_version_task(self, kind: str, payload, operation) -> None:
+        if self._version_task is not None:
+            return
+        cancellation = CancellationToken()
+        task = VersionTask(operation, cancellation)
+        task.signals.progress.connect(self._version_task_progress, Qt.ConnectionType.QueuedConnection)
+        task.signals.finished.connect(self._version_task_finished, Qt.ConnectionType.QueuedConnection)
+        self._version_task = task
+        self._version_task_kind = kind
+        self._version_task_payload = payload
+        self._version_cancellation = cancellation
+        self._version_progress = QProgressDialog("Подготовка архива…", "Отменить", 0, 0, self)
+        self._version_progress.setWindowTitle("Архив проекта")
+        self._version_progress.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self._version_progress.setAutoClose(False)
+        self._version_progress.setAutoReset(False)
+        self._version_progress.canceled.connect(cancellation.cancel)
+        self._version_progress.show()
+        self._update_actions()
+        self._version_pool.start(task)
+
+    def _version_task_progress(self, completed: int, total: int, phase: str) -> None:
+        if self._version_progress is None:
+            return
+        self._version_progress.setLabelText(phase)
+        self._version_progress.setRange(0, max(1, total))
+        self._version_progress.setValue(min(completed, max(1, total)))
+
+    def _version_task_finished(self, result, error) -> None:
+        kind, payload = self._version_task_kind, self._version_task_payload
+        if self._version_progress is not None:
+            self._version_progress.close()
+        self._version_progress = None
+        self._version_task = None
+        self._version_task_kind = None
+        self._version_task_payload = None
+        self._version_cancellation = None
+        self._update_actions()
+        if isinstance(error, ProjectError):
+            if kind == "export" and error.diagnostic.code in {"ARCHIVE_EXISTS", "ARCHIVE_VERSION_EXISTS"}:
+                _snapshot, target, _replace = payload
+                replace_target = error.diagnostic.path or target
+                answer = QMessageBox.question(
+                    self,
+                    "Архив уже существует",
+                    f"Архив проекта уже существует:\n{replace_target}\n\nЗаменить его после проверки нового архива?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel,
+                )
+                if answer == QMessageBox.StandardButton.Yes and self.session is not None:
+                    snapshot = self.session.snapshot
+                    self._start_version_task(
+                        "export",
+                        (snapshot, replace_target, True),
+                        lambda cancellation, progress: self.controller.service.versions.export(
+                            snapshot, replace_target, replace=True, cancellation=cancellation, on_progress=progress
+                        ),
+                    )
+                return
+            if error.diagnostic.code == "BUILD_CANCELLED":
+                self.statusBar().showMessage("Операция с архивом отменена", 5000)
+            else:
+                self._show_error(error)
+            return
+        if error is not None:
+            self._show_error(error)
+            return
+        if kind == "import":
+            try:
+                session = self.controller.open(result)
+            except ProjectError as exc:
+                self._show_error(exc)
+                self.statusBar().showMessage(f"Архив восстановлен в {result}; предыдущая сессия сохранена", 12000)
+                return
+            self.load_session(session)
+            return
+        if kind == "export":
+            archive_path, next_version, patched, patch_error = result
+            try:
+                snapshot = self.controller.service.projects.open(payload[0].root)
+                if self.session is not None and self.session.snapshot.root == snapshot.root:
+                    self.session.replace_snapshot(snapshot, saved=set(snapshot.documents))
+                self._refresh_component_tree()
+                self._active_tab_changed(self.tabs.currentIndex())
+            except ProjectError as exc:
+                self._show_error(exc)
+            if not patched:
+                current_version = self.session.snapshot.model.version if self.session is not None else "неизвестна"
+                QMessageBox.warning(
+                    self,
+                    "Архив создан",
+                    f"Архив сохранён: {archive_path}\nТекущая версия проекта: {current_version}. Журнал операции будет сверён при следующем открытии.\n{patch_error or ''}",
+                )
+                return
+            assert self.session is not None
+            self.setWindowTitle(f"{self.session.snapshot.model.name} — ComponentPress")
+            self.statusBar().showMessage(f"Архив {archive_path} сохранён; версия проекта повышена до {next_version}", 10000)
+
     def project_settings_dialog(self) -> None:
         if self.session is None:
             return
@@ -450,6 +615,21 @@ class MainWindow(QMainWindow):
         version, accepted = QInputDialog.getText(self, "Настройки проекта", "Версия игры", text=model.version)
         if not accepted:
             return
+        try:
+            old_parts = tuple(int(part) for part in model.version.split("."))
+            new_parts = tuple(int(part) for part in version.split("."))
+            if len(new_parts) == 3 and new_parts < old_parts:
+                answer = QMessageBox.warning(
+                    self,
+                    "Понижение версии",
+                    "Понижение версии может привести к конфликту имени архива. Продолжить?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel,
+                )
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+        except ValueError:
+            pass
         prod, accepted = QInputDialog.getText(self, "Столбцы тиража", "Prod", text=model.copies_columns.prod)
         if not accepted:
             return
@@ -1794,7 +1974,7 @@ class MainWindow(QMainWindow):
         self.undo_action.setEnabled(bool(visual and active_stack and active_stack.canUndo()))
         self.redo_action.setEnabled(bool(visual and active_stack and active_stack.canRedo()))
         self.add_component_action.setEnabled(has_project)
-        idle = self._active_build_job is None
+        idle = self._active_build_job is None and self._version_task is None
         self.build_all_action.setEnabled(has_project and idle)
         self.build_active_action.setEnabled(has_tab and idle)
         self.cancel_build_action.setEnabled(not idle)
@@ -1814,6 +1994,8 @@ class MainWindow(QMainWindow):
         for button in self.drawing_tools.values():
             button.setEnabled(visual)
         self.export_png_zip_action.setEnabled(has_project and idle)
+        self.export_project_archive_action.setEnabled(has_project and idle)
+        self.import_project_archive_action.setEnabled(idle)
         selected = self._selected_ids()
         has_selection = bool(selected)
         locked_selection = False
@@ -1851,6 +2033,10 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(message, 7000)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self._version_task is not None:
+            QMessageBox.information(self, "Архив проекта", "Дождитесь завершения операции или отмените её.")
+            event.ignore()
+            return
         for tab in self._tabs.values():
             tab.preview_timer.stop()
             tab.preview_generation += 1

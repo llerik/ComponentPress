@@ -23,5 +23,9 @@ releases/0.NN/ComponentPress-0.NN-win-x64.exe
 | `0.07` | `0.07/ComponentPress-0.07-win-x64.exe` | 53 824 826 байт | `6dd53de866f6ed76c52dfae5b61dff169de224fe1320e675d9a1e97e84603da9` | Windows 10 x64 22H2; frozen smoke потоковой PDF-сборки, отмены и очистки пройден |
 | `0.08` | `0.08/ComponentPress-0.08-win-x64.exe` | 54 449 633 байта | `99193d0a81f3f73f3ed5a37b19aad4772bd59455fdb572d94ef4abeddef88d58` | Windows 10 x64 22H2; frozen smoke Excel, редактора, Prod/Test превью, PNG/PDF-сборки, отмены и очистки пройден |
 | `0.09` | `0.09/ComponentPress-0.09-win-x64.exe` | 54 462 443 байта | `5370636085e35f22fe04d616d2ed5113f9fc44b094d2442c7f074408ad7641a9` | Windows 10 x64 22H2; frozen smoke Prod/Test-сборок, Test PNG ZIP, отмены и очистки пройден |
+| `0.10` | `0.10/ComponentPress-0.10-win-x64.exe` | 54 475 430 байт | `294b1e944873d56c2f15ff35f584d823ffec37fc97688fa50449dc506f92fc2a` | Windows 10 x64; frozen smoke пройден |
+| `0.11` | `0.11/ComponentPress-0.11-win-x64.exe` | 54 500 189 байт | `537f17951b7354e8552b47080a43c3b7802421e610b58a1c599f69932885a67d` | Windows 10 x64 22H2; frozen smoke пройден |
+| `0.12` | `0.12/ComponentPress-0.12-win-x64.exe` | 54 515 198 байт | `99a0960f8cbb7ceb71c4a29b78c30356cad3cc668edd4fb4478ca3315b338aec` | Windows 10 x64 22H2; frozen smoke пройден |
+| `0.13` | `0.13/ComponentPress-0.13-win-x64.exe` | 54 552 518 байт | `fe4975cfc057f5f7ba4bfa5237f74e74f63a8d6091a8831cd5114c1dbfba4f2a` | Windows 10 x64 22H2; архив, восстановление, Prod/Test-сборки, конфликт и отмена проверены frozen smoke |
 
 Выпуски `0.01` и `0.02`, добавленные в требования ретроспективно, ещё не опубликованы. Выпуски `0.03`–`0.09` не подписаны Authenticode.

@@ -28,6 +28,12 @@ class ResourceRepository(Protocol):
     def import_data(self, root: Path, source: Path) -> str: ...
 
 
+class ArchiveRepository(Protocol):
+    """Project-version archive contract, separate from PNG build archives."""
+    def export(self, snapshot: ProjectSnapshot, target: Path, *, replace: bool = False, cancellation=None, on_progress=None) -> tuple[Path, str, bool, str | None]: ...
+    def restore_path(self, archive_path: Path, destination: Path, *, cancellation=None, on_progress=None) -> Path: ...
+
+
 class DataSourceReader(Protocol):
     def read(
         self, path: Path, sheet: str, *, source: str = "main",

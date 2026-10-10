@@ -141,6 +141,53 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     expected_test_pngs = 2 if window.session.documents[first_id].model.data is not None else 1
     if zip_result.png_count != expected_test_pngs or not test_zip.is_file():
         return False
+    from componentpress.application.version_service import import_project_archive
+    from componentpress.domain.diagnostics import ProjectError
+    from componentpress.execution.cancellation import CancellationToken
+
+    archive_directory = root / "archive"
+    archive_directory.mkdir(exist_ok=True)
+    version_zip = archive_directory / "release-smoke-0.1.0.zip"
+    original_snapshot = window.session.snapshot
+    version_result = window.controller.service.versions.export(original_snapshot, version_zip)
+    if version_result[1:] != ("0.1.1", True, None) or not version_zip.is_file():
+        return False
+    promoted_snapshot = window.controller.service.projects.open(root)
+    if promoted_snapshot.model.version != "0.1.1":
+        return False
+    window.session.replace_snapshot(promoted_snapshot, saved=set(promoted_snapshot.documents))
+    try:
+        window.controller.service.versions.export(promoted_snapshot, version_zip)
+        return False
+    except ProjectError as exc:
+        if exc.diagnostic.code != "ARCHIVE_EXISTS":
+            return False
+    cancellation = CancellationToken()
+    cancellation.cancel()
+    try:
+        window.controller.service.versions.export(
+            promoted_snapshot,
+            archive_directory / "cancelled.zip",
+            cancellation=cancellation,
+        )
+        return False
+    except ProjectError as exc:
+        if exc.diagnostic.code != "BUILD_CANCELLED":
+            return False
+    if (archive_directory / "cancelled.zip").exists():
+        return False
+    restored_root = root.parent / "release-smoke-restored"
+    if restored_root.exists():
+        return False
+    import_project_archive(version_zip, restored_root)
+    restored_snapshot = window.controller.service.projects.open(restored_root)
+    if restored_snapshot.model.version != "0.1.0":
+        return False
+    from componentpress.application.sessions import ProjectSession
+
+    restored_result = BuildService(window.controller.service).run(ProjectSession.from_snapshot(restored_snapshot), BuildRequest(max_render_workers=2))
+    if restored_result.status != "succeeded" or restored_result.pdf_path is None or not restored_result.pdf_path.is_file():
+        return False
     cancelled = []
     loop = QEventLoop()
     cancel_id = window.controller.build.start(

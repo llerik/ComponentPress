@@ -13,6 +13,7 @@ from .contracts import ProjectSnapshot
 from .identifiers import IdentifierGenerator
 from .ports import ProjectRepository, ResourceRepository, WriteLockFactory
 from .sessions import ProjectSession
+from .version_service import VersionService
 
 
 class ProjectService:
@@ -21,6 +22,7 @@ class ProjectService:
         self.resources = resources
         self.write_lock = write_lock
         self.identifiers = identifiers or IdentifierGenerator()
+        self.versions = VersionService(projects, write_lock)
 
     def create(self, root: Path, name: str) -> ProjectSnapshot:
         return self.projects.create(root, name)
@@ -117,6 +119,16 @@ class ProjectService:
     def set_project_details(self, session: ProjectSession, *, name: str, version: str) -> None:
         updated = self.projects.save_project(session.snapshot, name=name, version=version)
         session.replace_snapshot(updated)
+
+    def export_project_version(self, session: ProjectSession, target: Path, *, replace: bool = False, cancellation=None, on_progress=None) -> tuple[Path, str, bool, str | None]:
+        self.save_all(session)
+        result = self.versions.export(session.snapshot, target, replace=replace, cancellation=cancellation, on_progress=on_progress)
+        refreshed = self.projects.open(session.snapshot.root)
+        session.replace_snapshot(refreshed, saved=set(refreshed.documents))
+        return result
+
+    def import_project_version(self, archive_path: Path, destination: Path) -> ProjectSession:
+        return ProjectSession.from_snapshot(self.versions.restore(archive_path, destination))
 
     def set_copies_columns(self, session: ProjectSession, *, prod: str, test: str) -> None:
         updated = self.projects.save_project(session.snapshot, copies_columns=CopiesColumns(prod=prod, test=test))
