@@ -93,6 +93,7 @@ class MainWindow(QMainWindow):
         self._active_build_job: str | None = None
         self._last_build_result: BuildResult | None = None
         self._build_progress: QProgressDialog | None = None
+        self._right_dock_handle = None
         self._close_after_build = False
         self._preview_pool = QThreadPool(self)
         self._preview_pool.setMaxThreadCount(1)
@@ -611,20 +612,45 @@ class MainWindow(QMainWindow):
         if handle is not None and getattr(self, "_screen_handle", None) is not handle:
             old_handle = getattr(self, "_screen_handle", None)
             if old_handle is not None:
-                old_handle.screenChanged.disconnect(self._screen_changed)
+                try:
+                    old_handle.screenChanged.disconnect(self._screen_changed)
+                except RuntimeError:
+                    pass
             self._screen_handle = handle
             handle.screenChanged.connect(self._screen_changed)
+        self._bind_right_dock_screen()
         self._limit_right_dock()
 
     def _screen_changed(self, _screen) -> None:
         self._limit_right_dock()
 
+    def _right_dock_top_level_changed(self, _floating: bool) -> None:
+        QTimer.singleShot(0, self._bind_right_dock_screen)
+        self._limit_right_dock()
+
+    def _bind_right_dock_screen(self) -> None:
+        handle = self.right_dock.windowHandle() if self.right_dock.isFloating() else None
+        if handle is self._right_dock_handle:
+            return
+        if self._right_dock_handle is not None:
+            try:
+                self._right_dock_handle.screenChanged.disconnect(self._right_dock_screen_changed)
+            except RuntimeError:
+                pass
+        self._right_dock_handle = handle
+        if handle is not None:
+            handle.screenChanged.connect(self._right_dock_screen_changed)
+
+    def _right_dock_screen_changed(self, _screen) -> None:
+        self._limit_right_dock()
+
     def _limit_right_dock(self) -> None:
-        screen = self.screen()
+        screen = self.right_dock.screen() if self.right_dock.isFloating() else self.screen()
         if screen is not None:
             self.right_dock.setMaximumWidth(max(1, screen.geometry().width() // 2))
 
     def _connect_signals(self) -> None:
+        self.right_dock.topLevelChanged.connect(self._right_dock_top_level_changed)
         self.new_action.triggered.connect(self.new_project_dialog)
         self.open_action.triggered.connect(self.open_project_dialog)
         self.save_action.triggered.connect(self.save_active)
@@ -2107,11 +2133,12 @@ class MainWindow(QMainWindow):
             preview_node = locations(tab.resolved_component).get(node.id) if isinstance(node, ConditionalGroupNode) and tab.resolved_component is not None else None
             matches = preview_node.node.condition_matches if preview_node is not None and isinstance(preview_node.node, ConditionalGroupNode) else None
             font_families = ()
+            font_error = None
             if isinstance(node, HtmlNode):
                 try:
                     font_families = available_font_families(self.session.snapshot.root)
-                except ProjectError:
-                    pass
+                except ProjectError as exc:
+                    font_error = exc
             self.element_properties.show_node(node, columns, component, matches, font_families)
             self.element_properties.show_image_quality(
                 item for item in tab.image_quality if item.node_id == node.id
@@ -2120,7 +2147,8 @@ class MainWindow(QMainWindow):
             self.multi_properties_group.hide()
             self.element_properties_group.show()
             self.element_properties.set_edit_locked(ids[0] in effectively_locked_ids(component))
-            self.statusBar().showMessage(f"Выбран элемент: {node.id}", 2500)
+            message = str(font_error.diagnostic) if font_error is not None else f"Выбран элемент: {node.id}"
+            self.statusBar().showMessage(message, 7000 if font_error is not None else 2500)
         else:
             self.element_properties.show_node(None)
             self.element_properties_group.hide()
@@ -2443,8 +2471,13 @@ class MainWindow(QMainWindow):
                     source_column=dialog.content_column.currentText() or None,
                 )
         elif tool == "html":
-            dialog = HtmlAddDialog(root, self._import_image, self, columns=self._cached_columns())
-            accepted = dialog.exec() == dialog.DialogCode.Accepted
+            try:
+                dialog = HtmlAddDialog(root, self._import_image, self, columns=self._cached_columns())
+            except ProjectError as exc:
+                self._show_error(exc)
+                accepted = False
+            else:
+                accepted = dialog.exec() == dialog.DialogCode.Accepted
             if accepted:
                 self.add_html(
                     dialog.html.toPlainText(), x_mm, y_mm,

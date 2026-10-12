@@ -15,11 +15,11 @@ VSVersionInfo(
         '040904B0',
         [StringStruct('CompanyName', 'ComponentPress'),
          StringStruct('FileDescription', 'ComponentPress — редактор печатных компонентов'),
-         StringStruct('FileVersion', '0.14.4'),
+         StringStruct('FileVersion', '0.14.5'),
          StringStruct('InternalName', 'ComponentPress'),
-         StringStruct('OriginalFilename', 'ComponentPress-0.14.4-win-x64.exe'),
+         StringStruct('OriginalFilename', 'ComponentPress-0.14.5-win-x64.exe'),
          StringStruct('ProductName', 'ComponentPress'),
-         StringStruct('ProductVersion', '0.14.4')]
+         StringStruct('ProductVersion', '0.14.5')]
       )
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])

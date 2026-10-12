@@ -1,11 +1,11 @@
-"""Regression scenarios for the twelve editor fixes in release 0.14.4."""
+"""Regression scenarios for editor rendering, properties and dock behaviour."""
 
 from pathlib import Path
 from dataclasses import replace
 import shutil
 
 import pytest
-from PySide6.QtCore import QPoint, QSettings, QSize, Qt
+from PySide6.QtCore import QPoint, QRect, QSettings, QSize, Qt
 from PySide6.QtGui import QColor, QFontDatabase, QIcon, QPixmap
 from PySide6.QtWidgets import QColorDialog, QComboBox, QDialog, QMessageBox, QPushButton
 
@@ -152,7 +152,7 @@ def selected_node(window):
 
 def test_work_panel_width_limit_survives_float_restore_and_resize(make_editor, qtbot):
     window, _root, _errors = make_editor()
-    maximum = window.screen().availableGeometry().width() // 2
+    maximum = window.screen().geometry().width() // 2
     assert window.right_dock.maximumWidth() == maximum
     window.right_dock.setFloating(True)
     window.right_dock.resize(maximum + 200, 500)
@@ -164,6 +164,57 @@ def test_work_panel_width_limit_survives_float_restore_and_resize(make_editor, q
     qtbot.wait(20)
     assert window.right_dock.maximumWidth() == maximum
     assert window.right_dock.width() <= maximum
+
+
+def test_floating_work_panel_uses_its_own_screen_and_tracks_screen_changed(make_editor, qtbot, monkeypatch):
+    window, _root, _errors = make_editor()
+    dock = window.right_dock
+    dock.setFloating(True)
+    qtbot.waitUntil(lambda: window._right_dock_handle is dock.windowHandle())
+    screen_width = [1000]
+
+    class AlternateScreen:
+        def geometry(self):
+            return QRect(0, 0, screen_width[0], 800)
+
+    monkeypatch.setattr(dock, "screen", lambda: AlternateScreen())
+    dock.windowHandle().screenChanged.emit(window.screen())
+    assert dock.maximumWidth() == 500
+    screen_width[0] = 1400
+    dock.windowHandle().screenChanged.emit(window.screen())
+    assert dock.maximumWidth() == 700
+    dock.setFloating(False)
+    qtbot.waitUntil(lambda: window._right_dock_handle is None)
+    assert dock.maximumWidth() == window.screen().geometry().width() // 2
+
+
+def test_malformed_project_font_reports_error_and_cancels_html_placement(make_editor):
+    window, root, errors = make_editor()
+    font = root / "assets" / "fonts" / "broken.ttf"
+    font.parent.mkdir(parents=True, exist_ok=True)
+    font.write_bytes(b"not a valid TrueType font")
+    document = window.session.documents["regression"]
+    before_model, before_text = document.model, document.draft_text
+    count = window.active_tab.undo_stack.count()
+    window._begin_tool("html")
+    window._place_element("html", 2, 2)
+    assert len(errors) == 1 and isinstance(errors[0], ProjectError)
+    assert errors[0].diagnostic.code == "FONT_INVALID"
+    assert window.active_tab.canvas.active_tool is None
+    assert document.model == before_model and document.draft_text == before_text
+    assert window.active_tab.undo_stack.count() == count
+
+
+def test_selecting_html_keeps_malformed_font_diagnostic_visible(make_editor, qtbot):
+    window, root, errors = make_editor()
+    assert window.add_html("<p>Text</p>", 2, 2, node_id="text")
+    qtbot.waitUntil(lambda: window.active_tab.displayed_generation == window.active_tab.preview_generation, timeout=15000)
+    font = root / "assets" / "fonts" / "broken.ttf"
+    font.parent.mkdir(parents=True, exist_ok=True)
+    font.write_bytes(b"not a valid TrueType font")
+    window._set_selection(("text",), source="tree")
+    assert "FONT_INVALID" in window.statusBar().currentMessage()
+    assert not errors
 
 
 def test_html_creation_uses_font_list_and_palette_and_tenth_point_precision(make_editor, qtbot, monkeypatch):
