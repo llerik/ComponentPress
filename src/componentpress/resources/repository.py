@@ -6,6 +6,19 @@ from componentpress.project_io.paths import check_exact_case, resolve_project_pa
 
 
 class ResourceRepository:
+    def project_data_path(self, root: Path, source: Path) -> str | None:
+        root = root.resolve()
+        try:
+            relative = source.absolute().relative_to(root)
+        except ValueError:
+            return None
+        value = PurePosixPath(relative).as_posix()
+        check_exact_case(root, value)
+        target = resolve_project_path(root, value)
+        if target.is_file() and source.resolve() == target:
+            return value
+        return None
+
     def import_image(self, root: Path, source: Path, folder: str = "") -> str:
         if not source.is_file() or source.suffix.lower() not in (".png", ".jpg", ".jpeg"):
             raise ProjectError(Diagnostic("RESOURCE_INVALID", "нужен существующий PNG/JPEG", source))
@@ -43,6 +56,9 @@ class ResourceRepository:
             raise ProjectError(Diagnostic("FILE_READ", str(exc), source)) from exc
         if not data.startswith(b"PK"):
             raise ProjectError(Diagnostic("DATA_SOURCE_INVALID", "содержимое не похоже на XLSX", source))
+        project_path = self.project_data_path(root, source)
+        if project_path is not None:
+            return project_path
         relative = f"data/{source.name}"
         check_exact_case(root, relative)
         target = resolve_project_path(root, relative)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 from pathlib import Path
 
 from componentpress.application.contracts import DocumentSnapshot, ProjectSnapshot
@@ -24,6 +25,11 @@ class PreviewService:
     def __init__(self, reader: DataSourceReader):
         self.reader = reader
         self._data: dict[tuple[object, ...], DataSheetSnapshot] = {}
+        self._data_fingerprints: dict[tuple[object, ...], tuple[object, ...]] = {}
+        self._validated_models: dict[tuple[object, ...], tuple[object, ...]] = {}
+        self._failures: dict[tuple[object, ...], tuple[tuple[object, ...], tuple[object, ...], tuple[Diagnostic, ...]]] = {}
+        self._fingerprints: dict[tuple[Path, str, str], tuple[object, ...]] = {}
+        self._persisted_validation: dict[tuple[Path, str, str], tuple[tuple[object, ...], frozenset[str]]] = {}
         self._versions: dict[tuple[object, ...], int] = {}
         self._requested: dict[tuple[Path, str], int] = {}
 
@@ -31,6 +37,11 @@ class PreviewService:
         """Drop validated data when the project settings or source change."""
         if root is None:
             self._data.clear()
+            self._data_fingerprints.clear()
+            self._validated_models.clear()
+            self._failures.clear()
+            self._fingerprints.clear()
+            self._persisted_validation.clear()
             self._versions.clear()
             self._requested.clear()
             return
@@ -38,7 +49,14 @@ class PreviewService:
         for key in tuple(self._data):
             if key[0] == resolved:
                 self._data.pop(key, None)
+                self._data_fingerprints.pop(key, None)
+                self._validated_models.pop(key, None)
+                self._failures.pop(key, None)
                 self._versions.pop(key, None)
+        for key in tuple(self._fingerprints):
+            if key[0] == resolved:
+                self._fingerprints.pop(key, None)
+                self._persisted_validation.pop(key, None)
         for key in tuple(self._requested):
             if key[0] == resolved:
                 self._requested.pop(key, None)
@@ -64,69 +82,206 @@ class PreviewService:
             document = snapshot.documents[component_id]
             raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", f"источник {binding.source!r} не найден", document.path, "data.source"))
         return (
-            snapshot.root.resolve(), component_id, source.path,
+            snapshot.root.resolve(), snapshot.model.id, component_id, source.path,
             source.formula_mode, binding.sheet,
+            snapshot.model.copies_columns.prod, snapshot.model.copies_columns.test,
         )
+
+    @staticmethod
+    def _source_key(snapshot: ProjectSnapshot) -> tuple[Path, str, str] | None:
+        source = snapshot.model.data_source
+        return (snapshot.root.resolve(), source.path, source.formula_mode) if source is not None else None
+
+    @staticmethod
+    def _fingerprint(path: Path) -> tuple[int, int]:
+        try:
+            metadata = path.stat()
+        except FileNotFoundError as exc:
+            raise ProjectError(Diagnostic("DATA_SOURCE_MISSING", "книга XLSX не найдена", path)) from exc
+        except OSError as exc:
+            raise ProjectError(Diagnostic("FILE_READ", str(exc), path)) from exc
+        return metadata.st_size, metadata.st_mtime_ns
+
+    @staticmethod
+    def _model_signature(snapshot: ProjectSnapshot, component: ComponentDefinition) -> tuple[object, ...]:
+        from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode
+
+        def nodes_signature(nodes):
+            result = []
+            for node in nodes:
+                if isinstance(node, ImageNode):
+                    result.append(("image", node.source_mode, node.source if node.source_mode == "manual" else node.source_column))
+                elif isinstance(node, HtmlNode):
+                    result.append(("html", node.content_mode, node.html if node.content_mode == "manual" else node.content_column))
+                elif isinstance(node, ConditionalGroupNode):
+                    result.append(("conditional", node.condition_column, node.condition_value, nodes_signature(node.children)))
+                elif isinstance(node, GroupNode):
+                    result.append(("group", nodes_signature(node.children)))
+                else:
+                    result.append((node.type,))
+            return tuple(result)
+
+        project = snapshot.model
+        icons = tuple(sorted((name, item.path, item.width_mm, item.height_mm) for name, item in project.icons.items()))
+        return (component.data.sheet if component.data else None, nodes_signature(component.elements),
+                tuple(sorted(project.variables.items())), icons)
+
+    def _store_validation_state(self, root: Path, source_path: str, fingerprint: tuple[object, ...], component_ids: list[str]) -> Diagnostic | None:
+        path = root / ".componentpress" / "validation.json"
+        folder = path.parent
+        payload = {
+            "format": 1,
+            "source": {"path": source_path, "size": fingerprint[0], "mtime_ns": fingerprint[1]},
+            "validated_components": sorted(component_ids),
+        }
+        try:
+            if folder.is_symlink() or path.is_symlink():
+                raise ProjectError(Diagnostic("PATH_SYMLINK", "символические ссылки для состояния проверки не поддерживаются", folder))
+            from componentpress.project_io.files import atomic_write
+
+            atomic_write(path, json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+        except ProjectError as exc:
+            return exc.diagnostic
+        return None
 
     def refresh(
         self, snapshot: ProjectSnapshot, component_id: str, *, request_id: int | None = None,
         component: ComponentDefinition | None = None,
     ) -> DataSheetSnapshot | None:
         document, model = self._model(snapshot, component_id, component)
-        binding = model.data
-        if binding is None:
+        if request_id is not None and request_id < self._requested.get((snapshot.root.resolve(), component_id), 0):
+            raise ProjectError(Diagnostic("DATA_REFRESH_STALE", "устаревший результат обновления данных отброшен", document.path))
+        if model.data is None:
+            self.validate_all(snapshot, manual=True, component_ids=(component_id,))
             return None
-        source = snapshot.model.data_source
-        if source is None:
-            raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", f"источник {binding.source!r} не найден", document.path, "data.source"))
-        cache_key = self._cache_key(snapshot, component_id, model)
-        assert cache_key is not None
-        request_key = (snapshot.root.resolve(), component_id)
-        if request_id is None:
-            request_id = self.begin_refresh(snapshot.root, component_id)
-        elif request_id < self._requested.get(request_key, 0):
-            raise ProjectError(Diagnostic("DATA_REFRESH_STALE", "устаревший результат обновления данных отброшен", document.path))
-        self._requested[request_key] = request_id
-        version = self._versions.get(cache_key, 0) + 1
-        check_exact_case(snapshot.root, source.path)
-        path = resolve_project_path(snapshot.root, source.path)
-        loaded = self.reader.read(
-            path, binding.sheet, source="main",
-            copies_columns=(snapshot.model.copies_columns.prod, snapshot.model.copies_columns.test),
-            version=version, request_id=request_id,
+        diagnostics = self.validate_all(
+            snapshot, manual=True, component_ids=(component_id,),
+            component_overrides={component_id: model},
         )
-        if request_id != self._requested.get(request_key):
-            raise ProjectError(Diagnostic("DATA_REFRESH_STALE", "устаревший результат обновления данных отброшен", document.path))
-        loaded = replace(loaded, rows=tuple(
-            replace(row, instance_id=instance_id(snapshot.model.id, component_id, binding.sheet, row.row_number))
-            for row in loaded.rows
-        ))
-        resolver = BindingResolver(snapshot.root, snapshot.model)
-        issues = []
-        for row in loaded.rows:
-            try:
-                resolver.resolve_component(model, loaded, row, owner=document.path)
-            except ProjectError as exc:
-                issues.append(exc.diagnostic)
-        if issues:
-            # Retain the last successful cache and surface every row-level issue.
-            raise ValidationIssues(issues)
-        self._versions[cache_key] = version
-        self._data[cache_key] = loaded
-        return loaded
+        if diagnostics:
+            raise ValidationIssues(diagnostics)
+        return self.cached_data(snapshot, component_id, component=model)
 
-    def validate_all(self, snapshot: ProjectSnapshot) -> tuple[object, ...]:
-        diagnostics = []
-        for component in snapshot.model.components:
-            model = snapshot.documents[component.id].model
-            if model.data is None:
+    def validate_all(
+        self, snapshot: ProjectSnapshot, *, force_read: bool = False, manual: bool = True,
+        component_ids: tuple[str, ...] | None = None,
+        component_overrides: dict[str, ComponentDefinition] | None = None,
+    ) -> tuple[Diagnostic, ...]:
+        source = snapshot.model.data_source
+        source_key = self._source_key(snapshot)
+        try:
+            source_path = resolve_project_path(snapshot.root, source.path) if source is not None else None
+            if source is not None:
+                check_exact_case(snapshot.root, source.path)
+                baseline = self._fingerprint(source_path)
+            else:
+                baseline = None
+        except ProjectError as exc:
+            return (exc.diagnostic,)
+
+        all_ids = tuple(dict.fromkeys((*(item.id for item in snapshot.model.components), *snapshot.documents)))
+        requested_ids = component_ids or all_ids
+        # If the source changed, all dependent components must move to the same generation.
+        if source_key is not None and self._fingerprints.get(source_key) != baseline:
+            requested_ids = all_ids
+        requests = {item: self.begin_refresh(snapshot.root, item) for item in requested_ids}
+        staged: dict[tuple[object, ...], tuple[DataSheetSnapshot, tuple[object, ...], tuple[object, ...]]] = {}
+        static_staged: dict[tuple[object, ...], tuple[object, ...]] = {}
+        failures: dict[tuple[object, ...], tuple[tuple[object, ...], tuple[object, ...], tuple[Diagnostic, ...]]] = {}
+        diagnostics: list[Diagnostic] = []
+        checked_ids: list[str] = []
+
+        for component_id in requested_ids:
+            document = snapshot.documents.get(component_id)
+            if document is None:
                 continue
+            model = (component_overrides or {}).get(component_id, document.model)
+            signature = self._model_signature(snapshot, model)
+            cache_key = self._cache_key(snapshot, component_id, model)
+            if cache_key is None:
+                static_key = (snapshot.root.resolve(), component_id)
+                if not manual and self._validated_models.get(static_key) == signature:
+                    checked_ids.append(component_id)
+                    continue
+                try:
+                    BindingResolver(snapshot.root, snapshot.model).resolve_component(model, None, None, owner=document.path)
+                except ProjectError as exc:
+                    diagnostics.append(exc.diagnostic)
+                    failures[static_key] = ((), signature, (exc.diagnostic,))
+                else:
+                    static_staged[static_key] = signature
+                    checked_ids.append(component_id)
+                continue
+
+            assert source_path is not None and baseline is not None
+            cached = self._data.get(cache_key)
+            cached_for_current = cached is not None and self._data_fingerprints.get(cache_key) == baseline
+            if (not force_read and cached_for_current and not manual
+                    and self._validated_models.get(cache_key) == signature):
+                checked_ids.append(component_id)
+                continue
+            previous_failure = self._failures.get(cache_key)
+            if (not force_read and not manual and previous_failure is not None
+                    and previous_failure[:2] == (baseline, signature)):
+                diagnostics.extend(previous_failure[2])
+                continue
+
+            version = self._versions.get(cache_key, 0) + 1
             try:
-                self.refresh(snapshot, component.id, component=model)
+                if cached_for_current and not force_read:
+                    loaded = cached
+                else:
+                    loaded = self.reader.read(
+                        source_path, model.data.sheet, source="main",
+                        copies_columns=(snapshot.model.copies_columns.prod, snapshot.model.copies_columns.test),
+                        version=version, request_id=requests.get(component_id, 0),
+                    )
+                    loaded = replace(loaded, rows=tuple(
+                        replace(row, instance_id=instance_id(snapshot.model.id, component_id, model.data.sheet, row.row_number))
+                        for row in loaded.rows
+                    ))
+                resolver = BindingResolver(snapshot.root, snapshot.model)
+                resolver.validate_columns(model, loaded, owner=document.path)
+                resolver.validate_static_resources(model, owner=document.path)
+                for row in loaded.rows:
+                    resolver.resolve_component(model, loaded, row, owner=document.path)
             except ValidationIssues as exc:
                 diagnostics.extend(exc.diagnostics)
+                failures[cache_key] = (baseline, signature, exc.diagnostics)
             except ProjectError as exc:
                 diagnostics.append(exc.diagnostic)
+                failures[cache_key] = (baseline, signature, (exc.diagnostic,))
+            else:
+                staged[cache_key] = (loaded, signature, baseline)
+                checked_ids.append(component_id)
+
+        if any(self._requested.get((snapshot.root.resolve(), component_id)) != request for component_id, request in requests.items()):
+            return (Diagnostic("DATA_REFRESH_STALE", "устаревший результат обновления данных отброшен", snapshot.root),)
+        if source is not None and source_path is not None and baseline is not None:
+            try:
+                if self._fingerprint(source_path) != baseline:
+                    raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "книга Excel изменилась во время проверки", source_path))
+            except ProjectError as exc:
+                return (exc.diagnostic if exc.diagnostic.code == "FILE_CHANGED_EXTERNALLY" else
+                        Diagnostic("FILE_CHANGED_EXTERNALLY", "книга Excel изменилась во время проверки", source_path),)
+        # Publish only after every component has observed the same Excel fingerprint.
+        self._data.update({key: value[0] for key, value in staged.items()})
+        self._data_fingerprints.update({key: value[2] for key, value in staged.items()})
+        self._validated_models.update({key: value[1] for key, value in staged.items()})
+        self._validated_models.update(static_staged)
+        self._failures.update(failures)
+        self._versions.update({key: value[0].version for key, value in staged.items()})
+        if source_key is not None and baseline is not None and checked_ids:
+            self._fingerprints[source_key] = baseline
+            previous = self._persisted_validation.get(source_key)
+            prior_ids = previous[1] if previous is not None and previous[0] == baseline else frozenset()
+            validated_ids = prior_ids.union(checked_ids)
+            if previous != (baseline, validated_ids):
+                state_error = self._store_validation_state(snapshot.root, source.path, baseline, list(validated_ids))
+                if state_error is not None:
+                    diagnostics.append(state_error)
+                else:
+                    self._persisted_validation[source_key] = (baseline, validated_ids)
         return tuple(diagnostics)
 
     def data(

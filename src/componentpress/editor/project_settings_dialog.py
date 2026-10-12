@@ -1,6 +1,7 @@
 """Validated project-wide settings editor."""
 
 from pathlib import Path
+from pathlib import PurePosixPath
 
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
@@ -14,6 +15,7 @@ class ProjectSettingsDialog(QDialog):
     def __init__(self, session: ProjectSession, preview, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Настройки проекта")
+        self._project_root = session.snapshot.root.resolve()
         self._picked_file: Path | None = None
         model = session.snapshot.model
         self.name = QLineEdit(model.name)
@@ -50,7 +52,13 @@ class ProjectSettingsDialog(QDialog):
         filename, _ = QFileDialog.getOpenFileName(self, "Выбрать книгу Excel", "", "Excel (*.xlsx)")
         if filename:
             self._picked_file = Path(filename)
-            self.source.setText(self._picked_file.name)
+            try:
+                relative = self._picked_file.absolute().relative_to(self._project_root)
+            except ValueError:
+                display = str(self._picked_file)
+            else:
+                display = PurePosixPath(relative).as_posix()
+            self.source.setText(display)
 
     def _clear_source(self) -> None:
         self._picked_file = None

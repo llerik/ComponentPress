@@ -1,24 +1,28 @@
+%YAML 1.2
+---
 # Второй компонент читает другой лист той же книги
 schema_version: 5
 id: event-card
 name: "Карта события"
 size_mm:
-  width: 63
-  height: 88
-background: "#F4F8FF"
+  width: 63.0
+  height: 88.0
+background: "#5043FF"
 data:
   sheet: "События"
 elements:
-  - id: event-title
-    name: "Событие"
-    type: html
-    x_mm: 5
-    y_mm: 8
-    width_mm: 53
-    height_mm: 24
-    font_family: Arial
-    font_size_pt: 16
-    color: "#17365D"
-    content:
-      mode: column
-      column: "Заголовок HTML"
+- id: event-title
+  name: "Событие"
+  type: html
+  x_mm: -2.8308225324027925
+  y_mm: 9.1186889332004
+  width_mm: 53.0
+  height_mm: 24.0
+  font_family: Arial
+  font_size_pt: 16.0
+  color: "#17365D"
+  content:
+    mode: column
+    column: "Заголовок HTML"
+  locked: false
+  text_align: left

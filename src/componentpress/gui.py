@@ -6,8 +6,9 @@ import inspect
 import sys
 import traceback
 
-from PySide6.QtCore import QEventLoop, QTimer
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QEventLoop, Qt, QTimer
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QMessageBox, QTreeView
 
 from componentpress.bootstrap import project_controller
 from componentpress.domain.component import SizeMM
@@ -26,14 +27,128 @@ def _smoke_failure(root: Path, line: int) -> bool:
 
 def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     """Exercise stage-six Excel preview plus the preceding editing workflow."""
+    from componentpress.editor.dialogs import format_error
+    from componentpress.editor.qt_models import ID_ROLE
+
+    if window.project_settings_action.isEnabled() or window.delete_component_action.isEnabled() or window.windows_menu.menuAction().isEnabled():
+        return _smoke_failure(root, inspect.currentframe().f_lineno)
+    window.show()
+    QApplication.processEvents()
     window.load_session(window.controller.open(root))
     if window.session is None:
+        return _smoke_failure(root, inspect.currentframe().f_lineno)
+    expected_docks = {"Инструменты", "Рабочие панели", "События", "Превью"}
+    if (
+        not window.project_settings_action.isEnabled()
+        or window.delete_component_action.isEnabled()
+        or not window.windows_menu.menuAction().isEnabled()
+        or {action.text() for action in window.windows_menu.actions()} != expected_docks
+        or any(not action.isCheckable() for action in window.windows_menu.actions())
+        or format_error(Exception()).strip() == ""
+        or format_error(Exception("   ")).strip() == ""
+    ):
+        return _smoke_failure(root, inspect.currentframe().f_lineno)
+    events_action = next(action for action in window.windows_menu.actions() if action.text() == "События")
+    events_action.trigger()
+    if window.events_dock.isVisible() or events_action.isChecked():
+        return _smoke_failure(root, inspect.currentframe().f_lineno)
+    events_action.trigger()
+    if not window.events_dock.isVisible() or window.dockWidgetArea(window.events_dock) != Qt.DockWidgetArea.BottomDockWidgetArea:
+        return _smoke_failure(root, inspect.currentframe().f_lineno)
+    component_tree = window.right_tabs.widget(0).findChild(QTreeView, "componentTree")
+    if (
+        component_tree is None
+        or component_tree is not window.component_tree
+        or not component_tree.isVisible()
+        or component_tree.model() is None
+        or component_tree.model().rowCount() != len(window.session.documents)
+    ):
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     component_ids = tuple(window.session.documents)
     if not component_ids:
         return _smoke_failure(root, inspect.currentframe().f_lineno)
+    data_components = tuple(
+        document for document in window.session.snapshot.documents.values()
+        if document.model.data is not None
+    )
+    if data_components and (
+        window.controller.preview is None
+        or any(
+            window.controller.preview.cached_data(window.session.snapshot, document.model.id) is None
+            for document in data_components
+        )
+    ):
+        return _smoke_failure(root, inspect.currentframe().f_lineno)
     first_id = component_ids[0]
     first_tab = window.open_component(first_id)
+    if first_tab is None or not _wait_for_preview(first_tab) or not first_tab.canvas._overlays:
+        return _smoke_failure(root, inspect.currentframe().f_lineno)
+    if window.session.documents[first_id].model.data is not None:
+        cached = window.controller.preview.cached_data(window.session.snapshot, first_id)
+        if cached is None:
+            return _smoke_failure(root, inspect.currentframe().f_lineno)
+        node_id = window.session.documents[first_id].model.elements[0].id
+        window._move_selected((node_id,), 1.0, 0.0)
+        if not _wait_for_preview(first_tab) or window.controller.preview.cached_data(window.session.snapshot, first_id) is not cached:
+            return _smoke_failure(root, inspect.currentframe().f_lineno)
+        first_tab.undo_stack.undo()
+        if not _wait_for_preview(first_tab) or window.controller.preview.cached_data(window.session.snapshot, first_id) is not cached:
+            return _smoke_failure(root, inspect.currentframe().f_lineno)
+    if window.session.snapshot.model.data_source is not None:
+        source_path = root / window.session.snapshot.model.data_source.path
+        source_bytes = source_path.read_bytes()
+        model = window.session.snapshot.model
+        try:
+            window.controller.update_project_settings(
+                name=model.name,
+                version=model.version,
+                prod=model.copies_columns.prod,
+                test=model.copies_columns.test,
+                data_source_file=source_path,
+            )
+        except Exception:
+            return _smoke_failure(root, inspect.currentframe().f_lineno)
+        if source_path.read_bytes() != source_bytes:
+            return _smoke_failure(root, inspect.currentframe().f_lineno)
+    first_index = next(
+        (component_tree.model().index(row, 0) for row in range(component_tree.model().rowCount())
+         if component_tree.model().index(row, 0).data(ID_ROLE) == first_id),
+        None,
+    )
+    if first_index is None:
+        return _smoke_failure(root, inspect.currentframe().f_lineno)
+    component_tree.setCurrentIndex(first_index)
+    component_tree.setFocus()
+    QTest.keyClick(component_tree, Qt.Key.Key_Down)
+    if len(component_ids) > 1:
+        second_id = component_tree.currentIndex().data(ID_ROLE)
+        if second_id == first_id or window.active_tab is None or window.active_tab.component_id != second_id:
+            return _smoke_failure(root, inspect.currentframe().f_lineno)
+        first_tab = window.open_component(first_id)
+        second_tab = window.open_component(second_id)
+        if first_tab is None or second_tab is None:
+            return _smoke_failure(root, inspect.currentframe().f_lineno)
+        window.tabs.setCurrentWidget(first_tab)
+        if component_tree.currentIndex().data(ID_ROLE) != first_id:
+            return _smoke_failure(root, inspect.currentframe().f_lineno)
+        window.tabs.setCurrentWidget(second_tab)
+        if component_tree.currentIndex().data(ID_ROLE) != second_id or not window.delete_component_action.isEnabled():
+            return _smoke_failure(root, inspect.currentframe().f_lineno)
+        original_question = QMessageBox.question
+        QMessageBox.question = staticmethod(lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes)
+        try:
+            window.delete_component_action.trigger()
+        finally:
+            QMessageBox.question = original_question
+        if second_id in window.session.documents:
+            return _smoke_failure(root, inspect.currentframe().f_lineno)
+        window._undo()
+        if second_id not in window.session.documents:
+            return _smoke_failure(root, inspect.currentframe().f_lineno)
+        window.close_tab(window.tabs.indexOf(second_tab))
+    else:
+        first_tab = None
+    first_tab = first_tab or window.open_component(first_id)
     if first_tab is None:
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     if window.session.documents[first_id].model.data is not None:
@@ -242,8 +357,15 @@ def main(argv: list[str] | None = None) -> int:
     application.setApplicationName("ComponentPress")
     application.setOrganizationName("ComponentPress")
     application.setWindowIcon(load_application_icon())
-    window = MainWindow(project_controller())
     smoke = len(arguments) == 2 and arguments[0] == "--release-smoke"
+    if smoke:
+        from PySide6.QtCore import QSettings
+
+        settings_root = Path(arguments[1]) / ".componentpress" / "release-smoke-settings"
+        settings_root.mkdir(parents=True, exist_ok=True)
+        QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+        QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(settings_root))
+    window = MainWindow(project_controller())
     if arguments and not smoke:
         return 2
     if smoke:

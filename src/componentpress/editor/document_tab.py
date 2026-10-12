@@ -1,6 +1,6 @@
 """One component tab with synchronized layout and YAML views."""
 
-from PySide6.QtCore import QRegularExpression, QTimer, Signal
+from PySide6.QtCore import QRegularExpression, QSize, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat, QUndoStack
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QVBoxLayout,
     QWidget,
-    QStyle,
 )
 
 from componentpress.application.sessions import ProjectSession
@@ -19,6 +18,7 @@ from componentpress.domain.diagnostics import ProjectError
 from componentpress.rendering import render_component_image
 from componentpress.rendering.geometry import MM_PER_INCH
 from componentpress.domain.component import ComponentDefinition
+from componentpress.app_assets import load_icon
 
 from .canvas import ComponentCanvas
 
@@ -85,10 +85,8 @@ class DocumentTab(QWidget):
             button.setToolTip("Перетаскивание" if button is self.layout_mode else "Текст")
             button.setAccessibleName(button.toolTip())
             button.setText("")
-            button.setIcon(self.style().standardIcon(
-                QStyle.StandardPixmap.SP_FileDialogDetailedView if button is self.layout_mode
-                else QStyle.StandardPixmap.SP_FileDialogContentsView
-            ))
+            button.setIcon(load_icon("cursor.png" if button is self.layout_mode else "text.png"))
+            button.setIconSize(QSize(22, 22))
             controls.addWidget(button)
         self.layout_mode.setChecked(True)
         controls.addStretch()

@@ -8,14 +8,14 @@ spec_directory = Path(SPECPATH)
 settings = runpy.run_path(str(spec_directory / "common.py"))
 root = settings["ROOT"]
 executable_name = settings["EXECUTABLE_NAME"]
-application_icon = root / "src" / "componentpress" / "app_assets" / "componentpress.png"
+application_assets = root / "src" / "componentpress" / "app_assets"
 windows_icon = spec_directory / "componentpress.ico"
 
 analysis = Analysis(
     [str(spec_directory / "windows_entry.py")],
     pathex=[str(root / "src")],
     binaries=[],
-    datas=[(str(application_icon), "componentpress/app_assets")],
+    datas=[(str(asset), "componentpress/app_assets") for asset in application_assets.glob("*.png")],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

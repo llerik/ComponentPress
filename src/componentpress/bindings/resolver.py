@@ -279,6 +279,56 @@ class BindingResolver:
         model = component.model_copy(update={"elements": visit(component.elements)})
         return ResolvedComponent(model, component.id, row, data.version if data else None)
 
+    def validate_columns(self, component: ComponentDefinition, data: DataSheetSnapshot, *, owner: Path | None = None) -> None:
+        """Check declared column bindings even when the sheet has no data rows."""
+        source = component.data.source if component.data else ""
+        sheet = component.data.sheet if component.data else ""
+        owner = owner or self.root / f"components/{component.id}.yaml"
+        names = {unicodedata.normalize("NFKC", name.strip()).casefold() for name in data.headers}
+
+        def require(column: str, field: str, node_id: str) -> None:
+            normalized = unicodedata.normalize("NFKC", column.strip()).casefold()
+            if normalized not in names:
+                raise ProjectError(Diagnostic(
+                    "COLUMN_UNKNOWN", f"нет столбца {column!r}", owner, field,
+                    source=source, sheet=sheet, node_id=node_id,
+                ))
+
+        def visit(nodes_: tuple[Node, ...]) -> None:
+            for node in nodes_:
+                if isinstance(node, ImageNode):
+                    if node.source_mode == "column":
+                        require(node.source_column or "", f"elements.{node.id}.source", node.id)
+                elif isinstance(node, HtmlNode):
+                    if node.content_mode == "column":
+                        require(node.content_column or "", f"elements.{node.id}.html", node.id)
+                elif isinstance(node, ConditionalGroupNode):
+                    require(node.condition_column, f"elements.{node.id}.condition_column", node.id)
+                    visit(node.children)
+                elif isinstance(node, GroupNode):
+                    visit(node.children)
+
+        visit(component.elements)
+
+    def validate_static_resources(self, component: ComponentDefinition, *, owner: Path | None = None) -> None:
+        """Validate manual resources even if a bound sheet currently has no rows."""
+        from componentpress.domain.nodes import ConditionalGroupNode, GroupNode
+
+        source = component.data.source if component.data else ""
+        sheet = component.data.sheet if component.data else ""
+        owner = owner or self.root / f"components/{component.id}.yaml"
+
+        def visit(nodes_: tuple[Node, ...]) -> None:
+            for node in nodes_:
+                if isinstance(node, ImageNode) and node.source_mode == "manual":
+                    self.resolve_path(node.source, None, BindingLocation(owner, f"elements.{node.id}.source", node.id, source, sheet))
+                elif isinstance(node, HtmlNode) and node.content_mode == "manual":
+                    self.resolve_html(node.html, None, BindingLocation(owner, f"elements.{node.id}.html", node.id, source, sheet))
+                elif isinstance(node, GroupNode):
+                    visit(node.children)
+
+        visit(component.elements)
+
     @staticmethod
     def _column_cell(column: str, row: DataRow | None, location: BindingLocation) -> CellValue:
         if row is None:

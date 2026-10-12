@@ -1,3 +1,5 @@
+%YAML 1.2
+---
 # Пример проекта второго этапа; расширен для демонстрации этапа 6
 schema_version: 5
 id: demo-game
@@ -8,27 +10,27 @@ variables:
 icons:
   ic_leaf_6:
     path: assets/images/animals/enemy/leaf.png
-    width_mm: 6
-    height_mm: 6
+    width_mm: 6.0
+    height_mm: 6.0
   ic_leaf_3:
     path: assets/images/icons/effects/leaf-small.png
-    width_mm: 3
-    height_mm: 3
+    width_mm: 3.0
+    height_mm: 3.0
 data_source:
   path: data/game.xlsx
 copies_columns:
   prod: Prod
   test: Debug
 components:
-  - id: forest-card
-    path: components/forest-card.yaml
-  - id: event-card
-    path: components/event-card.yaml
+- id: forest-card
+  path: components/forest-card.yaml
+- id: event-card
+  path: components/event-card.yaml
 print:
   paper: A4
   orientation: portrait
-  margin_mm: 5
-  gap_mm: 3
+  margin_mm: 5.0
+  gap_mm: 3.0
   dpi: 300
   cut_lines: true
   cut_line_width_mm: 0.2

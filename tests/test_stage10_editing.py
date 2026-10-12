@@ -5,11 +5,14 @@ import shutil
 
 import pytest
 from pydantic import ValidationError
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QFocusEvent, QKeyEvent
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from componentpress.application.preview_service import PreviewService
 from componentpress.application.edits import ensure_visual_edit_respects_locks
-from componentpress.bootstrap import project_repository
+from componentpress.bootstrap import project_repository, project_service
 from componentpress.data_sources import XlsxReader
 from componentpress.domain.component import ComponentDefinition, SizeMM
 from componentpress.domain.diagnostics import ProjectError
@@ -19,6 +22,7 @@ from componentpress.domain.schema import SCHEMA_VERSION
 from componentpress.domain.tree import (
     TreeOperationError,
     align_nodes,
+    locations,
     move_nodes,
     node_bounds,
     place_nodes,
@@ -26,11 +30,128 @@ from componentpress.domain.tree import (
     update_node,
 )
 from componentpress.editor.properties import ElementProperties
+from componentpress.editor.controllers import ProjectController
+from componentpress.editor.main_window import MainWindow
+from componentpress.project_io.repository import FileProjectRepository
 from componentpress.project_io.yaml_codec import parse_component
 from componentpress.rendering.exporter import ensure_gui_application
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _editor(tmp_path: Path, qtbot, monkeypatch):
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *_args, **_kwargs: QMessageBox.StandardButton.Discard))
+    root = tmp_path / "game"
+    shutil.copytree(ROOT / "examples" / "demo-game", root)
+    service = project_service()
+    window = MainWindow(ProjectController(service))
+    window.load_session(service.open_session(root))
+    qtbot.addWidget(window)
+    window.show()
+    tab = window.open_component("forest-card")
+    assert tab is not None
+    qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
+    return window, root, tab
+
+
+@pytest.mark.parametrize(
+    ("key", "modifiers", "dx", "dy"),
+    [
+        (Qt.Key.Key_Left, Qt.KeyboardModifier.NoModifier, -0.1, 0.0),
+        (Qt.Key.Key_Right, Qt.KeyboardModifier.NoModifier, 0.1, 0.0),
+        (Qt.Key.Key_Up, Qt.KeyboardModifier.NoModifier, 0.0, -0.1),
+        (Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier, 0.0, 0.1),
+        (Qt.Key.Key_Right, Qt.KeyboardModifier.ShiftModifier, 1.0, 0.0),
+    ],
+)
+def test_arrow_nudge_commits_one_undoable_move_and_saves(
+    tmp_path: Path, qtbot, monkeypatch, key, modifiers, dx: float, dy: float,
+) -> None:
+    window, root, tab = _editor(tmp_path, qtbot, monkeypatch)
+    window._set_selection(("heading",), source="tree")
+    before = locations(window.session.documents["forest-card"].model)["heading"]
+    history_count = tab.undo_stack.count()
+
+    QTest.keyPress(tab.canvas, key, modifiers)
+    QTest.keyRelease(tab.canvas, key, modifiers)
+    qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
+
+    after = locations(window.session.documents["forest-card"].model)["heading"]
+    assert (after.node.x_mm, after.node.y_mm) == pytest.approx((before.node.x_mm + dx, before.node.y_mm + dy))
+    assert tab.undo_stack.count() == history_count + 1
+    assert tab.canvas.selected_ids == ("heading",)
+    overlay = tab.canvas._overlays["heading"].sceneBoundingRect()
+    pixmap = tab.canvas._pixmap_item
+    component = window.session.documents["forest-card"].model
+    expected_bounds = node_bounds(component, "heading")
+    assert overlay.x() == pytest.approx(expected_bounds[0] * pixmap.boundingRect().width() / component.size_mm.width)
+    assert overlay.y() == pytest.approx(expected_bounds[1] * pixmap.boundingRect().height() / component.size_mm.height)
+
+    window.undo_group.undo()
+    assert locations(window.session.documents["forest-card"].model)["heading"].node == before.node
+    window.undo_group.redo()
+    assert locations(window.session.documents["forest-card"].model)["heading"].node == after.node
+    assert window.save_active()
+    reopened = FileProjectRepository().open(root)
+    assert locations(reopened.documents["forest-card"].model)["heading"].node == after.node
+
+
+def test_arrow_hold_batches_repeats_and_blocked_group_warning_cannot_reenter(
+    tmp_path: Path, qtbot, monkeypatch,
+) -> None:
+    window, _root, tab = _editor(tmp_path, qtbot, monkeypatch)
+    window._set_selection(("heading", "caption"), source="tree")
+    before = locations(window.session.documents["forest-card"].model)
+    history_count = tab.undo_stack.count()
+
+    QTest.keyPress(tab.canvas, Qt.Key.Key_Right)
+    for _ in range(3):
+        event = QKeyEvent(
+            QEvent.Type.KeyPress, Qt.Key.Key_Right, Qt.KeyboardModifier.NoModifier,
+            "", True, 1,
+        )
+        QApplication.sendEvent(tab.canvas, event)
+    QTest.keyRelease(tab.canvas, Qt.Key.Key_Right)
+    qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
+
+    moved = locations(window.session.documents["forest-card"].model)
+    assert moved["heading"].global_x == pytest.approx(before["heading"].global_x + 0.4)
+    assert moved["caption"].global_x == pytest.approx(before["caption"].global_x + 0.4)
+    assert tab.undo_stack.count() == history_count + 1
+    window.undo_group.undo()
+    assert locations(window.session.documents["forest-card"].model)["heading"].global_x == before["heading"].global_x
+
+    assert window._apply_tree("Блокировка потомка", update_node, "caption", selected=("caption",), locked=True)
+    group_before = locations(window.session.documents["forest-card"].model)["text-group"].node
+    locked_model = window.session.documents["forest-card"].model
+    window._set_selection(("caption",), source="tree")
+    history_count = tab.undo_stack.count()
+    QTest.keyPress(tab.canvas, Qt.Key.Key_Right)
+    QTest.keyRelease(tab.canvas, Qt.Key.Key_Right)
+    assert window.session.documents["forest-card"].model == locked_model
+    assert tab.undo_stack.count() == history_count
+
+    group_overlay_before = tab.canvas._overlays["text-group"].sceneBoundingRect()
+    window._set_selection(("text-group",), source="tree")
+    history_count = tab.undo_stack.count()
+    warnings = []
+
+    def reject_and_lose_focus(*_args) -> None:
+        warnings.append(True)
+        event = QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.OtherFocusReason)
+        QApplication.sendEvent(tab.canvas, event)
+
+    monkeypatch.setattr(QMessageBox, "warning", reject_and_lose_focus)
+    QTest.keyPress(tab.canvas, Qt.Key.Key_Right)
+    QTest.keyRelease(tab.canvas, Qt.Key.Key_Right)
+
+    assert len(warnings) == 1
+    assert tab.undo_stack.count() == history_count
+    assert window.session.documents["forest-card"].model == locked_model
+    assert locations(window.session.documents["forest-card"].model)["text-group"].node == group_before
+    group_overlay_after = tab.canvas._overlays["text-group"].sceneBoundingRect()
+    assert group_overlay_after.x() == pytest.approx(group_overlay_before.x())
 
 
 def _component() -> ComponentDefinition:

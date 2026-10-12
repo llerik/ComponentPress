@@ -12,8 +12,11 @@ class UiState:
         settings = self.settings
         settings.beginGroup("mainWindow")
         settings.setValue("geometry", window.saveGeometry())
-        settings.setValue("state", window.saveState())
         settings.setValue("rightTab", window.right_tabs.currentIndex())
+        if window.session is not None:
+            settings.setValue("state", window.saveState())
+            for dock in window.docks:
+                settings.setValue(f"docks/{dock.objectName()}", dock.isVisible())
         settings.endGroup()
         settings.sync()
 
@@ -33,6 +36,10 @@ class UiState:
                 window.move(screen.availableGeometry().center() - window.rect().center())
         if state is not None:
             window.restoreState(state)
+        window._saved_dock_visibility = {
+            dock.objectName(): settings.value(f"docks/{dock.objectName()}", True, type=bool)
+            for dock in window.docks
+        }
         index = settings.value("rightTab", 0, type=int)
         if 0 <= index < window.right_tabs.count():
             window.right_tabs.setCurrentIndex(index)

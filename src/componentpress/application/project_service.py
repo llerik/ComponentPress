@@ -125,15 +125,17 @@ class ProjectService:
         created_path: Path | None = None
         created_hash: str | None = None
         original_project_hash = session.snapshot.disk_hash
-        if data_source_file is not None:
-            with self.write_lock(session.snapshot.root):
-                relative = self.resources.import_data(session.snapshot.root, data_source_file)
-            created_path = resolve_project_path(session.snapshot.root, relative)
-            created_hash = file_hash(created_path)
-            source_path = relative
-        elif clear_data_source:
-            source_path = None
         try:
+            if data_source_file is not None:
+                with self.write_lock(session.snapshot.root):
+                    reused_path = self.resources.project_data_path(session.snapshot.root, data_source_file)
+                    relative = self.resources.import_data(session.snapshot.root, data_source_file)
+                if reused_path is None:
+                    created_path = resolve_project_path(session.snapshot.root, relative)
+                    created_hash = file_hash(created_path)
+                source_path = relative
+            elif clear_data_source:
+                source_path = None
             if source_path is None and any(document.model.data is not None for document in session.documents.values()):
                 raise ProjectError(Diagnostic("DATA_SOURCE_IN_USE", "сначала отвяжите листы компонентов от Excel", session.snapshot.root))
             current = session.snapshot.model
@@ -148,14 +150,14 @@ class ProjectService:
                 data_source=candidate.data_source, copies_columns=candidate.copies_columns,
             )
         except Exception:
-            project_path = session.snapshot.root / "project.yaml"
-            if (created_path is not None and created_path.exists() and created_hash is not None
-                    and file_hash(created_path) == created_hash
-                    and file_hash(project_path) == original_project_hash):
-                try:
+            try:
+                project_path = session.snapshot.root / "project.yaml"
+                if (created_path is not None and created_path.exists() and created_hash is not None
+                        and file_hash(created_path) == created_hash
+                        and file_hash(project_path) == original_project_hash):
                     created_path.unlink()
-                except OSError:
-                    pass
+            except OSError:
+                pass
             raise
         session.replace_snapshot(updated)
 

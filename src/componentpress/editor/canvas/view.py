@@ -483,20 +483,22 @@ class ComponentCanvas(QGraphicsView):
     def _finish_nudge(self) -> None:
         if self._nudge_key is None:
             return
-        if self._component is not None and self._pixmap_item is not None and (self._nudge_delta.x() or self._nudge_delta.y()):
-            sx = 1 / self._world_per_mm_x
-            sy = 1 / self._world_per_mm_y
-            component_before = self._component
-            starts = dict(self._nudge_starts)
-            self.nudgeRequested.emit(self._nudge_ids, self._nudge_delta.x() * sx, self._nudge_delta.y() * sy)
-            if self._component is component_before:
-                for node_id, start in starts.items():
-                    if node_id in self._overlays:
-                        self._overlays[node_id].setPos(start)
+        component_before = self._component
+        ids = self._nudge_ids
+        delta = QPointF(self._nudge_delta)
+        starts = dict(self._nudge_starts)
         self._nudge_key = None
         self._nudge_ids = ()
         self._nudge_delta = QPointF()
         self._nudge_starts.clear()
+        if component_before is not None and self._pixmap_item is not None and (delta.x() or delta.y()):
+            sx = 1 / self._world_per_mm_x
+            sy = 1 / self._world_per_mm_y
+            self.nudgeRequested.emit(ids, delta.x() * sx, delta.y() * sy)
+            if self._component is component_before:
+                for node_id, start in starts.items():
+                    if node_id in self._overlays:
+                        self._overlays[node_id].setPos(start)
 
     def focusOutEvent(self, event) -> None:
         self._finish_nudge()

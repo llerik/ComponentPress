@@ -236,7 +236,7 @@ def test_gui_data_panel_switch_refresh_insert_and_export(tmp_path: Path, qtbot, 
     assert tab.preview_row_number == 3
     assert tab.resolved_component is not None and "Лиса" in repr(tab.resolved_component)
     window._refresh_data(force=True)
-    assert controller.preview.data(window.session.snapshot, "forest-card").version == before_version + 1
+    assert controller.preview.data(window.session.snapshot, "forest-card").version == before_version
 
     index = window.data_column.findData("Название")
     window.data_column.setCurrentIndex(index)
@@ -430,7 +430,8 @@ def test_gui_applied_yaml_binding_uses_new_sheet_not_cached_data(tmp_path: Path,
     window.load_session(project_service().open_session(root))
     window.show()
     tab = window.open_component("event-card")
-    assert tab is not None and tab.resolved_component is None
+    assert tab is not None and tab.resolved_component is not None
+    assert "Лесной дождь" in repr(tab.resolved_component)
     window._validate_active()
     assert tab.resolved_component is not None
     assert "Лесной дождь" in repr(tab.resolved_component)

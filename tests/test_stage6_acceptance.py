@@ -291,6 +291,7 @@ def test_preview_rejects_result_that_becomes_stale_while_reader_is_running(tmp_p
     root = tmp_path / "project"
     (root / "components").mkdir(parents=True)
     (root / "data").mkdir()
+    (root / "data" / "test.xlsx").write_bytes(b"reader fixture")
     component = _html_component("<p>{Текст}</p>")
     project = _project()
     document = DocumentSnapshot(root / "components/card.yaml", "", "", component)
@@ -503,7 +504,8 @@ def test_gui_prod_test_preview_filters_validated_snapshot(tmp_path: Path, qtbot)
     window.load_session(project_service().open_session(root))
     try:
         tab = window.open_component("forest-card")
-        assert tab is not None and tab.preview_row_number is None
+        assert tab is not None and tab.preview_row_number == 2
+        assert "Волк" in repr(tab.resolved_component)
         window._validate_active()
         assert tab.preview_row_number == 2
         data = controller.preview.data(window.session.snapshot, "forest-card")

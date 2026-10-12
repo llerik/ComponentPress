@@ -25,6 +25,11 @@ from PySide6.QtWidgets import (
 )
 
 
+def format_error(error: Exception) -> str:
+    message = str(error).strip()
+    return message or f"Не удалось выполнить операцию ({type(error).__name__})."
+
+
 class ResourcePickerDialog(QDialog):
     def __init__(self, root: Path, importer: Callable[[Path, str], str], parent=None):
         super().__init__(parent)
@@ -81,7 +86,7 @@ class ResourcePickerDialog(QDialog):
         try:
             self.selected_path = self.importer(Path(source), folder.strip().replace("\\", "/"))
         except Exception as exc:
-            QMessageBox.critical(self, "Ошибка импорта", str(exc))
+            QMessageBox.critical(self, "Ошибка импорта", format_error(exc))
             return
         self.accept()
 

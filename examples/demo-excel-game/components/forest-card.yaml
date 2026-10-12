@@ -1,60 +1,68 @@
+%YAML 1.2
+---
 # Статический макет с вложенной группой; на этапе 6 к нему добавлены данные Excel
 schema_version: 5
 id: forest-card
 name: "Лесная карта"
 size_mm:
-  width: 63
-  height: 88
+  width: 63.0
+  height: 88.0
 background: "#FFFFFF"
 data:
   sheet: "Карты"
 elements:
-  - id: leaf-art
-    name: "Иллюстрация"
-    type: image
-    x_mm: 4
-    y_mm: 4
-    width_mm: 55
-    height_mm: 42
-    source:
+- id: leaf-art
+  name: "Иллюстрация"
+  type: image
+  x_mm: 7.72643070787637
+  y_mm: 4.372052176802925
+  width_mm: 55.0
+  height_mm: 42.0
+  source:
+    mode: column
+    column: "Изображение"
+  fit: contain
+  locked: false
+- id: text-group
+  type: group
+  name: "Текст"
+  x_mm: 4.0
+  y_mm: 49.0
+  children:
+  - id: heading
+    name: "Заголовок"
+    type: html
+    x_mm: 0.0
+    y_mm: 0.0
+    width_mm: 55.0
+    height_mm: 10.0
+    font_family: Arial
+    font_size_pt: 14.0
+    color: "#111111"
+    content:
       mode: column
-      column: "Изображение"
-    fit: contain
-  - id: text-group
-    type: group
-    name: "Текст"
-    x_mm: 4
-    y_mm: 49
-    children:
-      - id: heading
-        name: "Заголовок"
-        type: html
-        x_mm: 0
-        y_mm: 0
-        width_mm: 55
-        height_mm: 10
-        font_family: Arial
-        font_size_pt: 14
-        color: "#111111"
-        content:
-          mode: column
-          column: "Заголовок HTML"
-      - id: caption
-        name: "Описание"
-        type: html
-        x_mm: 0
-        y_mm: 10
-        width_mm: 55
-        height_mm: 29
-        font_family: Arial
-        font_size_pt: 6
-        color: "#111111"
-        content:
-          mode: manual
-          html: |-
-            <p>{{ vars["edition"] }} — примечание компонента</p>
-            <table border="1" cellspacing="0" cellpadding="2" width="100%">
-              <tr><th colspan="2">Свойства</th></tr>
-              <tr><td>Ресурс</td><td>Путь изображения выбирается из столбца Excel</td></tr>
-              <tr><td>Тираж</td><td>Столбцы Prod и Debug</td></tr>
-            </table>
+      column: "Заголовок HTML"
+    locked: false
+    text_align: left
+  - id: caption
+    name: "Описание"
+    type: html
+    x_mm: 0.0
+    y_mm: 10.0
+    width_mm: 55.0
+    height_mm: 29.0
+    font_family: Arial
+    font_size_pt: 6.0
+    color: "#111111"
+    content:
+      mode: manual
+      html: |-
+        <p>{{ vars["edition"] }} — примечание компонента</p>
+        <table border="1" cellspacing="0" cellpadding="2" width="100%">
+          <tr><th colspan="2">Свойства</th></tr>
+          <tr><td>Ресурс</td><td>Путь изображения выбирается из столбца Excel</td></tr>
+          <tr><td>Тираж</td><td>Столбцы Prod и Debug</td></tr>
+        </table>
+    locked: false
+    text_align: left
+  locked: false

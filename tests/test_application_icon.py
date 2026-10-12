@@ -112,7 +112,17 @@ def test_icon_assets_are_declared_for_python_and_windows_packages() -> None:
     assert "*.png" in package_data["componentpress.app_assets"]
 
     spec = (ROOT / "packaging" / "windows.spec").read_text(encoding="utf-8")
-    assert 'root / "src" / "componentpress" / "app_assets" / "componentpress.png"' in spec
-    assert 'datas=[(str(application_icon), "componentpress/app_assets")]' in spec
+    assert 'application_assets = root / "src" / "componentpress" / "app_assets"' in spec
+    assert 'datas=[(str(asset), "componentpress/app_assets") for asset in application_assets.glob("*.png")]' in spec
+    expected_assets = {
+        "settings.png", "add.png", "save.png", "undo.png", "redo.png", "remove.png", "group.png",
+        "ungroup.png", "zoom_up.png", "zoom_down.png", "by_screen.png", "cursor.png", "image.png",
+        "text.png", "condition.png", "rectangle.png", "ellipse.png", "line.png", "up.png", "down.png",
+        "move.png", "delete.png", "left.png", "right.png", "real_size.png", "align_horizontal_left.png",
+        "align_horizontal_center.png", "align_horizontal_right.png", "align_vertical_top.png",
+        "align_vertical_center.png", "align_vertical_bottom.png", "align_center.png", "format_align_left.png",
+        "format_align_center.png", "format_align_right.png",
+    }
+    assert expected_assets <= {asset.name for asset in (ROOT / "src" / "componentpress" / "app_assets").glob("*.png")}
     assert 'windows_icon = spec_directory / "componentpress.ico"' in spec
     assert "icon=str(windows_icon)" in spec
