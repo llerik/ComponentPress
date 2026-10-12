@@ -121,10 +121,8 @@ def render_component_image(
     dpm = round(dpi / 0.0254)
     image.setDotsPerMeterX(dpm)
     image.setDotsPerMeterY(dpm)
-    # Keep the scene's logical 96-DPI geometry stable while retaining the
-    # higher-resolution backing pixels needed by the current zoom/DPR.
-    if preserve_logical_size:
-        image.setDevicePixelRatio(dpi / 96.0)
+    # Apply the editor's logical pixel ratio after painting so the backing
+    # resolution improves the image without scaling its scene geometry.
     image.fill(0)
     loader = resource_loader or ProjectResourceLoader(snapshot.root)
     def draw(fonts: ProjectFonts | None) -> None:
@@ -149,6 +147,8 @@ def render_component_image(
             )
         finally:
             painter.end()
+        if preserve_logical_size:
+            image.setDevicePixelRatio(dpi / 96.0)
     if register_fonts:
         with ProjectFonts(snapshot.root) as fonts:
             draw(fonts)

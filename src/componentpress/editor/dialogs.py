@@ -6,8 +6,10 @@ from pathlib import Path, PurePosixPath
 from collections.abc import Callable
 
 from PySide6.QtCore import QDir
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
+    QColorDialog,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -23,6 +25,8 @@ from PySide6.QtWidgets import (
     QTreeView,
     QVBoxLayout,
 )
+
+from componentpress.rendering.fonts import available_font_families
 
 
 def format_error(error: Exception) -> str:
@@ -171,17 +175,31 @@ class HtmlAddDialog(QDialog):
         self.content_mode.setEnabled(bool(columns))
         self.content_column = QComboBox()
         self.content_column.addItems(list(columns))
-        self.font = QLineEdit("Arial")
+        self.font = QComboBox()
+        self.font.setObjectName("newHtmlFont")
+        self.font.addItems(available_font_families(root))
+        if self.font.findText("Arial") >= 0:
+            self.font.setCurrentText("Arial")
         self.font_size = QDoubleSpinBox()
-        self.font_size.setRange(0.001, 1000)
+        self.font_size.setRange(0.1, 1000)
+        self.font_size.setDecimals(1)
+        self.font_size.setSingleStep(0.1)
         self.font_size.setValue(10)
+        self.font_size.setObjectName("newHtmlFontSize")
         self.color = QLineEdit("#111111")
+        self.color.setReadOnly(True)
+        self.color.setObjectName("newHtmlColor")
+        self.color_button = QPushButton("Выбрать цвет…")
+        self.color_button.setObjectName("newHtmlColorPicker")
+        color_row = QHBoxLayout()
+        color_row.addWidget(self.color, 1)
+        color_row.addWidget(self.color_button)
         form.addRow("Название", self.name)
         form.addRow("Источник", self.content_mode)
         form.addRow("Столбец", self.content_column)
         form.addRow("Шрифт", self.font)
         form.addRow("Размер, pt", self.font_size)
-        form.addRow("Цвет", self.color)
+        form.addRow("Цвет", color_row)
         layout.addLayout(form)
         self.html = QPlainTextEdit("<p>Текст</p>")
         self.html.setObjectName("newHtmlSource")
@@ -191,6 +209,7 @@ class HtmlAddDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         layout.addWidget(buttons)
         insert.clicked.connect(self._insert_image)
+        self.color_button.clicked.connect(self._pick_color)
         self.content_mode.currentIndexChanged.connect(self._sync_content_mode)
         self._sync_content_mode()
         buttons.accepted.connect(self._accept)
@@ -224,6 +243,11 @@ class HtmlAddDialog(QDialog):
             QMessageBox.information(self, "Новый HTML-текст", "Проверьте Excel и выберите столбец.")
             return
         self.accept()
+
+    def _pick_color(self) -> None:
+        selected = QColorDialog.getColor(QColor(self.color.text()), self, "Цвет текста")
+        if selected.isValid():
+            self.color.setText(selected.name(QColor.NameFormat.HexRgb).upper())
 
     def _sync_content_mode(self, _index: int = 0) -> None:
         manual = self.content_mode.currentData() == "manual"

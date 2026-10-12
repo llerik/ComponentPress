@@ -1,13 +1,14 @@
 """Qt item models for component and reverse-layer element trees."""
 
-from PySide6.QtCore import QTimer, Qt, Signal
-from PySide6.QtGui import QIcon, QStandardItem, QStandardItemModel
-from PySide6.QtWidgets import QApplication, QStyle
-from PySide6.QtWidgets import QAbstractItemView, QTreeView
+from PySide6.QtCore import QTimer, QSize, Qt, Signal
+from PySide6.QtGui import QStandardItem, QStandardItemModel
+from PySide6.QtWidgets import QStyle
+from PySide6.QtWidgets import QAbstractItemView, QStyleOptionViewItem, QStyledItemDelegate, QTreeView
 
 from componentpress.application.sessions import ProjectSession
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
+from componentpress.app_assets import load_icon
 
 
 ID_ROLE = int(Qt.ItemDataRole.UserRole) + 1
@@ -18,6 +19,7 @@ class LayerTreeView(QTreeView):
     """Layer tree whose drag is interpreted by the document model."""
 
     layerDropRequested = Signal(object, str)
+    lockToggleRequested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -30,7 +32,24 @@ class LayerTreeView(QTreeView):
         # freshly rebuilt presentation model after our synchronous drop.
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setDefaultDropAction(Qt.DropAction.CopyAction)
+        self.setItemDelegate(LockIconDelegate(self))
 
+    def lock_icon_rect(self, index):
+        option = QStyleOptionViewItem()
+        option.initFrom(self)
+        option.rect = self.visualRect(index)
+        option.widget = self
+        self.itemDelegateForIndex(index).initStyleOption(option, index)
+        return self.style().subElementRect(QStyle.SubElement.SE_ItemViewItemDecoration, option, self)
+
+    def mousePressEvent(self, event) -> None:
+        index = self.indexAt(event.position().toPoint())
+        if index.isValid() and index.column() == 0:
+            if self.lock_icon_rect(index).contains(event.position().toPoint()):
+                self.lockToggleRequested.emit(str(index.data(ID_ROLE)))
+                event.accept()
+                return
+        super().mousePressEvent(event)
     def startDrag(self, _supported_actions) -> None:
         super().startDrag(Qt.DropAction.CopyAction)
 
@@ -47,6 +66,14 @@ class LayerTreeView(QTreeView):
             QTimer.singleShot(0, lambda: self.layerDropRequested.emit(ids, target_id))
         else:
             event.ignore()
+
+
+class LockIconDelegate(QStyledItemDelegate):
+    """Standard item delegate used to locate the clickable lock decoration."""
+
+    def initStyleOption(self, option, index) -> None:
+        super().initStyleOption(option, index)
+        option.decorationSize = QSize(22, 22)
 
 
 def component_model(session: ProjectSession) -> QStandardItemModel:
@@ -86,12 +113,10 @@ def _node_row(node: Node, locked_ids: frozenset[str]) -> list[QStandardItem]:
     if isinstance(node, GroupNode):
         for child in reversed(node.children):
             name.appendRow(_node_row(child, locked_ids))
-    if node.id in locked_ids:
-        style = QApplication.style()
-        if style is not None:
-            name.setIcon(QIcon(style.standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning)))
-        name.setToolTip("Заблокированная группа" if node.locked and isinstance(node, GroupNode) else "Заблокированный элемент")
-        name.setData(True, LOCKED_ROLE)
+    locked = node.id in locked_ids
+    name.setIcon(load_icon("lock.png" if locked else "lock_open.png"))
+    name.setToolTip(("Заблокированная группа" if isinstance(node, GroupNode) else "Заблокированный элемент") if locked else "Нажмите значок, чтобы заблокировать")
+    name.setData(locked, LOCKED_ROLE)
     return [name, kind]
 
 

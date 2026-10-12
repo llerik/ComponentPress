@@ -63,3 +63,13 @@ class ProjectFonts:
 
     def __exit__(self, *_: object) -> None:
         self.close()
+
+
+def available_font_families(root: Path) -> tuple[str, ...]:
+    """List system and project fonts while keeping project registrations temporary."""
+    manager = ProjectFonts(root)
+    try:
+        manager.register()
+        return tuple(sorted(QFontDatabase.families(), key=str.casefold))
+    finally:
+        manager.close()

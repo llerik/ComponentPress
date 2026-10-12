@@ -20,7 +20,7 @@ DEMO = Path(__file__).resolve().parents[1] / "examples" / "demo-excel-game"
 
 def copy_demo(tmp_path: Path) -> Path:
     root = tmp_path / "game"
-    shutil.copytree(DEMO, root)
+    shutil.copytree(DEMO, root, ignore=shutil.ignore_patterns(".componentpress"))
     return root
 
 

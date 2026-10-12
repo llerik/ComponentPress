@@ -274,6 +274,8 @@ class BindingResolver:
                     }))
                 elif isinstance(node, GroupNode):
                     resolved.append(node.model_copy(update={"children": visit(node.children)}))
+                else:
+                    resolved.append(node)
             return tuple(resolved)
 
         model = component.model_copy(update={"elements": visit(component.elements)})

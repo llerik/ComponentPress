@@ -320,7 +320,11 @@ def test_preview_rejects_result_that_becomes_stale_while_reader_is_running(tmp_p
     assert caught.value.diagnostic.code == "DATA_REFRESH_STALE"
 
 
-def test_cli_preview_export_and_gui_canvas_use_same_resolved_pixels(tmp_path: Path, qtbot) -> None:
+def test_cli_preview_export_and_gui_canvas_use_same_resolved_pixels(tmp_path: Path, qtbot, monkeypatch) -> None:
+    from componentpress.editor.document_tab import DocumentTab
+
+    # Pixel equality needs matching backing DPI; zoom/DPR behaviour has separate coverage.
+    monkeypatch.setattr(DocumentTab, "_preview_dpi", staticmethod(lambda *_: 96))
     root = tmp_path / "demo"
     shutil.copytree(DEMO, root)
     snapshot = project_repository().open(root)
@@ -429,7 +433,10 @@ def test_dynamic_resource_errors_keep_excel_context_for_all_render_contexts(
     )
 
 
-def test_static_gui_canvas_matches_static_cli_export_with_project_variables(tmp_path: Path, qtbot) -> None:
+def test_static_gui_canvas_matches_static_cli_export_with_project_variables(tmp_path: Path, qtbot, monkeypatch) -> None:
+    from componentpress.editor.document_tab import DocumentTab
+
+    monkeypatch.setattr(DocumentTab, "_preview_dpi", staticmethod(lambda *_: 96))
     root = tmp_path / "static-demo"
     shutil.copytree(STATIC_DEMO, root)
     snapshot = project_repository().open(root)

@@ -49,6 +49,7 @@ from componentpress.project_io.paths import validate_relative_path
 from componentpress.domain.copy_mode import copies_for_mode
 from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, LineNode, ShapeNode
 from componentpress.rendering.fonts import ProjectFonts
+from componentpress.rendering.fonts import available_font_families
 from componentpress.platforms.services import PlatformServices
 from componentpress.app_assets import load_icon
 from componentpress.domain.tree import (
@@ -120,6 +121,7 @@ class MainWindow(QMainWindow):
         self._build_actions()
         self._build_ui()
         self.ui_state.restore(self)
+        self._limit_right_dock()
         self._suppress_docks()
         self._connect_signals()
         self._update_actions()
@@ -214,6 +216,7 @@ class MainWindow(QMainWindow):
         self.toolbox_dock.setObjectName("toolboxDock")
         self.right_dock = QDockWidget("Рабочие панели", self)
         self.right_dock.setObjectName("rightDock")
+        self.right_dock.setMaximumWidth(max(1, self.screen().geometry().width() // 2))
         self.right_dock.setWidget(self.right_panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.right_dock)
         self.left_panel = self._left_panel()
@@ -377,6 +380,9 @@ class MainWindow(QMainWindow):
             button.setToolTip(button.text())
             button.setIcon(load_icon(icon))
             button.setText("")
+        for button in (self.layer_up, self.layer_down, *layer_icons):
+            button.setFixedSize(34, 34)
+            button.setIconSize(QSize(22, 22))
         layout.addStretch(1)
         return panel
 
@@ -498,6 +504,7 @@ class MainWindow(QMainWindow):
         self.component_properties_group = QGroupBox("Свойства компонента")
         property_layout = QVBoxLayout(self.component_properties_group)
         self.properties = ComponentProperties()
+        self.properties.sheetChanged.connect(self._component_property_sheet_changed)
         property_layout.addWidget(self.properties)
         layout.addWidget(self.component_properties_group, 1)
         self.element_properties_group = QGroupBox("Свойства элемента")
@@ -595,7 +602,27 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._limit_right_dock()
         self._rescale_preview_frame()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        handle = self.windowHandle()
+        if handle is not None and getattr(self, "_screen_handle", None) is not handle:
+            old_handle = getattr(self, "_screen_handle", None)
+            if old_handle is not None:
+                old_handle.screenChanged.disconnect(self._screen_changed)
+            self._screen_handle = handle
+            handle.screenChanged.connect(self._screen_changed)
+        self._limit_right_dock()
+
+    def _screen_changed(self, _screen) -> None:
+        self._limit_right_dock()
+
+    def _limit_right_dock(self) -> None:
+        screen = self.screen()
+        if screen is not None:
+            self.right_dock.setMaximumWidth(max(1, screen.geometry().width() // 2))
 
     def _connect_signals(self) -> None:
         self.new_action.triggered.connect(self.new_project_dialog)
@@ -649,6 +676,7 @@ class MainWindow(QMainWindow):
         self.ungroup_button.clicked.connect(lambda: self.ungroup_selected())
         self.reparent_button.clicked.connect(self.reparent_selected_dialog)
         self.element_tree.layerDropRequested.connect(self._layer_drop)
+        self.element_tree.lockToggleRequested.connect(self._toggle_element_lock)
         self.element_properties.nodeChanged.connect(self._edit_selected_node)
         self.element_properties.insertImageRequested.connect(self.insert_html_image)
         self.element_properties.colorRequested.connect(self._pick_node_color)
@@ -1274,6 +1302,8 @@ class MainWindow(QMainWindow):
                 message = str(exc.diagnostic)
                 self.statusBar().showMessage(message, 7000)
         self._fill_combo(self.data_sheet, sheets, binding.sheet if binding else None)
+        self.properties.set_sheets(tuple(str(value) for _, value in sheets if value))
+        self.properties.show_component(document.model)
         data = self._refresh_data(force=False, render=False) if binding is not None else None
         headers = list(data.headers) if data is not None else []
         self._fill_combo(self.data_column, [(header, header) for header in headers], self.data_column.currentData())
@@ -2076,7 +2106,13 @@ class MainWindow(QMainWindow):
             component = self.session.documents[tab.component_id].model
             preview_node = locations(tab.resolved_component).get(node.id) if isinstance(node, ConditionalGroupNode) and tab.resolved_component is not None else None
             matches = preview_node.node.condition_matches if preview_node is not None and isinstance(preview_node.node, ConditionalGroupNode) else None
-            self.element_properties.show_node(node, columns, component, matches)
+            font_families = ()
+            if isinstance(node, HtmlNode):
+                try:
+                    font_families = available_font_families(self.session.snapshot.root)
+                except ProjectError:
+                    pass
+            self.element_properties.show_node(node, columns, component, matches, font_families)
             self.element_properties.show_image_quality(
                 item for item in tab.image_quality if item.node_id == node.id
             )
@@ -2121,12 +2157,22 @@ class MainWindow(QMainWindow):
             self._edit_active(background=color.name(QColor.NameFormat.HexRgb).upper())
 
     def _pick_node_color(self, current: str) -> None:
-        initial = QColor(current)
+        ids = self._selected_ids()
+        node = locations(self.session.documents[self.active_tab.component_id].model).get(ids[0]).node if ids and self.session and self.active_tab else None
+        field = {"shapeFill": "fill", "shapeStroke": "stroke"}.get(current, "color")
+        value = getattr(node, field, "#111111") if node is not None else current
+        initial = QColor(value or "#FFFFFF")
         if not initial.isValid():
             initial = QColor("#111111")
-        color = QColorDialog.getColor(initial, self, "Цвет текста")
+        color = QColorDialog.getColor(initial, self, "Цвет текста" if field == "color" else "Цвет заливки" if field == "fill" else "Цвет контура", QColorDialog.ColorDialogOption.ShowAlphaChannel)
         if color.isValid():
-            self._edit_selected_node({"color": color.name(QColor.NameFormat.HexRgb).upper()})
+            self._edit_selected_node({field: color.name(QColor.NameFormat.HexArgb).upper() if color.alpha() < 255 else color.name(QColor.NameFormat.HexRgb).upper()})
+
+    def _component_property_sheet_changed(self, sheet: object) -> None:
+        if self.active_tab is None:
+            return
+        binding = DataBinding(sheet=str(sheet)) if sheet else None
+        self._edit_active(data=binding)
 
     def _align_selected(self, edge: str) -> None:
         selected = self._selected_ids()
@@ -2245,8 +2291,8 @@ class MainWindow(QMainWindow):
         ids = self._selected_ids()
         if len(ids) != 1 or self.session is None or self.active_tab is None:
             return
-        if "color" in changes and not QColor(str(changes["color"])).isValid():
-            QMessageBox.warning(self, "Некорректное значение", "Цвет должен иметь вид #RRGGBB")
+        if any(value is not None and not QColor(str(value)).isValid() for key, value in changes.items() if key in ("color", "fill", "stroke")):
+            QMessageBox.warning(self, "Некорректное значение", "Выберите допустимый цвет из палитры")
             self._show_selection(ids)
             return
         self._apply_tree("Изменить элемент", update_node, ids[0], selected=ids, **changes)
@@ -2262,6 +2308,13 @@ class MainWindow(QMainWindow):
         if not ids:
             return False
         return self._apply_tree("Изменить порядок слоёв", reorder_nodes, ids, direction, selected=ids)
+
+    def _toggle_element_lock(self, node_id: str) -> None:
+        if self.active_tab is None or self.session is None:
+            return
+        node = locations(self.session.documents[self.active_tab.component_id].model).get(node_id)
+        if node is not None:
+            self._apply_tree("Изменить блокировку элемента", update_node, node_id, locked=not node.node.locked, selected=(node_id,))
 
     def _layer_drop(self, ids: object, target_id: str) -> None:
         selected = tuple(ids)
@@ -2396,7 +2449,7 @@ class MainWindow(QMainWindow):
                 self.add_html(
                     dialog.html.toPlainText(), x_mm, y_mm,
                     name=dialog.name.text().strip(),
-                    font_family=dialog.font.text(), font_size_pt=dialog.font_size.value(), color=dialog.color.text(),
+                    font_family=dialog.font.currentText(), font_size_pt=dialog.font_size.value(), color=dialog.color.text(),
                     content_mode=dialog.content_mode.currentData(),
                     content_column=dialog.content_column.currentText() or None,
                 )

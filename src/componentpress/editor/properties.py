@@ -1,10 +1,9 @@
 """Component properties shown for an active document."""
 
-from PySide6.QtCore import QSignalBlocker, Qt, Signal
+from PySide6.QtCore import QSignalBlocker, QSize, Qt, Signal
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
     QButtonGroup,
-    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -26,9 +25,11 @@ class ComponentProperties(QWidget):
     sizeChanged = Signal(float, float)
     backgroundChanged = Signal(str)
     backgroundColorRequested = Signal()
+    sheetChanged = Signal(object)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, sheets: tuple[str, ...] = ()):
         super().__init__(parent)
+        self._available_sheets = sheets
         self.setObjectName("componentProperties")
         layout = QFormLayout(self)
         self.identity = QLabel()
@@ -42,6 +43,10 @@ class ComponentProperties(QWidget):
         self.background_edit.setPlaceholderText("#FFFFFF")
         self.background_button = QPushButton("Выбрать цвет…")
         self.background_button.setObjectName("componentBackgroundPicker")
+        self.sheet = QComboBox()
+        self.sheet.setObjectName("componentPropertySheet")
+        self.sheet.addItem("Без привязки к Excel", None)
+        self.sheet.addItems(list(sheets))
         background_row = QHBoxLayout()
         background_row.addWidget(self.background_edit, 1)
         background_row.addWidget(self.background_button)
@@ -50,12 +55,17 @@ class ComponentProperties(QWidget):
         layout.addRow("Ширина, мм", self.width_spin)
         layout.addRow("Высота, мм", self.height_spin)
         layout.addRow("Фон", background_row)
+        layout.addRow("Лист Excel", self.sheet)
         self.name_edit.editingFinished.connect(lambda: self.nameChanged.emit(self.name_edit.text()))
         self.background_edit.editingFinished.connect(lambda: self.backgroundChanged.emit(self.background_edit.text()))
         self.width_spin.editingFinished.connect(self._emit_size)
         self.height_spin.editingFinished.connect(self._emit_size)
         self.background_button.clicked.connect(self.backgroundColorRequested)
+        self.sheet.currentIndexChanged.connect(lambda _index: self.sheetChanged.emit(self.sheet.currentData()))
         self.setEnabled(False)
+
+    def set_sheets(self, sheets: tuple[str, ...]) -> None:
+        self._available_sheets = sheets
 
     @staticmethod
     def _size_spin(name: str) -> QDoubleSpinBox:
@@ -78,12 +88,21 @@ class ComponentProperties(QWidget):
             QSignalBlocker(self.width_spin),
             QSignalBlocker(self.height_spin),
             QSignalBlocker(self.background_edit),
+            QSignalBlocker(self.sheet),
         ]
         self.identity.setText(component.id)
         self.name_edit.setText(component.name)
         self.width_spin.setValue(component.size_mm.width)
         self.height_spin.setValue(component.size_mm.height)
         self.background_edit.setText(component.background)
+        current_sheet = component.data.sheet if component.data else None
+        self.sheet.clear()
+        self.sheet.addItem("Без привязки к Excel", None)
+        for sheet in self._available_sheets:
+            self.sheet.addItem(sheet, sheet)
+        if current_sheet and self.sheet.findData(current_sheet) < 0:
+            self.sheet.addItem(f"{current_sheet} (не найден)", current_sheet)
+        self.sheet.setCurrentIndex(max(0, self.sheet.findData(current_sheet)))
         del blockers
 
 
@@ -127,8 +146,10 @@ class ElementProperties(QWidget):
         self.condition_state.setObjectName("conditionState")
         self.stroke_color = QLineEdit()
         self.stroke_color.setObjectName("shapeStroke")
+        self.stroke_color.setReadOnly(True)
         self.fill_color = QLineEdit()
         self.fill_color.setObjectName("shapeFill")
+        self.fill_color.setReadOnly(True)
         self.stroke_width = self._number("shapeStrokeWidth", 0.001, 1000.0)
         self.stroke_style = QComboBox()
         self.stroke_style.setObjectName("shapeStrokeStyle")
@@ -139,9 +160,12 @@ class ElementProperties(QWidget):
         self.line_dy = self._number("lineDY", -10000.0, 10000.0)
         self.font_combo = QComboBox()
         self.font_combo.setObjectName("htmlFont")
-        self.font_spin = self._number("htmlFontSize", 0.001, 1000.0)
+        self.font_spin = self._number("htmlFontSize", 0.1, 1000.0)
+        self.font_spin.setDecimals(1)
+        self.font_spin.setSingleStep(0.1)
         self.color_edit = QLineEdit()
         self.color_edit.setObjectName("htmlColor")
+        self.color_edit.setReadOnly(True)
         self.color_button = QPushButton("Выбрать цвет…")
         self.color_button.setObjectName("htmlColorPicker")
         self.color_widget = QWidget()
@@ -163,15 +187,29 @@ class ElementProperties(QWidget):
             self.alignment_group.addButton(button)
             self.alignment_buttons[value] = button
             alignment_row.addWidget(button)
-        self.lock_check = QCheckBox("Заблокирован")
-        self.lock_check.setObjectName("elementLocked")
+        self.lock_button = QPushButton()
+        self.lock_button.setObjectName("elementLocked")
+        self.lock_button.setCheckable(True)
+        self.lock_button.setFixedSize(34, 34)
+        self.fill_button = QPushButton("Выбрать цвет…")
+        self.fill_button.setObjectName("shapeFillPicker")
+        self.stroke_button = QPushButton("Выбрать цвет…")
+        self.stroke_button.setObjectName("shapeStrokePicker")
+        self.no_fill_button = QPushButton("Без заливки")
+        self.no_fill_button.setObjectName("shapeNoFill")
+        fill_row = QWidget()
+        self.fill_widget = fill_row
+        fill_layout = QHBoxLayout(fill_row)
+        fill_layout.setContentsMargins(0, 0, 0, 0)
+        fill_layout.addWidget(self.fill_button)
+        fill_layout.addWidget(self.no_fill_button)
         self.group_bounds = QLabel()
         self.group_bounds.setObjectName("groupBounds")
         self.quality_label = QLabel()
         self.quality_label.setObjectName("imageQuality")
         self.quality_label.setWordWrap(True)
         form.addRow("Элемент", self.identity)
-        form.addRow("Защита", self.lock_check)
+        form.addRow("Защита", self.lock_button)
         form.addRow("Габариты группы, мм", self.group_bounds)
         form.addRow("Разрешение рисунков", self.quality_label)
         form.addRow("Название", self.name_edit)
@@ -185,8 +223,8 @@ class ElementProperties(QWidget):
         form.addRow("Столбец условия", self.condition_column)
         form.addRow("Значение условия", self.condition_value)
         form.addRow("Состояние", self.condition_state)
-        form.addRow("Заливка (#RRGGBB)", self.fill_color)
-        form.addRow("Контур", self.stroke_color)
+        form.addRow("Заливка", fill_row)
+        form.addRow("Контур", self.stroke_button)
         form.addRow("Толщина контура, мм", self.stroke_width)
         form.addRow("Стиль контура", self.stroke_style)
         form.addRow("Конец линии ΔX, мм", self.line_dx)
@@ -227,7 +265,10 @@ class ElementProperties(QWidget):
         self.font_spin.editingFinished.connect(lambda: self.nodeChanged.emit({"font_size_pt": self.font_spin.value()}))
         self.color_edit.editingFinished.connect(lambda: self.nodeChanged.emit({"color": self.color_edit.text()}))
         self.color_button.clicked.connect(lambda: self.colorRequested.emit(self.color_edit.text()))
-        self.lock_check.toggled.connect(lambda checked: self.nodeChanged.emit({"locked": checked}))
+        self.lock_button.toggled.connect(lambda checked: self.nodeChanged.emit({"locked": checked}))
+        self.fill_button.clicked.connect(lambda: self.colorRequested.emit("shapeFill"))
+        self.stroke_button.clicked.connect(lambda: self.colorRequested.emit("shapeStroke"))
+        self.no_fill_button.clicked.connect(lambda: self.nodeChanged.emit({"fill": None}))
         self.alignment_group.buttonClicked.connect(
             lambda button: self.nodeChanged.emit({"text_align": button.property("alignment")})
         )
@@ -244,6 +285,13 @@ class ElementProperties(QWidget):
         spin.setSingleStep(1.0)
         return spin
 
+    def _set_lock_icon(self, locked: bool) -> None:
+        from componentpress.app_assets import load_icon
+
+        self.lock_button.setIcon(load_icon("lock.png" if locked else "lock_open.png"))
+        self.lock_button.setIconSize(QSize(22, 22))
+        self.lock_button.setAccessibleName("Разблокировать элемент" if locked else "Заблокировать элемент")
+
     def _geometry_changed(self) -> None:
         changes: dict[str, float] = {"x_mm": self.x_spin.value(), "y_mm": self.y_spin.value()}
         if self.width_spin.isVisible():
@@ -254,7 +302,7 @@ class ElementProperties(QWidget):
             changes["stroke_width_mm"] = self.stroke_width.value()
         self.nodeChanged.emit(changes)
 
-    def show_node(self, node: Node | None, columns: tuple[str, ...] = (), component: ComponentDefinition | None = None, condition_matches: bool | None = None) -> None:
+    def show_node(self, node: Node | None, columns: tuple[str, ...] = (), component: ComponentDefinition | None = None, condition_matches: bool | None = None, font_families: tuple[str, ...] = ()) -> None:
         self.setEnabled(node is not None)
         if node is None:
             return
@@ -262,7 +310,7 @@ class ElementProperties(QWidget):
             self.x_spin, self.y_spin, self.width_spin, self.height_spin, self.name_edit,
             self.source_edit, self.fit_combo, self.font_combo, self.font_spin, self.color_edit,
             self.html_edit, self.content_mode, self.content_column, self.font_combo,
-            self.lock_check, self.condition_column, self.condition_value, self.stroke_color,
+            self.lock_button, self.condition_column, self.condition_value, self.stroke_color,
             self.fill_color, self.stroke_width, self.stroke_style, self.line_dx, self.line_dy,
             *self.alignment_buttons.values(),
         )
@@ -280,10 +328,12 @@ class ElementProperties(QWidget):
                     inherited_lock = True
                     break
                 parent_id = index[parent_id].parent_id
-        self.lock_check.setChecked(node.locked)
-        self.lock_check.setEnabled(not inherited_lock)
-        self.lock_check.setToolTip("Разблокируйте родительскую группу" if inherited_lock else "Защищает визуальные команды; YAML можно редактировать вручную")
-        self.form.setRowVisible(self.lock_check, True)
+        effectively_locked = node.locked or inherited_lock
+        self.lock_button.setChecked(effectively_locked)
+        self._set_lock_icon(effectively_locked)
+        self.lock_button.setEnabled(not inherited_lock)
+        self.lock_button.setToolTip("Разблокируйте родительскую группу" if inherited_lock else ("Разблокировать элемент" if effectively_locked else "Заблокировать элемент"))
+        self.form.setRowVisible(self.lock_button, True)
         self.x_spin.setValue(node.x_mm)
         self.y_spin.setValue(node.y_mm)
         sized = isinstance(node, (ImageNode, HtmlNode))
@@ -293,8 +343,8 @@ class ElementProperties(QWidget):
         shape = isinstance(node, ShapeNode)
         self.form.setRowVisible(self.line_dx, line)
         self.form.setRowVisible(self.line_dy, line)
-        self.form.setRowVisible(self.fill_color, shape)
-        self.form.setRowVisible(self.stroke_color, shape or line)
+        self.form.setRowVisible(self.fill_widget, shape)
+        self.form.setRowVisible(self.stroke_button, shape or line)
         self.form.setRowVisible(self.stroke_width, shape or line)
         self.form.setRowVisible(self.stroke_style, shape or line)
         if line:
@@ -302,10 +352,12 @@ class ElementProperties(QWidget):
             self.line_dy.setValue(node.dy_mm)
         if shape or line:
             self.stroke_color.setText(node.stroke)
+            self.stroke_button.setStyleSheet(f"background-color: {node.stroke}")
             self.stroke_width.setValue(node.stroke_width_mm)
             self.stroke_style.setCurrentIndex(max(0, self.stroke_style.findData(node.stroke_style)))
         if shape:
             self.fill_color.setText(node.fill or "")
+            self.fill_button.setStyleSheet(f"background-color: {node.fill or 'transparent'}")
         is_group = isinstance(node, GroupNode)
         self.form.setRowVisible(self.group_bounds, is_group)
         conditional = isinstance(node, ConditionalGroupNode)
@@ -352,16 +404,23 @@ class ElementProperties(QWidget):
         if column:
             self.content_column.setCurrentText(column)
         self.content_column.setEnabled(mode == "column")
+        if getattr(self, "_node_type", "") == "html":
+            self.html_edit.setReadOnly(mode != "manual")
+            self.apply_html.setEnabled(mode == "manual")
+            self.insert_image.setEnabled(mode == "manual")
         for widget in (self.font_combo, self.font_spin, self.color_widget):
             self.form.setRowVisible(widget, html)
         for button in self.alignment_buttons.values():
             button.setVisible(html)
-        self.alignment_widget.setVisible(html)
+        self.form.setRowVisible(self.alignment_widget, html)
         for widget in (self.html_edit, self.insert_image, self.apply_html):
             widget.setVisible(html)
         if html:
             self.font_combo.clear()
-            self.font_combo.addItems(sorted(QFontDatabase.families(), key=str.casefold))
+            self.html_edit.setReadOnly(mode != "manual")
+            self.apply_html.setEnabled(mode == "manual")
+            self.insert_image.setEnabled(mode == "manual")
+            self.font_combo.addItems(list(font_families or sorted(QFontDatabase.families(), key=str.casefold)))
             if self.font_combo.findText(node.font_family, Qt.MatchFlag.MatchFixedString) < 0:
                 self.font_combo.insertItem(0, f"{node.font_family} (недоступен)", node.font_family)
             self.font_combo.setCurrentText(node.font_family if self.font_combo.findText(node.font_family) >= 0 else f"{node.font_family} (недоступен)")
@@ -378,7 +437,7 @@ class ElementProperties(QWidget):
     def set_edit_locked(self, locked: bool) -> None:
         for widget in (
             self.name_edit, self.x_spin, self.y_spin, self.width_spin, self.height_spin,
-            self.condition_column, self.condition_value, self.stroke_color, self.fill_color,
+            self.condition_column, self.condition_value, self.stroke_button, self.fill_button, self.no_fill_button,
             self.stroke_width, self.stroke_style, self.line_dx, self.line_dy,
             self.source_edit, self.fit_combo, self.content_mode, self.content_column,
             self.font_combo, self.font_spin, self.color_edit, self.color_button,
@@ -388,6 +447,10 @@ class ElementProperties(QWidget):
             widget.setEnabled(not locked)
         if not locked:
             self.content_column.setEnabled(self.content_mode.currentData() == "column")
+            manual = self.content_mode.currentData() == "manual"
+            self.html_edit.setReadOnly(not manual)
+            self.apply_html.setEnabled(manual)
+            self.insert_image.setEnabled(manual)
 
     def show_image_quality(self, quality) -> None:
         items = tuple(quality)
@@ -416,6 +479,10 @@ class ElementProperties(QWidget):
         if mode == "column" and self.content_column.currentText():
             changes["source_column" if field == "source_mode" else "content_column"] = self.content_column.currentText()
         self.content_column.setEnabled(mode == "column")
+        if self._node_type == "html":
+            self.html_edit.setReadOnly(mode != "manual")
+            self.apply_html.setEnabled(mode == "manual")
+            self.insert_image.setEnabled(mode == "manual")
         self.nodeChanged.emit(changes)
 
     def _content_column_changed(self) -> None:
