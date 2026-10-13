@@ -2,11 +2,12 @@
 
 from pathlib import Path
 import shutil
+import pytest
 
 from PySide6.QtCore import QSettings, QSize, Qt
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QTreeView
+from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox, QTreeView
 
 from componentpress.bootstrap import project_service
 from componentpress.editor.component_dialog import ComponentDialog
@@ -40,6 +41,145 @@ def make_window(tmp_path: Path, qtbot):
 
 def use_temp_ui_settings(window: MainWindow, tmp_path: Path) -> None:
     window.ui_state = UiState(QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat))
+
+
+def test_copy_mode_switch_changes_label_color_and_keyboard_state(qtbot) -> None:
+    from componentpress.editor.copy_mode_switch import CopyModeSwitch
+
+    switch = CopyModeSwitch()
+    qtbot.addWidget(switch)
+    switch.show()
+    assert switch.mode == "prod" and switch.text() == "Prod"
+    assert switch.accessibleName() == "Режим тиража"
+    assert switch.accessibleDescription() == "Режим тиража: Prod"
+
+    def pixel(x: int, y: int) -> tuple[int, int, int]:
+        image = QImage(switch.size(), QImage.Format.Format_ARGB32)
+        image.fill(Qt.GlobalColor.transparent)
+        switch.render(image)
+        color = image.pixelColor(x, y)
+        return color.red(), color.green(), color.blue()
+
+    assert pixel(25, 15) == (197, 143, 143)
+    assert pixel(13, 15) == (255, 255, 255)
+    QTest.mouseClick(switch, Qt.MouseButton.LeftButton, pos=switch.rect().center())
+    assert switch.mode == "test" and switch.text() == "Test"
+    assert switch.accessibleDescription() == "Режим тиража: Test"
+    assert pixel(10, 15) == (143, 181, 154)
+    assert pixel(38, 15) == (255, 255, 255)
+    QTest.keyClick(switch, Qt.Key.Key_Space)
+    assert switch.mode == "prod" and switch.text() == "Prod"
+
+
+@pytest.mark.parametrize("mode", ("prod", "test"))
+def test_build_request_uses_copy_switch_mode(tmp_path: Path, qtbot, monkeypatch, mode: str) -> None:
+    from types import SimpleNamespace
+    from componentpress.application.contracts import BuildRequest
+
+    _root, window, _service = make_window(tmp_path, qtbot)
+    window.data_mode.setChecked(mode == "test")
+    window.save_all = lambda: True
+    window.controller.build = SimpleNamespace(cancel=lambda _job_id: True)
+    requests = []
+
+    class Dialog:
+        class DialogCode:
+            Accepted = 1
+
+        class Workers:
+            @staticmethod
+            def value():
+                return 2
+
+        def __init__(self, _settings, _parent, *, mode):
+            self.mode = mode
+            self.workers = self.Workers()
+
+        def exec(self):
+            return self.DialogCode.Accepted
+
+        def print_settings(self):
+            return window.session.snapshot.model.print
+
+    monkeypatch.setattr(main_window_module, "BuildOptionsDialog", Dialog)
+    monkeypatch.setattr(window.controller, "start_build", lambda request, **_kwargs: (requests.append(request), "job")[1])
+    window._start_build(active_only=False)
+
+    assert isinstance(requests[0], BuildRequest)
+    assert requests[0].mode == mode
+    assert window._build_progress is not None
+    window._build_progress.close()
+    window._build_progress = None
+    window._active_build_job = None
+
+
+@pytest.mark.parametrize("mode", ("prod", "test"))
+def test_instance_export_uses_copy_switch_mode(tmp_path: Path, qtbot, monkeypatch, mode: str) -> None:
+    from types import SimpleNamespace
+
+    _root, window, _service = make_window(tmp_path, qtbot)
+    window.open_component("forest-card")
+    window.data_mode.setChecked(mode == "test")
+    calls = []
+    monkeypatch.setattr(main_window_module.QFileDialog, "getSaveFileName", lambda *_args: (str(tmp_path / "instance.png"), ""))
+    window.controller.preview = SimpleNamespace(
+        export_png=lambda *_args, **kwargs: (calls.append(kwargs["mode"]), SimpleNamespace(png=tmp_path / "instance.png"))[1]
+    )
+
+    window._export_instance()
+    assert calls == [mode]
+
+
+@pytest.mark.parametrize("mode", ("prod", "test"))
+def test_png_zip_uses_copy_switch_mode_and_filename(tmp_path: Path, qtbot, monkeypatch, mode: str) -> None:
+    from types import SimpleNamespace
+    import componentpress.application.png_archive as png_archive
+
+    _root, window, _service = make_window(tmp_path, qtbot)
+    window.open_component("forest-card")
+    window.data_mode.setChecked(mode == "test")
+    window.save_all = lambda: True
+    calls = []
+    suggested_names = []
+
+    class Choice:
+        class ButtonRole:
+            AcceptRole = 1
+
+        class StandardButton:
+            Cancel = 2
+
+        def __init__(self, _parent):
+            self.active = None
+
+        def setWindowTitle(self, _value): pass
+        def setText(self, _value): pass
+        def addButton(self, _value, _role=None):
+            button = object()
+            if self.active is None:
+                self.active = button
+            return button
+        def exec(self): pass
+        def clickedButton(self): return self.active
+
+    monkeypatch.setattr(main_window_module, "QMessageBox", Choice)
+    def choose_archive(_parent, _title, suggested, _filter):
+        suggested_names.append(suggested)
+        return str(tmp_path / "out.zip"), ""
+
+    monkeypatch.setattr(main_window_module.QFileDialog, "getSaveFileName", choose_archive)
+    monkeypatch.setattr(
+        png_archive, "export_png_archive",
+        lambda _snapshot, path, **kwargs: (
+            calls.append((Path(path), kwargs["mode"])),
+            SimpleNamespace(path=Path(path), png_count=1, copies=1, mode=kwargs["mode"]),
+        )[1],
+    )
+
+    window._export_png_archive()
+    assert calls == [(tmp_path / "out.zip", mode)]
+    assert suggested_names == [f"forest-card-{mode}.zip"]
+    assert window.statusBar().currentMessage().find(mode) >= 0
 
 
 def test_project_settings_action_tracks_project_and_tab_state(tmp_path: Path, qtbot) -> None:
@@ -84,12 +224,11 @@ def test_window_menu_actions_toggle_panels_and_sync_close_button(tmp_path: Path,
         assert window.dockWidgetArea(dock) == area
         action.trigger()
         assert not dock.isVisible() and not action.isChecked()
-        dock.show()  # The dock's close affordance uses the same native visibility action.
+        dock.show()
         qtbot.waitUntil(action.isChecked)
         dock.hide()
         assert not action.isChecked()
 
-    # Hiding a panel while loaded survives a project close/open cycle.
     window.toolbox_dock.hide()
     window.ui_state.save(window)
     window._update_project_visibility()
@@ -104,6 +243,23 @@ def test_window_menu_actions_toggle_panels_and_sync_close_button(tmp_path: Path,
     assert restored.toolbox_dock.isVisible()
     assert restored.dockWidgetArea(restored.toolbox_dock) == Qt.DockWidgetArea.LeftDockWidgetArea
 
+
+def test_menu_popup_renders_native_window_contents_with_effects_disabled(tmp_path: Path, qtbot) -> None:
+    _root, window, _service = make_window(tmp_path, qtbot)
+    screen = window.screen()
+
+    assert not screen is None
+    assert not window.windowHandle() is None
+    assert not QApplication.isEffectEnabled(Qt.UIEffect.UI_AnimateMenu)
+    assert not QApplication.isEffectEnabled(Qt.UIEffect.UI_FadeMenu)
+    menu = window.file_menu
+    menu.popup(window.menuBar().mapToGlobal(window.menuBar().actionGeometry(menu.menuAction()).bottomLeft()))
+    qtbot.waitUntil(menu.isVisible, timeout=1000)
+    capture = screen.grabWindow(menu.winId()).toImage()
+    assert not capture.isNull()
+    colors = {capture.pixelColor(x, y).rgba() for y in range(capture.height()) for x in range(capture.width())}
+    assert len(colors) >= 4
+    menu.hide()
 
 def test_delete_component_action_requires_active_tab_and_deletes_selected_component(tmp_path: Path, qtbot, monkeypatch) -> None:
     root, window, service = make_window(tmp_path, qtbot)
@@ -347,12 +503,16 @@ def test_moving_and_undoing_element_keeps_excel_preview_visible(tmp_path: Path, 
     assert data is not None and tab.canvas._pixmap_item is not None
 
     window._move_selected(("leaf-art",), 2.0, 0.0)
+    assert not tab.canvas._pixmap_item.isVisible()
     qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation)
+    assert tab.canvas._pixmap_item.isVisible()
     assert service.cached_data(snapshot, "forest-card") is data
     assert tab.canvas._pixmap_item is not None
 
     tab.undo_stack.undo()
+    assert not tab.canvas._pixmap_item.isVisible()
     qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation)
+    assert tab.canvas._pixmap_item.isVisible()
     assert service.cached_data(snapshot, "forest-card") is data
     assert tab.canvas._pixmap_item is not None
 
@@ -466,7 +626,9 @@ def test_command_and_preview_buttons_use_the_assigned_png_icons(tmp_path: Path, 
         window.project_settings_action: "settings.png", window.add_component_action: "add.png",
         window.save_action: "save.png", window.undo_action: "undo.png", window.redo_action: "redo.png",
         window.delete_action: "remove.png", window.group_action: "group.png", window.ungroup_action: "ungroup.png",
-        window.zoom_in_action: "zoom_up.png", window.zoom_out_action: "zoom_down.png", window.fit_action: "by_screen.png",
+        window.zoom_in_action: "zoom_in.png", window.zoom_out_action: "zoom_out.png", window.fit_action: "by_screen.png",
+        window.validate_active_action: "validate.png", window.validate_all_action: "validate_all.png",
+        window.build_active_action: "build.png", window.build_all_action: "build_all.png",
     }
     for action, filename in action_icons.items():
         assert matches_asset(action.icon(), filename), (action.text(), filename)
@@ -487,10 +649,12 @@ def test_command_and_preview_buttons_use_the_assigned_png_icons(tmp_path: Path, 
     assert window.add_component_button.text() == ""
 
     preview_icons = (
+        (window.preview_first, "begin.png", "Первый экземпляр"),
         (window.preview_previous, "left.png", "Предыдущий"),
         (window.preview_next, "right.png", "Следующий"),
-        (window.preview_zoom_in, "zoom_up.png", "Увеличить"),
-        (window.preview_zoom_out, "zoom_down.png", "Уменьшить"),
+        (window.preview_last, "end.png", "Последний экземпляр"),
+        (window.preview_zoom_in, "zoom_in.png", "Увеличить"),
+        (window.preview_zoom_out, "zoom_out.png", "Уменьшить"),
         (window.preview_fit, "real_size.png", "По размеру"),
     )
     for button, filename, label in preview_icons:
@@ -502,8 +666,8 @@ def test_command_and_preview_buttons_use_the_assigned_png_icons(tmp_path: Path, 
 
     tab = window.open_component("forest-card")
     assert tab is not None
-    assert matches_asset(tab.layout_mode.icon(), "cursor.png")
-    assert matches_asset(tab.text_mode.icon(), "text.png")
+    assert matches_asset(tab.layout_mode.icon(), "brick.png")
+    assert matches_asset(tab.text_mode.icon(), "code.png")
 
 
 def test_component_creation_and_deletion_round_trip_preserves_draft_and_tab(tmp_path: Path, qtbot, monkeypatch) -> None:

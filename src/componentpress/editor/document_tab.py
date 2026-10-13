@@ -85,7 +85,7 @@ class DocumentTab(QWidget):
             button.setToolTip("Перетаскивание" if button is self.layout_mode else "Текст")
             button.setAccessibleName(button.toolTip())
             button.setText("")
-            button.setIcon(load_icon("cursor.png" if button is self.layout_mode else "text.png"))
+            button.setIcon(load_icon("brick.png" if button is self.layout_mode else "code.png"))
             button.setIconSize(QSize(22, 22))
             controls.addWidget(button)
         self.layout_mode.setChecked(True)
@@ -190,6 +190,7 @@ class DocumentTab(QWidget):
         if selected is None:
             selected = self.canvas.selected_ids
         self.canvas.set_component_model(active_component, selected)
+        self.canvas.set_preview_pending(True)
         self.preview_generation += 1
         self._preview_arguments = (
             session.snapshot, active_component, dpi, fit, selected,

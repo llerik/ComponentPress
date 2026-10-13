@@ -168,10 +168,17 @@ class PreviewService:
         component_overrides: dict[str, ComponentDefinition] | None = None,
     ) -> tuple[Diagnostic, ...]:
         source = snapshot.model.data_source
-        source_key = self._source_key(snapshot)
+        all_ids = tuple(dict.fromkeys((*(item.id for item in snapshot.model.components), *snapshot.documents)))
+        requested_ids = component_ids or all_ids
+        static_only = bool(component_ids) and all(
+            component_id in snapshot.documents
+            and (component_overrides or {}).get(component_id, snapshot.documents[component_id].model).data is None
+            for component_id in requested_ids
+        )
+        source_key = None if static_only else self._source_key(snapshot)
         try:
-            source_path = resolve_project_path(snapshot.root, source.path) if source is not None else None
-            if source is not None:
+            source_path = resolve_project_path(snapshot.root, source.path) if source is not None and not static_only else None
+            if source is not None and not static_only:
                 check_exact_case(snapshot.root, source.path)
                 baseline = self._fingerprint(source_path)
             else:
@@ -179,8 +186,6 @@ class PreviewService:
         except ProjectError as exc:
             return (exc.diagnostic,)
 
-        all_ids = tuple(dict.fromkeys((*(item.id for item in snapshot.model.components), *snapshot.documents)))
-        requested_ids = component_ids or all_ids
         # If the source changed, all dependent components must move to the same generation.
         if source_key is not None and self._fingerprints.get(source_key) != baseline:
             requested_ids = all_ids

@@ -517,7 +517,7 @@ def test_gui_prod_test_preview_filters_validated_snapshot(tmp_path: Path, qtbot)
         assert tab.preview_row_number == 2
         data = controller.preview.data(window.session.snapshot, "forest-card")
         assert data is not None and len(data.rows) == 2
-        window.data_mode.setCurrentIndex(1)
+        window.data_mode.setChecked(True)
         assert window.data_row.count() == 2
         window.data_row.setCurrentIndex(1)
         assert tab.preview_row_number == 3

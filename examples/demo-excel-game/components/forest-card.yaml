@@ -14,8 +14,8 @@ elements:
 - id: leaf-art
   name: "Иллюстрация"
   type: image
-  x_mm: 7.72643070787637
-  y_mm: 4.372052176802925
+  x_mm: 3.383
+  y_mm: 3.05
   width_mm: 55.0
   height_mm: 42.0
   source:

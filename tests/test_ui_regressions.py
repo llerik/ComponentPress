@@ -3,10 +3,11 @@
 from pathlib import Path
 from dataclasses import replace
 import shutil
+from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QPoint, QRect, QSettings, QSize, Qt
-from PySide6.QtGui import QColor, QFontDatabase, QIcon, QPixmap
+from PySide6.QtGui import QColor, QFontDatabase, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import QColorDialog, QComboBox, QDialog, QMessageBox, QPushButton
 
 from componentpress.application.contracts import DocumentSnapshot, ProjectSnapshot
@@ -14,12 +15,13 @@ from componentpress.bindings.resolver import BindingResolver
 from componentpress.bootstrap import project_controller
 from componentpress.domain.component import ComponentDefinition, DataBinding, SizeMM
 from componentpress.domain.diagnostics import ProjectError
-from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, LineNode, ShapeNode
+from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, LineNode, ShapeNode
 from componentpress.domain.project import DataSource, ProjectDefinition
 from componentpress.domain.tree import locations
 from componentpress.domain.values import CellValue, DataRow, DataSheetSnapshot
 from componentpress.editor.dialogs import HtmlAddDialog
 from componentpress.editor.main_window import MainWindow
+from componentpress.editor.canvas import ComponentCanvas
 from componentpress.editor.properties import ElementProperties
 from componentpress.editor.ui_state import UiState
 from componentpress.project_io.repository import FileProjectRepository
@@ -71,6 +73,85 @@ def test_html_pixels_stay_in_frame_and_keep_logical_size_at_preview_dpi(tmp_path
     assert right <= (node.x_mm + node.width_mm) * factor + 1
     assert bottom <= (node.y_mm + node.height_mm) * factor + 1
     assert value.documents["card"].model.elements[0].font_size_pt == 10
+
+
+@pytest.mark.parametrize("dpi", [48, 96, 120, 192, 384])
+@pytest.mark.parametrize("fit", ["contain", "cover", "stretch"])
+def test_image_overlay_uses_exact_millimetre_geometry_at_preview_dpi(tmp_path, dpi, fit):
+    ensure_gui_application()
+    source = QImage(101, 67, QImage.Format.Format_ARGB32)
+    source.fill(QColor("#0000FF"))
+    loader = SimpleNamespace(image=lambda *args, **kwargs: SimpleNamespace(image=source))
+    node = ImageNode(id="image", name="Image", type="image", x_mm=7, y_mm=9,
+                     width_mm=12, height_mm=8, source="assets/image.png", fit=fit)
+    value = snapshot(tmp_path, [node])
+    image = render_component_image(value, "card", dpi=dpi, resource_loader=loader, preserve_logical_size=True)
+    canvas = ComponentCanvas()
+    canvas.set_document(image, value.documents["card"].model, selected=("image",))
+
+    rect = canvas._overlays["image"].sceneBoundingRect()
+    factor = 96 / 25.4
+    assert rect.getRect() == pytest.approx((7 * factor, 9 * factor, 12 * factor, 8 * factor))
+    assert canvas._pixmap_item.sceneBoundingRect().getRect() == pytest.approx((0, 0, 30 * factor, 20 * factor))
+
+
+def test_pending_preview_hides_stale_raster_and_keeps_current_selection_interactive(make_editor, qtbot):
+    window, _root, errors = make_editor()
+    assert window.add_html("<p>Move</p>", 2, 2, node_id="move-me")
+    tab = window.active_tab
+    qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
+    assert tab.canvas._pixmap_item is not None and tab.canvas._pixmap_item.isVisible()
+    node = locations(window.session.documents["regression"].model)["move-me"].node
+    moved = node.model_copy(update={"x_mm": node.x_mm + 2})
+    component = window.session.documents["regression"].model.model_copy(
+        update={"elements": (moved,)}
+    )
+    generation = tab.queue_preview(window.session, component=component, selected=(node.id,))
+    assert not tab.canvas._pixmap_item.isVisible()
+    assert tab.canvas.selected_ids == (node.id,)
+    expected_x = moved.x_mm * 96 / 25.4
+    assert tab.canvas._overlays[node.id].sceneBoundingRect().left() == pytest.approx(expected_x)
+    assert tab.canvas._page_contains(tab.canvas._overlays[node.id].sceneBoundingRect().center())
+    qtbot.waitUntil(lambda: tab.displayed_generation == generation, timeout=15000)
+    assert tab.canvas._pixmap_item.isVisible()
+    assert not errors
+
+
+def test_preview_first_and_last_follow_filtered_excel_rows(make_editor, qtbot):
+    window, _root, errors = make_editor(excel=True)
+    tab = window.open_component("forest-card")
+    assert tab is not None
+    window.data_mode.setChecked(True)
+    qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
+    data = window.controller.preview.cached_data(window.session.snapshot, "forest-card")
+    eligible = [row.row_number for row in data.rows if row.test_copies > 0]
+    assert len(eligible) >= 2
+
+    assert not window.preview_first.isEnabled()
+    window.preview_last.click()
+    assert tab.preview_row_number == eligible[-1]
+    assert window.data_row.currentData() == eligible[-1]
+    qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
+    assert not window.preview_last.isEnabled() and window.preview_first.isEnabled()
+
+    window.preview_first.click()
+    assert tab.preview_row_number == eligible[0]
+    assert window.data_row.currentData() == eligible[0]
+    qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
+    assert not window.preview_first.isEnabled() and window.preview_last.isEnabled()
+    assert not errors
+
+
+def test_active_static_validation_ignores_missing_project_excel_and_checks_resources(make_editor):
+    window, root, _errors = make_editor(excel=True)
+    assert window.add_image("assets/images/missing.png", 2, 2, node_id="missing-image")
+    (root / "data" / "game.xlsx").unlink()
+
+    window.validate_active_action.trigger()
+
+    messages = [window.event_list.item(i).text() for i in range(window.event_list.count())]
+    assert any("RESOURCE_MISSING" in item and "missing-image" in item for item in messages)
+    assert not any("DATA_SOURCE_MISSING" in item for item in messages)
 
 
 @pytest.mark.parametrize("changes", [{"height_mm": 0.1}, {"width_mm": 0.1}])

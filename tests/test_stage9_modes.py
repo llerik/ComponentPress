@@ -198,6 +198,6 @@ def test_gui_mode_switch_uses_cached_excel_snapshot(tmp_path: Path, monkeypatch:
         raise AssertionError("GUI mode switch attempted an XLSX read")
 
     monkeypatch.setattr(window.controller.preview.reader, "read", fail_read)
-    window.data_mode.setCurrentIndex(1)
-    assert window.data_mode.currentData() == "test"
+    window.data_mode.setChecked(True)
+    assert window.data_mode.mode == "test"
     assert tab.preview_row_number == 2

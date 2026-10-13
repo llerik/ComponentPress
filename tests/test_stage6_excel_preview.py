@@ -230,7 +230,7 @@ def test_gui_data_panel_switch_refresh_insert_and_export(tmp_path: Path, qtbot, 
     assert tab.preview_row_number == 2
 
     before_version = controller.preview.data(window.session.snapshot, "forest-card").version
-    window.data_mode.setCurrentIndex(1)
+    window.data_mode.setChecked(True)
     assert window.data_row.count() == 2
     window.data_row.setCurrentIndex(1)
     assert tab.preview_row_number == 3

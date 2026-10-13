@@ -255,8 +255,8 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
         or not build_result.report_path.is_file()
     ):
         return _smoke_failure(root, inspect.currentframe().f_lineno)
-    window.data_mode.setCurrentIndex(1)
-    if window.data_mode.currentData() != "test":
+    window.data_mode.setChecked(True)
+    if window.data_mode.mode != "test":
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     test_build = window.controller.build.run(window.session, BuildRequest(max_render_workers=2, mode="test"))
     if test_build.status != "succeeded" or test_build.mode != "test" or test_build.report_path is None:

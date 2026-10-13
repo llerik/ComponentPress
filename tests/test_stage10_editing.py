@@ -82,11 +82,10 @@ def test_arrow_nudge_commits_one_undoable_move_and_saves(
     assert tab.undo_stack.count() == history_count + 1
     assert tab.canvas.selected_ids == ("heading",)
     overlay = tab.canvas._overlays["heading"].sceneBoundingRect()
-    pixmap = tab.canvas._pixmap_item
     component = window.session.documents["forest-card"].model
     expected_bounds = node_bounds(component, "heading")
-    assert overlay.x() == pytest.approx(expected_bounds[0] * pixmap.boundingRect().width() / component.size_mm.width)
-    assert overlay.y() == pytest.approx(expected_bounds[1] * pixmap.boundingRect().height() / component.size_mm.height)
+    assert overlay.x() == pytest.approx(expected_bounds[0] * 96 / 25.4)
+    assert overlay.y() == pytest.approx(expected_bounds[1] * 96 / 25.4)
 
     window.undo_group.undo()
     assert locations(window.session.documents["forest-card"].model)["heading"].node == before.node

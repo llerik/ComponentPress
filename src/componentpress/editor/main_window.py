@@ -82,6 +82,7 @@ from .qt_models import ID_ROLE, LayerTreeView, component_model, element_model
 from .component_dialog import ComponentDialog
 from .ui_state import UiState
 from .project_settings_dialog import ProjectSettingsDialog
+from .copy_mode_switch import CopyModeSwitch
 
 
 class MainWindow(QMainWindow):
@@ -117,6 +118,10 @@ class MainWindow(QMainWindow):
         self._project_history_focus = False
         self.ui_state = UiState()
         self.setObjectName("mainWindow")
+        application = QApplication.instance()
+        if application is not None:
+            application.setEffectEnabled(Qt.UIEffect.UI_AnimateMenu, False)
+            application.setEffectEnabled(Qt.UIEffect.UI_FadeMenu, False)
         self.setWindowTitle("ComponentPress")
         self.resize(1280, 800)
         self._build_actions()
@@ -169,7 +174,7 @@ class MainWindow(QMainWindow):
         self.cancel_build_action = self._action("Отменить сборку")
         self.open_build_action = self._action("Открыть папку результата")
         self.open_pdf_action = self._action("Открыть печатный PDF")
-        self.validate_active_action = self._action("Проверить активный лист")
+        self.validate_active_action = self._action("Проверить активный компонент")
         self.validate_all_action = self._action("Проверить все компоненты")
         self.file_menu = self.menuBar().addMenu("Файл")
         self.file_menu.addActions([self.new_action, self.open_action])
@@ -201,10 +206,7 @@ class MainWindow(QMainWindow):
         self.about_menu.addAction(self.about_action)
 
     def _build_ui(self) -> None:
-        self.data_mode = QComboBox()
-        self.data_mode.setObjectName("dataMode")
-        self.data_mode.addItem("Prod", "prod")
-        self.data_mode.addItem("Test", "test")
+        self.data_mode = CopyModeSwitch()
         self.tabs = QTabWidget()
         self.tabs.setObjectName("documentTabs")
         self.tabs.setTabsClosable(True)
@@ -249,7 +251,6 @@ class MainWindow(QMainWindow):
         self.quick_toolbar.setMovable(False)
         self.quick_toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.quick_toolbar)
-        self.quick_toolbar.addWidget(QLabel("Тираж"))
         self.quick_toolbar.addWidget(self.data_mode)
         self.quick_toolbar.addSeparator()
         for action in (self.validate_active_action, self.validate_all_action, self.build_active_action, self.build_all_action, self.cancel_build_action):
@@ -413,14 +414,20 @@ class MainWindow(QMainWindow):
         controls = QHBoxLayout()
         self.preview_previous = QPushButton()
         self.preview_next = QPushButton()
+        self.preview_first = QPushButton()
+        self.preview_last = QPushButton()
+        self.preview_first.setEnabled(False)
+        self.preview_last.setEnabled(False)
         self.preview_zoom_out = QPushButton()
         self.preview_zoom_in = QPushButton()
         self.preview_fit = QPushButton()
         preview_icons = (
+            (self.preview_first, "begin.png", "Первый экземпляр"),
             (self.preview_previous, "left.png", "Предыдущий"),
             (self.preview_next, "right.png", "Следующий"),
-            (self.preview_zoom_in, "zoom_up.png", "Увеличить"),
-            (self.preview_zoom_out, "zoom_down.png", "Уменьшить"),
+            (self.preview_last, "end.png", "Последний экземпляр"),
+            (self.preview_zoom_in, "zoom_in.png", "Увеличить"),
+            (self.preview_zoom_out, "zoom_out.png", "Уменьшить"),
             (self.preview_fit, "real_size.png", "По размеру"),
         )
         for button, icon, label in preview_icons:
@@ -443,7 +450,9 @@ class MainWindow(QMainWindow):
             self.add_component_action: "add.png", self.project_settings_action: "settings.png",
             self.save_action: "save.png", self.undo_action: "undo.png", self.redo_action: "redo.png",
             self.delete_action: "remove.png", self.group_action: "group.png", self.ungroup_action: "ungroup.png",
-            self.zoom_in_action: "zoom_up.png", self.zoom_out_action: "zoom_down.png", self.fit_action: "by_screen.png",
+            self.zoom_in_action: "zoom_in.png", self.zoom_out_action: "zoom_out.png", self.fit_action: "by_screen.png",
+            self.validate_active_action: "validate.png", self.validate_all_action: "validate_all.png",
+            self.build_active_action: "build.png", self.build_all_action: "build_all.png",
         }
         for action, icon in action_icons.items():
             action.setIcon(load_icon(icon))
@@ -717,10 +726,12 @@ class MainWindow(QMainWindow):
         self.data_row.currentIndexChanged.connect(self._row_changed)
         self.data_sheet.currentIndexChanged.connect(self._data_binding_changed)
         self.data_column.currentIndexChanged.connect(self._update_data_chain)
-        self.data_mode.currentIndexChanged.connect(self._data_mode_changed)
+        self.data_mode.toggled.connect(self._data_mode_changed)
         self.event_search.textChanged.connect(self._filter_events)
         self.preview_next.clicked.connect(lambda: self._step_preview(1))
         self.preview_previous.clicked.connect(lambda: self._step_preview(-1))
+        self.preview_first.clicked.connect(lambda: self._step_preview(-1, endpoint="first"))
+        self.preview_last.clicked.connect(lambda: self._step_preview(1, endpoint="last"))
         self.preview_zoom_in.clicked.connect(lambda: self._scale_preview(1.2))
         self.preview_zoom_out.clicked.connect(lambda: self._scale_preview(1 / 1.2))
         self.preview_fit.clicked.connect(lambda: self._scale_preview(1.0, fit=True))
@@ -1344,7 +1355,7 @@ class MainWindow(QMainWindow):
     def _populate_rows(self, data) -> None:
         tab = self.active_tab
         current = tab.preview_row_number if tab is not None else None
-        mode = self.data_mode.currentData() or "prod"
+        mode = self.data_mode.mode
         values = [] if data is None else [
             (f"{row.instance_id} — строка {row.row_number} — тираж {copies_for_mode(row, mode)}", row.row_number)
             for row in data.rows if copies_for_mode(row, mode) > 0
@@ -1366,16 +1377,19 @@ class MainWindow(QMainWindow):
                 self.preview_image.setPixmap(QPixmap())
                 self.preview_image.setText("Проверьте данные Excel, чтобы увидеть экземпляры")
                 self.statusBar().showMessage("Сначала обновите данные или провалидируйте их, затем выберите экземпляр в текущем режиме", 5000)
-            elif is_excel and data is not None and not any(copies_for_mode(row, str(self.data_mode.currentData())) > 0 for row in data.rows):
+            elif is_excel and data is not None and not any(copies_for_mode(row, self.data_mode.mode) > 0 for row in data.rows):
                 self.active_tab.preview_row_number = None
                 self.active_tab.canvas.clear_document()
                 self.preview_image.setPixmap(QPixmap())
                 self.preview_image.setText("В выбранном режиме нет экземпляров")
+                self.preview_first.setEnabled(False)
+                self.preview_last.setEnabled(False)
                 self.preview_next.setEnabled(False)
                 self.preview_previous.setEnabled(False)
                 self.statusBar().showMessage("В выбранном режиме нет экземпляров", 5000)
             else:
                 self._refresh_preview(self.active_tab)
+            self._update_preview_navigation()
 
     def _add_events(self, diagnostics) -> None:
         reveal = False
@@ -1405,21 +1419,24 @@ class MainWindow(QMainWindow):
         if self.session is None or self.active_tab is None or self.controller.preview is None:
             return
         component_id = self.active_tab.component_id
-        if self.session.documents[component_id].model.data is None:
-            self.statusBar().showMessage("У компонента не выбран лист Excel", 5000)
+        if not self._apply_draft(component_id):
             return
+        component = self.session.documents[component_id].model
         try:
             snapshot = self._snapshot_for_current_documents()
             if snapshot is None:
                 return
             diagnostics = self.controller.preview.validate_all(snapshot, manual=True, component_ids=(component_id,))
             if diagnostics:
+                other_paths = {document.path for other_id, document in snapshot.documents.items() if other_id != component_id}
+                current_failed = any(item.path == snapshot.documents[component_id].path for item in diagnostics)
+                if current_failed or not all(item.path in other_paths for item in diagnostics):
+                    self._add_events(diagnostics)
+                    self.statusBar().showMessage(f"Ошибок: {len(diagnostics)}; подробности в панели событий", 7000)
+                    return
                 self._add_events(diagnostics)
-                self.statusBar().showMessage(f"Ошибок: {len(diagnostics)}; подробности в панели событий", 7000)
-                return
-            data = self.controller.preview.cached_data(snapshot, component_id, component=self.session.documents[component_id].model)
-            if data is None:
-                return
+                self.statusBar().showMessage("Текущий компонент проверен; ошибки найдены в других компонентах", 7000)
+            data = self.controller.preview.cached_data(snapshot, component_id, component=component)
         except ValidationIssues as exc:
             self._add_events(exc.diagnostics)
             self.statusBar().showMessage(f"Ошибок: {len(exc.diagnostics)}; подробности в панели событий", 7000)
@@ -1428,13 +1445,19 @@ class MainWindow(QMainWindow):
             self._add_events((exc.diagnostic,))
             self.statusBar().showMessage("Проверка не пройдена; подробности в панели событий", 7000)
             return
-        self._add_events((Diagnostic("VALIDATION_OK", f"Лист {data.sheet} проверен; строк: {len(data.rows)}", data.path, source="main", sheet=data.sheet, severity="info"),))
+        if data is None:
+            self._add_events((Diagnostic("VALIDATION_OK", f"Компонент {component.name} и его ресурсы проверены", snapshot.documents[component_id].path, source="main", severity="info"),))
+        else:
+            self._add_events((Diagnostic("VALIDATION_OK", f"Лист {data.sheet} проверен; строк: {len(data.rows)}", data.path, source="main", sheet=data.sheet, severity="info"),))
         self._populate_data_panel()
         self._refresh_preview(self.active_tab)
 
     def _validate_all(self, *, force_read: bool = False) -> None:
         if self.session is None or self.controller.preview is None:
             return
+        for component_id in tuple(self.session.documents):
+            if not self._apply_draft(component_id):
+                return
         snapshot = self._snapshot_for_current_documents()
         if snapshot is None:
             return
@@ -1488,6 +1511,8 @@ class MainWindow(QMainWindow):
             tab.resolved_component = None
             active_component = document.model
             bindings_resolved = False
+            self.preview_first.setEnabled(False)
+            self.preview_last.setEnabled(False)
         else:
             tab.resolved_component = None
             cached = self.controller.preview.cached_data(self.session.snapshot, tab.component_id, component=document.model)
@@ -1495,15 +1520,19 @@ class MainWindow(QMainWindow):
                 tab.canvas.clear_document()
                 self.preview_image.setPixmap(QPixmap())
                 self.preview_image.setText("Проверьте данные Excel, чтобы увидеть экземпляры")
+                self.preview_first.setEnabled(False)
+                self.preview_last.setEnabled(False)
                 self.preview_next.setEnabled(False)
                 self.preview_previous.setEnabled(False)
                 return False
-            eligible = [row for row in cached.rows if copies_for_mode(row, str(self.data_mode.currentData())) > 0]
+            eligible = [row for row in cached.rows if copies_for_mode(row, self.data_mode.mode) > 0]
             if not eligible:
                 tab.preview_row_number = None
                 tab.canvas.clear_document()
                 self.preview_image.setPixmap(QPixmap())
                 self.preview_image.setText("В выбранном режиме нет экземпляров")
+                self.preview_first.setEnabled(False)
+                self.preview_last.setEnabled(False)
                 self.preview_next.setEnabled(False)
                 self.preview_previous.setEnabled(False)
                 return False
@@ -1512,7 +1541,7 @@ class MainWindow(QMainWindow):
             try:
                 resolved = self.controller.preview.select_row(
                     self.session.snapshot, tab.component_id, row_number=tab.preview_row_number,
-                    mode=str(self.data_mode.currentData() or "prod"),
+                    mode=self.data_mode.mode,
                     component=document.model,
                     validate_resources=False,
                 )
@@ -1536,7 +1565,7 @@ class MainWindow(QMainWindow):
         self.preview_image.setText("Подготовка превью…")
         return True
 
-    def _step_preview(self, direction: int) -> None:
+    def _step_preview(self, direction: int, *, endpoint: str | None = None) -> None:
         tab = self.active_tab
         if self.session is None or tab is None or tab.resolved_component is None or self.controller.preview is None:
             return
@@ -1546,11 +1575,11 @@ class MainWindow(QMainWindow):
         data = self.controller.preview.cached_data(self.session.snapshot, tab.component_id, component=component)
         if data is None:
             return
-        eligible = [row for row in data.rows if copies_for_mode(row, str(self.data_mode.currentData())) > 0]
+        eligible = [row for row in data.rows if copies_for_mode(row, self.data_mode.mode) > 0]
         if not eligible:
             return
         current = next((i for i, row in enumerate(eligible) if row.row_number == tab.preview_row_number), 0)
-        next_index = current + direction
+        next_index = 0 if endpoint == "first" else len(eligible) - 1 if endpoint == "last" else current + direction
         if not 0 <= next_index < len(eligible):
             return
         tab.preview_row_number = eligible[next_index].row_number
@@ -1600,13 +1629,17 @@ class MainWindow(QMainWindow):
         if self.session is not None and tab is not None and self.controller.preview is not None:
             data = self.controller.preview.cached_data(self.session.snapshot, tab.component_id)
         if data is None or tab is None or tab.resolved_component is None:
+            self.preview_first.setEnabled(False)
+            self.preview_last.setEnabled(False)
             self.preview_next.setEnabled(False)
             self.preview_previous.setEnabled(False)
             return
-        eligible = [row for row in data.rows if copies_for_mode(row, str(self.data_mode.currentData())) > 0]
+        eligible = [row for row in data.rows if copies_for_mode(row, self.data_mode.mode) > 0]
         index = next((i for i, row in enumerate(eligible) if row.row_number == tab.preview_row_number), -1)
         self.preview_previous.setEnabled(index > 0)
         self.preview_next.setEnabled(0 <= index < len(eligible) - 1)
+        self.preview_first.setEnabled(index > 0)
+        self.preview_last.setEnabled(0 <= index < len(eligible) - 1)
 
     @staticmethod
     def _preview_font_families(component: ComponentDefinition) -> set[str]:
@@ -1742,6 +1775,7 @@ class MainWindow(QMainWindow):
         value = self.data_row.currentData()
         tab.preview_row_number = int(value) if value is not None else None
         self._refresh_preview(tab)
+        self._update_preview_navigation()
         self._update_data_chain()
 
     def _data_binding_changed(self, _index: int) -> None:
@@ -1821,7 +1855,7 @@ class MainWindow(QMainWindow):
             result = self.controller.preview.export_png(
                 self.session.snapshot, self.active_tab.component_id, Path(filename),
                 row_number=self.active_tab.preview_row_number,
-                mode=str(self.data_mode.currentData() or "prod"),
+                mode=self.data_mode.mode,
                 component=self.session.documents[self.active_tab.component_id].model,
             )
         except ProjectError as exc:
@@ -1843,7 +1877,7 @@ class MainWindow(QMainWindow):
         if clicked not in (active_button, project_button):
             return
         component_ids = (self.active_tab.component_id,) if self.active_tab is not None and clicked is active_button else None
-        target_name = f"{self.active_tab.component_id}-{self.data_mode.currentData()}.zip" if component_ids else f"{self.session.snapshot.model.id}-{self.data_mode.currentData()}.zip"
+        target_name = f"{self.active_tab.component_id}-{self.data_mode.mode}.zip" if component_ids else f"{self.session.snapshot.model.id}-{self.data_mode.mode}.zip"
         filename, _ = QFileDialog.getSaveFileName(self, "Сохранить PNG ZIP", target_name, "ZIP (*.zip)")
         if not filename:
             return
@@ -1868,7 +1902,7 @@ class MainWindow(QMainWindow):
             result = export_png_archive(
                 self.session.snapshot,
                 Path(filename),
-                mode=str(self.data_mode.currentData() or "prod"),
+                mode=self.data_mode.mode,
                 component_ids=component_ids,
                 cancellation=cancellation,
                 on_progress=update_progress,
@@ -1897,7 +1931,7 @@ class MainWindow(QMainWindow):
             return
         if not self.save_all():
             return
-        mode = str(self.data_mode.currentData() or "prod")
+        mode = self.data_mode.mode
         dialog = BuildOptionsDialog(self.session.snapshot.model.print, self, mode=mode)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
@@ -2786,6 +2820,10 @@ class MainWindow(QMainWindow):
         self.delete_component_action.setEnabled(has_project and has_tab and len(self.session.documents) > 1 and idle)
         self.build_all_action.setEnabled(has_project and idle)
         self.build_active_action.setEnabled(has_tab and idle)
+        self.validate_all_action.setEnabled(has_project and idle)
+        self.validate_active_action.setEnabled(has_tab and idle)
+        self.data_validate_all.setEnabled(has_project and idle)
+        self.data_validate.setEnabled(has_tab and idle)
         self.cancel_build_action.setEnabled(not idle)
         ready = self._last_build_result is not None
         self.open_build_action.setEnabled(ready)

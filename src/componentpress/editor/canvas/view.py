@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QKeyEvent, QMouseEvent, QPainter, QPen, QPixmap, QWheelEvent
+from PySide6.QtGui import QColor, QImage, QKeyEvent, QMouseEvent, QPainter, QPen, QPixmap, QTransform, QWheelEvent
 from PySide6.QtWidgets import QFrame, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsScene, QGraphicsView, QGraphicsLineItem
 
 from componentpress.domain.component import ComponentDefinition
@@ -133,10 +133,14 @@ class ComponentCanvas(QGraphicsView):
         self._overlays.clear()
         self.scene().clear()
         self._pixmap_item = self.scene().addPixmap(QPixmap.fromImage(image))
+        self._pixmap_item.setTransform(QTransform.fromScale(
+            component.size_mm.width * 96.0 / 25.4 / self._pixmap_item.boundingRect().width(),
+            component.size_mm.height * 96.0 / 25.4 / self._pixmap_item.boundingRect().height(),
+        ))
         self._pixmap_item.setZValue(0)
         self._sync_model_overlays(component, selected)
         scene = self.scene()
-        scene.setSceneRect(self._pixmap_item.boundingRect().adjusted(-24, -24, 24, 24))
+        scene.setSceneRect(self._pixmap_item.sceneBoundingRect().adjusted(-24, -24, 24, 24))
         first = not self._has_image
         self._has_image = True
         if first or fit:
@@ -150,6 +154,11 @@ class ComponentCanvas(QGraphicsView):
         self._sync_model_overlays(component, selected)
         self.viewport().update()
 
+    def set_preview_pending(self, pending: bool) -> None:
+        if self._pixmap_item is not None:
+            self._pixmap_item.setVisible(not pending)
+            self.viewport().update()
+
     def _sync_model_overlays(self, component: ComponentDefinition, selected: tuple[str, ...]) -> None:
         locked_ids = effectively_locked_ids(component)
         scene = self.scene()
@@ -161,8 +170,8 @@ class ComponentCanvas(QGraphicsView):
         if self._pixmap_item is None:
             self._syncing_selection = False
             return
-        sx = self._pixmap_item.boundingRect().width() / component.size_mm.width
-        sy = self._pixmap_item.boundingRect().height() / component.size_mm.height
+        sx = self._world_per_mm_x
+        sy = self._world_per_mm_y
         order = 0
 
         def add(nodes: tuple[Node, ...]) -> None:
@@ -198,7 +207,7 @@ class ComponentCanvas(QGraphicsView):
         for node_id in selected:
             if node_id in self._overlays:
                 self._overlays[node_id].setSelected(True)
-        scene.setSceneRect(self._pixmap_item.boundingRect().adjusted(-24, -24, 24, 24))
+        scene.setSceneRect(self._pixmap_item.sceneBoundingRect().adjusted(-24, -24, 24, 24))
         self._syncing_selection = False
 
     def set_image(self, image: QImage, *, fit: bool = False) -> None:

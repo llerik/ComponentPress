@@ -119,7 +119,7 @@ def test_low_resolution_image_is_reported_without_blocking_build(tmp_path: Path)
     assert result.status == "succeeded", result.diagnostics
     assert result.report_path is not None
     report = json.loads(result.report_path.read_text(encoding="utf-8"))
-    assert report["application_version"] == "0.14.5"
+    assert report["application_version"] == "0.14.7"
     warnings = [item for item in report["warnings"] if item["code"] == "IMAGE_DPI_LOW"]
     assert warnings and all(item["severity"] == "warning" for item in warnings)
     assert all("эффективное разрешение" in item["message"] for item in warnings)
@@ -163,7 +163,7 @@ def test_preview_runs_off_ui_thread_and_keeps_scene_coordinates(tmp_path: Path, 
     component = window.session.documents["forest-card"].model
     heading_width_mm = node_bounds(component, "heading")[2]
     assert tab.canvas._overlays["heading"].rect().width() == pytest.approx(
-        heading_width_mm * logical.width() / component.size_mm.width,
+        heading_width_mm * 96 / 25.4,
     )
 
 
