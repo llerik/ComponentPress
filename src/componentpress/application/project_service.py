@@ -1,8 +1,10 @@
 """Project use cases, independent of file and Qt adapters."""
 
 from pathlib import Path
+from functools import wraps
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.diagnostics.logging import log_event, log_exception
 from componentpress.application.edits import ensure_visual_edit_respects_locks
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.project import CopiesColumns, DataSource
@@ -16,6 +18,25 @@ from .sessions import ProjectSession
 from .version_service import VersionService
 
 
+def _logged(operation: str):
+    def decorate(function):
+        @wraps(function)
+        def run(*args, **kwargs):
+            log_event("project.operation", operation=operation, status="started")
+            try:
+                result = function(*args, **kwargs)
+            except ProjectError as exc:
+                log_event("project.operation", operation=operation, status="failed", code=exc.diagnostic.code)
+                raise
+            except Exception as exc:
+                log_exception("project.operation", exc, operation=operation, status="failed")
+                raise
+            log_event("project.operation", operation=operation, status="succeeded")
+            return result
+        return run
+    return decorate
+
+
 class ProjectService:
     def __init__(self, projects: ProjectRepository, resources: ResourceRepository, write_lock: WriteLockFactory, identifiers: IdentifierGenerator | None = None):
         self.projects = projects
@@ -24,12 +45,15 @@ class ProjectService:
         self.identifiers = identifiers or IdentifierGenerator()
         self.versions = VersionService(projects, write_lock)
 
+    @_logged("create")
     def create(self, root: Path, name: str) -> ProjectSnapshot:
         return self.projects.create(root, name)
 
+    @_logged("open")
     def open(self, root: Path) -> ProjectSnapshot:
         return self.projects.open(root)
 
+    @_logged("migrate")
     def migrate(self, root: Path) -> ProjectSnapshot:
         return self.projects.migrate(root)
 
@@ -42,6 +66,7 @@ class ProjectService:
     def migrate_session(self, root: Path) -> ProjectSession:
         return ProjectSession.from_snapshot(self.migrate(root))
 
+    @_logged("rename")
     def rename(self, root: Path, name: str) -> ProjectSnapshot:
         return self.projects.save_project(self.projects.open(root), name=name)
 
@@ -103,11 +128,13 @@ class ProjectService:
             if session.documents[component_id].dirty:
                 self.save_document(session, component_id)
 
+    @_logged("import_image")
     def import_image(self, root: Path, source: Path, folder: str = "") -> str:
         snapshot = self.projects.open(root)
         with self.write_lock(snapshot.root):
             return self.resources.import_image(snapshot.root, source, folder)
 
+    @_logged("import_data")
     def import_data(self, session: ProjectSession, source: Path) -> str:
         """Import the project's single XLSX source."""
         with self.write_lock(session.snapshot.root):

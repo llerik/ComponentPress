@@ -9,6 +9,7 @@ from PySide6.QtGui import QImage, QPainter
 
 from componentpress.build.input_snapshot import BuildInputSnapshot, BuildInstance, SnapshotResourceLoader
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.diagnostics.logging import log_exception
 from componentpress.rendering.geometry import MM_PER_INCH, pixel_size
 from componentpress.rendering.painter import paint_component
 from .cancellation import CancellationToken
@@ -61,5 +62,10 @@ class RenderInstanceTask(QRunnable):
             finally:
                 temporary.unlink(missing_ok=True)
         except Exception as exc:  # carried to the coordinator; QRunnable must not leak it
-            error = exc
-        self.done(self.instance.index, error)
+            if isinstance(exc, ProjectError):
+                error = exc
+            else:
+                incident_id = log_exception("build.render", exc, operation="render", phase="png", mode=self.snapshot.mode)
+                error = ProjectError(Diagnostic("RENDER_FAILED", "Ошибка отрисовки", self.instance.document_path, incident_id=incident_id, message_key="error.render_failed"))
+        finally:
+            self.done(self.instance.index, error)

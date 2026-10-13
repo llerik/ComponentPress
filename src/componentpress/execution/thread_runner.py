@@ -11,6 +11,8 @@ from PySide6.QtGui import QFontDatabase
 from componentpress.application.contracts import BuildProgress, BuildResult
 from componentpress.build.engine import BuildEngine
 from componentpress.build.input_snapshot import BuildInputSnapshot
+from componentpress.domain.diagnostics import Diagnostic
+from componentpress.diagnostics.logging import log_exception
 from .cancellation import CancellationToken
 from .job_store import JobStore
 from .signals import BuildSignals
@@ -25,7 +27,15 @@ class _CoordinatorTask(QRunnable):
         self.signals = signals
 
     def run(self) -> None:
-        result = self.engine.execute(self.snapshot, self.token, self.signals.progress.emit)
+        try:
+            result = self.engine.execute(self.snapshot, self.token, self.signals.progress.emit)
+        except Exception as exc:
+            incident_id = log_exception("build.coordinator", exc, operation="build", job_id=self.snapshot.job_id, phase="coordinator", mode=self.snapshot.mode)
+            try:
+                self.engine.store.update(self.snapshot.job_id, phase="failed", cleanup_state="cleanup_pending")
+            except Exception as state_error:
+                log_exception("build.coordinator_state", state_error, operation="build", job_id=self.snapshot.job_id, phase="cleanup", mode=self.snapshot.mode)
+            result = BuildResult(self.snapshot.job_id, "failed", diagnostics=(Diagnostic("BUILD_FAILED", "Unexpected build error", incident_id=incident_id, message_key="error.build_failed"),), cleanup_state="cleanup_pending", mode=self.snapshot.mode)
         self.signals.finished.emit(result)
 
 
@@ -80,8 +90,19 @@ class ThreadBuildRunner(QObject):
         if job is None:
             return
         # Global font registration belongs to the GUI/main thread.
-        for font_id in reversed(job.snapshot.registered_font_ids):
-            QFontDatabase.removeApplicationFont(font_id)
-        self.store.release(result.job_id)
-        if job.finished is not None:
-            job.finished(result)
+        try:
+            for font_id in reversed(job.snapshot.registered_font_ids):
+                QFontDatabase.removeApplicationFont(font_id)
+        except Exception as exc:
+            log_exception("build.font_cleanup", exc, operation="build", job_id=result.job_id, phase="font_cleanup")
+        finally:
+            try:
+                self.store.release(result.job_id)
+            except Exception as exc:
+                log_exception("build.lock_release", exc, operation="build", job_id=result.job_id, phase="lock_release")
+            finally:
+                if job.finished is not None:
+                    try:
+                        job.finished(result)
+                    except Exception as exc:
+                        log_exception("build.completion_callback", exc, operation="build", job_id=result.job_id, phase="completion")

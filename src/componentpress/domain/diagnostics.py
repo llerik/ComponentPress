@@ -14,6 +14,9 @@ class Diagnostic:
     sheet: str | None = None
     cell: str | None = None
     node_id: str | None = None
+    message_key: str | None = None
+    params: dict[str, object] | None = None
+    incident_id: str | None = None
 
     def __str__(self) -> str:
         location = str(self.path) if self.path else "проект"
@@ -32,7 +35,19 @@ class Diagnostic:
             details.append(f"элемент {self.node_id}")
         if details:
             location += " [" + ", ".join(details) + "]"
-        return f"{location}: {self.code}: {self.message}"
+        message = self.message
+        if self.message_key:
+            from componentpress.i18n import tr
+
+            message = tr(self.message_key, **(self.params or {}))
+        else:
+            from componentpress.i18n import language, tr
+
+            if language() != "ru":
+                message = tr("error.diagnostic", code=self.code)
+        if self.incident_id:
+            message = f"{message} [{tr('error.incident_id', incident_id=self.incident_id)}]"
+        return f"{location}: {self.code}: {message}"
 
 
 class ProjectError(Exception):

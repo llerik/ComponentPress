@@ -12,6 +12,8 @@ from componentpress.domain.component import ComponentDefinition
 from componentpress.rendering import render_component_image
 from componentpress.rendering.image_quality import measure_component_images
 from componentpress.rendering.resources import ProjectResourceLoader
+from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.diagnostics.logging import log_exception
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,9 @@ class PreviewTask(QRunnable):
                 bindings_resolved=self.request.bindings_resolved,
             )
         except Exception as exc:
+            if not isinstance(exc, ProjectError):
+                incident_id = log_exception("preview.render", exc, operation="preview", phase="render")
+                exc = ProjectError(Diagnostic("PREVIEW_ERROR", "Unexpected preview error", incident_id=incident_id, message_key="error.preview_failed"))
             self.signals.finished.emit(("render", self.request, None, exc))
         else:
             self.signals.finished.emit(("render", self.request, (image, quality), None))
@@ -92,6 +97,9 @@ class PreviewFontReadTask(QRunnable):
                             raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "шрифт изменился во время чтения", path))
                         files.append((path, data))
         except Exception as exc:
+            if not isinstance(exc, ProjectError):
+                incident_id = log_exception("preview.fonts", exc, operation="preview", phase="fonts")
+                exc = ProjectError(Diagnostic("PREVIEW_ERROR", "Unexpected font error", incident_id=incident_id, message_key="error.preview_failed"))
             self.signals.finished.emit(("fonts", self.request, None, exc))
         else:
             self.signals.finished.emit(("fonts", self.request, tuple(files), None))

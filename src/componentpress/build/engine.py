@@ -12,6 +12,7 @@ from PySide6.QtCore import QThreadPool
 
 from componentpress.application.contracts import BuildProgress, BuildResult
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.diagnostics.logging import log_event, log_exception
 from componentpress.execution.cancellation import CancellationToken
 from componentpress.execution.cleanup import cleanup_job_directory
 from componentpress.execution.job_store import JobStore
@@ -34,6 +35,7 @@ class BuildEngine:
     ) -> BuildResult:
         started = datetime.now(timezone.utc).isoformat()
         output: Path | None = None
+        log_event("build.started", operation="build", job_id=snapshot.job_id, phase="preparing", mode=snapshot.mode)
         try:
             cancellation.check()
             plan = calculate_imposition(snapshot.instances, snapshot.print_settings)
@@ -107,6 +109,7 @@ class BuildEngine:
                     self.store.update(snapshot.job_id, cleanup_state="cleanup_pending")
                 except Exception as exc:
                     post_publish.append(self._bookkeeping_warning("не удалось записать состояние очистки", exc, snapshot.job_directory))
+            log_event("build.finished", operation="build", status="succeeded", job_id=snapshot.job_id, phase="finished", mode=snapshot.mode)
             return BuildResult(
                 snapshot.job_id,
                 "succeeded",
@@ -121,8 +124,11 @@ class BuildEngine:
         except Exception as exc:
             if isinstance(exc, ProjectError):
                 diagnostic = exc.diagnostic
+                event = "build.cancelled" if diagnostic.code == "BUILD_CANCELLED" else "build.failed"
+                log_event(event, operation="build", job_id=snapshot.job_id, phase=diagnostic.code, mode=snapshot.mode, code=diagnostic.code)
             else:
-                diagnostic = Diagnostic("BUILD_FAILED", str(exc), snapshot.job_directory)
+                incident_id = log_exception("build.failed", exc, operation="build", job_id=snapshot.job_id, phase="failed", mode=snapshot.mode)
+                diagnostic = Diagnostic("BUILD_FAILED", "Unexpected build error", incident_id=incident_id, message_key="error.build_failed")
             status = "cancelled" if diagnostic.code == "BUILD_CANCELLED" else "failed"
             try:
                 self.store.update(snapshot.job_id, phase=status, cleanup_state="running")
@@ -144,7 +150,9 @@ class BuildEngine:
 
     @staticmethod
     def _bookkeeping_warning(message: str, exc: Exception, path: Path, *, code: str = "BUILD_BOOKKEEPING_FAILED") -> Diagnostic:
-        detail = exc.diagnostic.message if isinstance(exc, ProjectError) else str(exc)
+        if not isinstance(exc, ProjectError):
+            log_exception("build.bookkeeping", exc, operation="build", phase=code, code=code)
+        detail = exc.diagnostic.message if isinstance(exc, ProjectError) else "технические подробности в журнале"
         return Diagnostic(code, f"{message}: {detail}", path, severity="warning")
 
     @staticmethod
@@ -164,9 +172,13 @@ class BuildEngine:
                 if error is not None:
                     errors.append(error)
                     cancellation.cancel()
-                progress(BuildProgress(snapshot.job_id, "rendering", completed, total, f"PNG {completed} из {total}"))
-                if completed == total:
-                    all_done.set()
+                try:
+                    progress(BuildProgress(snapshot.job_id, "rendering", completed, total, f"PNG {completed} из {total}"))
+                except Exception as exc:
+                    log_exception("build.progress", exc, operation="build", job_id=snapshot.job_id, phase="rendering", mode=snapshot.mode)
+                finally:
+                    if completed == total:
+                        all_done.set()
 
         for instance in snapshot.instances:
             pool.start(RenderInstanceTask(snapshot, instance, cancellation, done))

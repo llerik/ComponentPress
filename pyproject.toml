@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "componentpress"
-version = "0.14.7"
+version = "0.15"
 description = "Редактор печатных компонентов настольных игр"
 requires-python = ">=3.14"
 dependencies = [
@@ -24,6 +24,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "componentpress.app_assets" = ["*.png"]
+"componentpress.i18n" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

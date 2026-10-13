@@ -16,6 +16,7 @@ from componentpress.application.contracts import ProjectSnapshot
 from componentpress.build.input_snapshot import InputSnapshotBuilder
 from componentpress.domain.copy_mode import validate_copy_mode
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.diagnostics.logging import log_event, log_exception
 from componentpress.execution.cancellation import CancellationToken
 from componentpress.execution.cleanup import cleanup_job_directory
 from componentpress.execution.job_store import JobStore
@@ -41,6 +42,7 @@ def export_png_archive(
     on_progress=None,
 ) -> PngArchiveResult:
     selected_mode = validate_copy_mode(mode)
+    log_event("project.png_export", operation="png_export", status="started", mode=selected_mode)
     if target.exists():
         raise ProjectError(Diagnostic("ARCHIVE_EXISTS", "ZIP уже существует; выберите другое имя", target))
     if target.suffix.casefold() != ".zip":
@@ -120,11 +122,14 @@ def export_png_archive(
             raise ProjectError(Diagnostic("ARCHIVE_EXISTS", "ZIP уже существует; выберите другое имя", target)) from exc
         except OSError as exc:
             raise ProjectError(Diagnostic("ARCHIVE_PUBLISH", f"не удалось атомарно опубликовать ZIP: {exc}", target)) from exc
+        log_event("project.png_export", operation="png_export", status="succeeded", mode=selected_mode)
         return PngArchiveResult(target, selected_mode, len(snapshot.instances), snapshot.total_copies)
-    except ProjectError:
+    except ProjectError as exc:
+        log_event("project.png_export", operation="png_export", status="cancelled" if exc.diagnostic.code == "BUILD_CANCELLED" else "failed", mode=selected_mode, code=exc.diagnostic.code)
         raise
     except (OSError, zipfile.BadZipFile) as exc:
-        raise ProjectError(Diagnostic("ARCHIVE_WRITE", str(exc), target)) from exc
+        incident_id = log_exception("project.png_export", exc, operation="png_export", status="failed", mode=selected_mode, code="ARCHIVE_WRITE")
+        raise ProjectError(Diagnostic("ARCHIVE_WRITE", "Не удалось создать ZIP-архив", target, incident_id=incident_id, message_key="error.png_export_failed")) from exc
     finally:
         temporary.unlink(missing_ok=True)
         for font_id in reversed(registered_font_ids):

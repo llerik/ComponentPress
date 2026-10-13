@@ -11,7 +11,7 @@ from .imposition import ImpositionPlan
 from .input_snapshot import BuildInputSnapshot
 
 
-APPLICATION_VERSION = "0.14.7"
+from componentpress.version import APPLICATION_VERSION
 
 
 def sha256(path: Path) -> str:

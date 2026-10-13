@@ -28,6 +28,9 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTabWidget,
     QDockWidget,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QToolBar,
     QToolButton,
     QMenu,
@@ -83,6 +86,9 @@ from .component_dialog import ComponentDialog
 from .ui_state import UiState
 from .project_settings_dialog import ProjectSettingsDialog
 from .copy_mode_switch import CopyModeSwitch
+from componentpress.i18n import language, set_language, tr
+from componentpress.diagnostics import logging as technical_log
+import zipfile
 
 
 class MainWindow(QMainWindow):
@@ -122,7 +128,7 @@ class MainWindow(QMainWindow):
         if application is not None:
             application.setEffectEnabled(Qt.UIEffect.UI_AnimateMenu, False)
             application.setEffectEnabled(Qt.UIEffect.UI_FadeMenu, False)
-        self.setWindowTitle("ComponentPress")
+        self.setWindowTitle(tr("app.name"))
         self.resize(1280, 800)
         self._build_actions()
         self._build_ui()
@@ -148,53 +154,53 @@ class MainWindow(QMainWindow):
         return action
 
     def _build_actions(self) -> None:
-        self.new_action = self._action("Новый проект…", QKeySequence.StandardKey.New)
-        self.open_action = self._action("Открыть проект…", QKeySequence.StandardKey.Open)
-        self.save_action = self._action("Сохранить документ", QKeySequence.StandardKey.Save)
-        self.save_all_action = self._action("Сохранить всё", "Ctrl+Shift+S")
-        self.close_tab_action = self._action("Закрыть вкладку", QKeySequence.StandardKey.Close)
-        self.exit_action = self._action("Выход", QKeySequence.StandardKey.Quit)
-        self.import_project_archive_action = self._action("Импорт архива проекта…")
-        self.export_project_archive_action = self._action("Архив версии проекта…")
-        self.export_png_zip_action = self._action("Экспорт PNG ZIP…")
-        self.add_component_action = self._action("Добавить компонент…", "Ctrl+Shift+N")
-        self.project_settings_action = self._action("Настройки проекта…")
-        self.about_action = self._action("О программе")
-        self.undo_action = self._action("Отменить", QKeySequence.StandardKey.Undo)
-        self.redo_action = self._action("Повторить", QKeySequence.StandardKey.Redo)
-        self.delete_action = self._action("Удалить элементы", QKeySequence.StandardKey.Delete)
-        self.delete_component_action = self._action("Удалить компонент…")
-        self.group_action = self._action("Сгруппировать", "Ctrl+G")
-        self.ungroup_action = self._action("Разгруппировать", "Ctrl+Shift+G")
-        self.zoom_in_action = self._action("Увеличить", QKeySequence.StandardKey.ZoomIn)
-        self.zoom_out_action = self._action("Уменьшить", QKeySequence.StandardKey.ZoomOut)
-        self.fit_action = self._action("По размеру окна", "Ctrl+0")
-        self.build_all_action = self._action("Собрать всё…", "Ctrl+B")
-        self.build_active_action = self._action("Собрать активный компонент…", "Ctrl+Shift+B")
-        self.cancel_build_action = self._action("Отменить сборку")
-        self.open_build_action = self._action("Открыть папку результата")
-        self.open_pdf_action = self._action("Открыть печатный PDF")
-        self.validate_active_action = self._action("Проверить активный компонент")
-        self.validate_all_action = self._action("Проверить все компоненты")
-        self.file_menu = self.menuBar().addMenu("Файл")
+        self.new_action = self._action(tr("action.new"), QKeySequence.StandardKey.New)
+        self.open_action = self._action(tr("action.open"), QKeySequence.StandardKey.Open)
+        self.save_action = self._action(tr("action.save"), QKeySequence.StandardKey.Save)
+        self.save_all_action = self._action(tr("action.save_all"), "Ctrl+Shift+S")
+        self.close_tab_action = self._action(tr("action.close_tab"), QKeySequence.StandardKey.Close)
+        self.exit_action = self._action(tr("action.exit"), QKeySequence.StandardKey.Quit)
+        self.import_project_archive_action = self._action(tr("action.import_archive"))
+        self.export_project_archive_action = self._action(tr("action.export_archive"))
+        self.export_png_zip_action = self._action(tr("action.export_png"))
+        self.add_component_action = self._action(tr("action.add_component"), "Ctrl+Shift+N")
+        self.project_settings_action = self._action(tr("action.project_settings"))
+        self.about_action = self._action(tr("menu.about"))
+        self.undo_action = self._action(tr("action.undo"), QKeySequence.StandardKey.Undo)
+        self.redo_action = self._action(tr("action.redo"), QKeySequence.StandardKey.Redo)
+        self.delete_action = self._action(tr("action.delete"), QKeySequence.StandardKey.Delete)
+        self.delete_component_action = self._action(tr("action.delete_component"))
+        self.group_action = self._action(tr("action.group"), "Ctrl+G")
+        self.ungroup_action = self._action(tr("action.ungroup"), "Ctrl+Shift+G")
+        self.zoom_in_action = self._action(tr("action.zoom_in"), QKeySequence.StandardKey.ZoomIn)
+        self.zoom_out_action = self._action(tr("action.zoom_out"), QKeySequence.StandardKey.ZoomOut)
+        self.fit_action = self._action(tr("action.fit"), "Ctrl+0")
+        self.build_all_action = self._action(tr("action.build_all"), "Ctrl+B")
+        self.build_active_action = self._action(tr("action.build_active"), "Ctrl+Shift+B")
+        self.cancel_build_action = self._action(tr("action.cancel_build"))
+        self.open_build_action = self._action(tr("action.open_result"))
+        self.open_pdf_action = self._action(tr("action.open_pdf"))
+        self.validate_active_action = self._action(tr("action.validate_active"))
+        self.validate_all_action = self._action(tr("action.validate_all"))
+        self.file_menu = self.menuBar().addMenu(tr("menu.file"))
         self.file_menu.addActions([self.new_action, self.open_action])
         self.file_menu.addSeparator()
-        self.import_menu = self.file_menu.addMenu("Импорт")
+        self.import_menu = self.file_menu.addMenu(tr("menu.import"))
         self.import_menu.addAction(self.import_project_archive_action)
-        self.export_menu = self.file_menu.addMenu("Экспорт")
+        self.export_menu = self.file_menu.addMenu(tr("menu.export"))
         self.export_menu.addActions([self.export_png_zip_action, self.export_project_archive_action])
         self.file_menu.addSeparator()
         self.file_menu.addActions([self.project_settings_action, self.add_component_action])
-        self.windows_menu = self.file_menu.addMenu("Окна")
+        self.windows_menu = self.file_menu.addMenu(tr("menu.windows"))
         self.file_menu.addSeparator()
         self.file_menu.addActions([self.save_action, self.save_all_action, self.close_tab_action])
         self.file_menu.addSeparator()
         self.file_menu.addAction(self.exit_action)
-        self.edit_menu = self.menuBar().addMenu("Правка")
+        self.edit_menu = self.menuBar().addMenu(tr("menu.edit"))
         self.edit_menu.addActions([self.undo_action, self.redo_action])
         self.edit_menu.addSeparator()
         self.edit_menu.addActions([self.delete_action, self.delete_component_action, self.group_action, self.ungroup_action])
-        self.build_menu = self.menuBar().addMenu("Сборка")
+        self.build_menu = self.menuBar().addMenu(tr("menu.build"))
         self.build_menu.addActions([
             self.build_all_action,
             self.build_active_action,
@@ -202,7 +208,7 @@ class MainWindow(QMainWindow):
             self.open_build_action,
             self.open_pdf_action,
         ])
-        self.about_menu = self.menuBar().addMenu("О программе")
+        self.about_menu = self.menuBar().addMenu(tr("menu.about"))
         self.about_menu.addAction(self.about_action)
 
     def _build_ui(self) -> None:
@@ -215,9 +221,9 @@ class MainWindow(QMainWindow):
         self.tabs.setMinimumWidth(0)
         self.setCentralWidget(self.tabs)
         self.right_panel = self._right_panel()
-        self.toolbox_dock = QDockWidget("Инструменты", self)
+        self.toolbox_dock = QDockWidget(tr("panel.tools"), self)
         self.toolbox_dock.setObjectName("toolboxDock")
-        self.right_dock = QDockWidget("Рабочие панели", self)
+        self.right_dock = QDockWidget(tr("panel.workspace"), self)
         self.right_dock.setObjectName("rightDock")
         self.right_dock.setMaximumWidth(max(1, self.screen().geometry().width() // 2))
         self.right_dock.setWidget(self.right_panel)
@@ -225,11 +231,11 @@ class MainWindow(QMainWindow):
         self.left_panel = self._left_panel()
         self.toolbox_dock.setWidget(self.left_panel)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.toolbox_dock)
-        self.events_dock = QDockWidget("События", self)
+        self.events_dock = QDockWidget(tr("panel.events"), self)
         self.events_dock.setObjectName("eventsDock")
         self.events_dock.setWidget(self._events_panel())
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.events_dock)
-        self.preview_dock = QDockWidget("Превью", self)
+        self.preview_dock = QDockWidget(tr("panel.preview"), self)
         self.preview_dock.setObjectName("previewDock")
         self.preview_dock.setWidget(self._preview_panel())
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.preview_dock)
@@ -331,7 +337,7 @@ class MainWindow(QMainWindow):
         data.setParent(panel)
         self.compat_data_panel = data
         data.hide()
-        tools = QGroupBox("Инструменты")
+        tools = QGroupBox(tr("panel.tools_group"))
         tools_layout = QVBoxLayout(tools)
         self.image_tool = QPushButton("Изображение")
         self.image_tool.setObjectName("imageTool")
@@ -366,7 +372,7 @@ class MainWindow(QMainWindow):
             button.setFixedSize(34, 34)
             tools_layout.addWidget(button)
         layout.addWidget(tools)
-        actions = QGroupBox("Слои")
+        actions = QGroupBox(tr("panel.layers"))
         action_layout = QVBoxLayout(actions)
         for button in (self.layer_up, self.layer_down, self.group_button, self.ungroup_button, self.reparent_button):
             action_layout.addWidget(button)
@@ -392,9 +398,9 @@ class MainWindow(QMainWindow):
         panel = QWidget()
         events_layout = QVBoxLayout(panel)
         self.event_search = QLineEdit()
-        self.event_search.setPlaceholderText("Поиск событий")
+        self.event_search.setPlaceholderText(tr("event.search"))
         self.event_list = QListWidget()
-        self.clear_events = QPushButton("Очистить")
+        self.clear_events = QPushButton(tr("event.clear"))
         self.clear_events.setIcon(load_icon("delete.png"))
         self.clear_events.clicked.connect(self.event_list.clear)
         events_layout.addWidget(self.event_search)
@@ -441,7 +447,7 @@ class MainWindow(QMainWindow):
         return panel
 
     def _build_icon_toolbar(self) -> None:
-        self.icon_toolbar = QToolBar("Инструменты редактирования", self)
+        self.icon_toolbar = QToolBar(tr("panel.edit_tools"), self)
         self.icon_toolbar.setObjectName("editTools")
         self.icon_toolbar.setMovable(False)
         self.icon_toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
@@ -469,7 +475,7 @@ class MainWindow(QMainWindow):
         components = QWidget()
         component_layout = QVBoxLayout(components)
         component_header = QHBoxLayout()
-        component_header.addWidget(QLabel("Компоненты"), 1)
+        component_header.addWidget(QLabel(tr("panel.components")), 1)
         self.add_component_button = QToolButton()
         self.add_component_button.setText("+")
         self.add_component_button.setToolTip("Добавить компонент")
@@ -485,8 +491,8 @@ class MainWindow(QMainWindow):
         component_layout.addWidget(self.component_tree)
         self.component_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.component_tree.customContextMenuRequested.connect(self._component_context_menu)
-        self.right_tabs.addTab(components, "Компоненты")
-        elements = QGroupBox("Элементы (передний план сверху)")
+        self.right_tabs.addTab(components, tr("panel.components"))
+        elements = QGroupBox(tr("panel.element_order"))
         element_layout = QVBoxLayout(elements)
         self.element_tree = LayerTreeView()
         self.element_tree.setObjectName("elementTree")
@@ -498,7 +504,7 @@ class MainWindow(QMainWindow):
         self.group_button = QPushButton("Создать группу")
         self.ungroup_button = QPushButton("Разгруппировать")
         self.reparent_button = QPushButton("Переместить…")
-        self.right_tabs.addTab(elements, "Элементы")
+        self.right_tabs.addTab(elements, tr("panel.elements"))
         layout.addWidget(self.right_tabs, 2)
         self.multi_properties_group = QGroupBox("Выравнивание выделения")
         multi_layout = QHBoxLayout(self.multi_properties_group)
@@ -606,9 +612,114 @@ class MainWindow(QMainWindow):
             self._sync_tool_buttons()
 
     def _show_about(self) -> None:
-        from componentpress.build.report import APPLICATION_VERSION
+        from importlib import import_module
+        from importlib.metadata import PackageNotFoundError, metadata, version
+        from PySide6 import __version__ as qt_version
+        from PySide6.QtCore import QSettings
+        from PySide6.QtWidgets import QComboBox, QFileDialog, QFormLayout, QHBoxLayout
+        import platform
+
+        from componentpress.version import APPLICATION_VERSION
         from componentpress.domain.schema import SCHEMA_VERSION
-        QMessageBox.about(self, "О программе", f"ComponentPress {APPLICATION_VERSION}\nРедактор печатных компонентов настольных игр\nПоддерживаемая схема проекта и компонентов: {SCHEMA_VERSION}")
+
+        dialog = QDialog(self)
+        dialog.setObjectName("aboutDialog")
+        dialog.setWindowTitle(tr("about.title"))
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel(f"ComponentPress {APPLICATION_VERSION}\n{tr('about.description')}"))
+        details = QFormLayout()
+        details.addRow(QLabel(tr("about.schema", version=SCHEMA_VERSION)))
+        details.addRow(QLabel(tr("about.runtime", python=platform.python_version(), qt=qt_version)))
+        dependency_rows = []
+        packages = {
+            "openpyxl": ("openpyxl", "MIT"),
+            "ruamel.yaml": ("ruamel.yaml", "MIT"),
+            "pydantic": ("pydantic", "MIT"),
+            "Jinja2": ("jinja2", "BSD-3-Clause"),
+            "PySide6": ("PySide6", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
+        }
+        for package, (module_name, fallback_license) in packages.items():
+            try:
+                try:
+                    package_version = version(package)
+                    package_metadata = metadata(package)
+                    license_name = (package_metadata.get("License-Expression") or package_metadata.get("License") or fallback_license).splitlines()[0][:100]
+                except PackageNotFoundError:
+                    package_module = import_module(module_name)
+                    package_version = getattr(package_module, "__version__", getattr(package_module, "VERSION", "included"))
+                    license_name = fallback_license
+                dependency_rows.append(f"{package} {package_version} ({license_name})")
+            except (PackageNotFoundError, ImportError):
+                continue
+        dependency_label = QLabel(tr("about.dependencies", dependencies="; ".join(dependency_rows)))
+        dependency_label.setWordWrap(True)
+        details.addRow(dependency_label)
+        details.addRow(QLabel(tr("about.license")))
+        layout.addLayout(details)
+
+        language_row = QHBoxLayout()
+        language_row.addWidget(QLabel(tr("about.language")))
+        selector = QComboBox()
+        selector.setObjectName("languageSelector")
+        selector.addItem(tr("language.ru"), "ru")
+        selector.addItem(tr("language.en"), "en")
+        selector.setCurrentIndex(0 if language() == "ru" else 1)
+        language_row.addWidget(selector)
+        layout.addLayout(language_row)
+        restart = QLabel(tr("about.restart"))
+        layout.addWidget(restart)
+
+        actions = QDialogButtonBox()
+        open_logs = actions.addButton(tr("about.open_logs"), QDialogButtonBox.ButtonRole.ActionRole)
+        report = actions.addButton(tr("about.create_report"), QDialogButtonBox.ButtonRole.ActionRole)
+        actions.addButton(QDialogButtonBox.StandardButton.Close)
+        layout.addWidget(actions)
+
+        def save_language(index: int) -> None:
+            selected = selector.itemData(index)
+            if selected != language():
+                settings = QSettings(QSettings.Format.IniFormat, QSettings.Scope.UserScope, "ComponentPress", "ComponentPress")
+                settings.setValue("language", selected)
+                settings.sync()
+                restart.setText(tr("about.restart"))
+
+        def show_report() -> None:
+            filename, _filter = QFileDialog.getSaveFileName(
+                dialog, tr("about.report_title"), "componentpress-error.zip", tr("about.report_filter")
+            )
+            if not filename:
+                return
+            target = Path(filename)
+            if target.exists() and QMessageBox.question(dialog, tr("about.report_title"), str(target)) != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                result = self._last_build_result
+                diagnostic = next(iter(result.diagnostics), None) if result is not None else None
+                technical_log.create_report(
+                    target,
+                    incident_id=getattr(diagnostic, "incident_id", None),
+                    code=getattr(diagnostic, "code", None),
+                    job_id=result.job_id if result is not None else None,
+                    phase=result.status if result is not None else None,
+                    status=result.status if result is not None else None,
+                    mode=result.mode if result is not None else None,
+                )
+            except (OSError, ValueError, zipfile.BadZipFile) as exc:
+                QMessageBox.warning(dialog, tr("about.report_title"), tr("about.report_failed", error=type(exc).__name__))
+                return
+            QMessageBox.information(dialog, tr("about.report_title"), tr("about.report_saved", path=target.name))
+
+        def show_log_folder() -> None:
+            folder = technical_log.log_folder()
+            if folder is None or not folder.exists() or not PlatformServices.open_path(folder):
+                QMessageBox.information(dialog, tr("about.title"), tr("about.open_logs_failed"))
+
+        selector.currentIndexChanged.connect(save_language)
+        open_logs.clicked.connect(show_log_folder)
+        report.clicked.connect(show_report)
+        actions.rejected.connect(dialog.reject)
+        dialog.resize(720, 340)
+        dialog.exec()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -847,7 +958,7 @@ class MainWindow(QMainWindow):
         if self._version_task is not None:
             return
         cancellation = CancellationToken()
-        task = VersionTask(operation, cancellation)
+        task = VersionTask(operation, cancellation, kind)
         task.signals.progress.connect(self._version_task_progress, Qt.ConnectionType.QueuedConnection)
         task.signals.finished.connect(self._version_task_finished, Qt.ConnectionType.QueuedConnection)
         self._version_task = task
@@ -1394,6 +1505,7 @@ class MainWindow(QMainWindow):
     def _add_events(self, diagnostics) -> None:
         reveal = False
         for diagnostic in diagnostics:
+            technical_log.log_event("project.diagnostic", code=getattr(diagnostic, "code", "UNKNOWN"), status=getattr(diagnostic, "severity", "error"))
             self.event_list.addItem(str(diagnostic))
             if getattr(diagnostic, "severity", "error") != "info":
                 reveal = True
@@ -2872,8 +2984,12 @@ class MainWindow(QMainWindow):
         self._sync_tool_buttons()
 
     def _show_error(self, error: Exception) -> None:
-        message = format_error(error.diagnostic if isinstance(error, ProjectError) else error)
-        QMessageBox.critical(self, "Ошибка", message)
+        if isinstance(error, ProjectError):
+            message = format_error(error.diagnostic)
+        else:
+            incident_id = technical_log.log_exception("gui.operation", error, operation="dialog", status="failed")
+            message = tr("error.unexpected", incident_id=incident_id)
+        QMessageBox.critical(self, tr("error.title"), message)
         self.statusBar().showMessage(message, 7000)
 
     def closeEvent(self, event: QCloseEvent) -> None:

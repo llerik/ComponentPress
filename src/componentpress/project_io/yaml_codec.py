@@ -140,7 +140,11 @@ def _template_path(value: str, path: Path, field: str) -> None:
     try:
         validate_relative_path(candidate)
     except ProjectError as exc:
-        raise ProjectError(Diagnostic(exc.diagnostic.code, exc.diagnostic.message, path, field)) from exc
+        raise ProjectError(Diagnostic(
+            exc.diagnostic.code, exc.diagnostic.message, path, field,
+            message_key=exc.diagnostic.message_key, params=exc.diagnostic.params,
+            incident_id=exc.diagnostic.incident_id,
+        )) from exc
 
 
 class _ImageSources(HTMLParser):
@@ -173,7 +177,11 @@ def parse_project(text: str, path: Path) -> tuple[ProjectDefinition, CommentedMa
         try:
             validate_relative_path(value)
         except ProjectError as exc:
-            raise ProjectError(Diagnostic(exc.diagnostic.code, exc.diagnostic.message, path, field)) from exc
+            raise ProjectError(Diagnostic(
+                exc.diagnostic.code, exc.diagnostic.message, path, field,
+                message_key=exc.diagnostic.message_key, params=exc.diagnostic.params,
+                incident_id=exc.diagnostic.incident_id,
+            )) from exc
         if field.startswith("icons.") and (not value.startswith("assets/images/") or not value.lower().endswith((".png", ".jpg", ".jpeg"))):
             raise ProjectError(Diagnostic("ICON_PATH", "иконка должна ссылаться на PNG/JPEG в assets/images", path, field))
         if field == "data_source.path" and not value.lower().endswith(".xlsx"):

@@ -38,7 +38,11 @@ class ProjectResourceLoader:
             check_exact_case(self.root, relative_path)
             path = resolve_project_path(self.root, relative_path)
         except ProjectError as exc:
-            raise ProjectError(Diagnostic(exc.diagnostic.code, exc.diagnostic.message, owner or exc.diagnostic.path, field)) from exc
+            raise ProjectError(Diagnostic(
+                exc.diagnostic.code, exc.diagnostic.message, owner or exc.diagnostic.path, field,
+                message_key=exc.diagnostic.message_key, params=exc.diagnostic.params,
+                incident_id=exc.diagnostic.incident_id,
+            )) from exc
         try:
             data = path.read_bytes()
         except FileNotFoundError as exc:

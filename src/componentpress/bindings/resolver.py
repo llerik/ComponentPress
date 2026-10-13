@@ -183,6 +183,8 @@ class BindingResolver:
             exc.diagnostic.code, exc.diagnostic.message, location.owner, location.field,
             source=location.source or None, sheet=location.sheet or None,
             cell=cell.coordinate if cell is not None else None, node_id=location.node_id,
+            message_key=exc.diagnostic.message_key, params=exc.diagnostic.params,
+            incident_id=exc.diagnostic.incident_id,
         ))
 
     def resolve_component(self, component: ComponentDefinition, data: DataSheetSnapshot | None, row: DataRow | None, *, owner: Path | None = None) -> ResolvedComponent:
@@ -243,6 +245,8 @@ class BindingResolver:
                             raise ProjectError(Diagnostic(
                                 exc.diagnostic.code, exc.diagnostic.message, owner, location.field,
                                 source=source, sheet=sheet, cell=cell.coordinate, node_id=node.id,
+                                message_key=exc.diagnostic.message_key, params=exc.diagnostic.params,
+                                incident_id=exc.diagnostic.incident_id,
                             )) from exc
                         if parse_references(html):
                             raise ProjectError(Diagnostic("COLUMN_TEMPLATE_FORBIDDEN", "содержимое Excel не может содержать подстановки", owner, location.field, source=source, sheet=sheet, cell=cell.coordinate, node_id=node.id))
@@ -257,6 +261,8 @@ class BindingResolver:
                             raise ProjectError(Diagnostic(
                                 exc.diagnostic.code, exc.diagnostic.message, owner, location.field,
                                 source=source, sheet=sheet, cell=cell.coordinate, node_id=node.id,
+                                message_key=exc.diagnostic.message_key, params=exc.diagnostic.params,
+                                incident_id=exc.diagnostic.incident_id,
                             )) from exc
                     else:
                         html = self.resolve_html(html, row, location)

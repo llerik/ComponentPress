@@ -113,7 +113,9 @@ def test_icon_assets_are_declared_for_python_and_windows_packages() -> None:
 
     spec = (ROOT / "packaging" / "windows.spec").read_text(encoding="utf-8")
     assert 'application_assets = root / "src" / "componentpress" / "app_assets"' in spec
-    assert 'datas=[(str(asset), "componentpress/app_assets") for asset in application_assets.glob("*.png")]' in spec
+    assert '"componentpress/app_assets") for asset in application_assets.glob("*.png")' in spec
+    assert '"componentpress/i18n") for asset in i18n_assets.glob("*.json")' in spec
+    assert '"PySide6/translations") for language in ("ru", "en")' in spec
     expected_assets = {
         "settings.png", "add.png", "save.png", "undo.png", "redo.png", "remove.png", "group.png",
         "ungroup.png", "zoom_up.png", "zoom_down.png", "by_screen.png", "cursor.png", "image.png",

@@ -12,6 +12,7 @@ from componentpress.application.contracts import BuildProgress, BuildRequest, Bu
 from componentpress.application.sessions import ProjectSession
 from componentpress.build.input_snapshot import InputSnapshotBuilder
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.diagnostics.logging import log_event, log_exception
 from componentpress.domain.copy_mode import validate_copy_mode
 from componentpress.execution.cancellation import CancellationToken
 from componentpress.execution.cleanup import cleanup_job_directory
@@ -86,6 +87,7 @@ class BuildService(QObject):
         self.projects.save_all(session)
         recovery_diagnostics = store.recover()
         job_id = uuid4().hex
+        log_event("build.started", operation="build", status="started", job_id=job_id, phase="preparation", mode=mode)
         job_directory = store.initialize(job_id, session.snapshot.model.id)
         store.update(job_id, mode=mode)
         token = CancellationToken()
@@ -126,9 +128,21 @@ class BuildService(QObject):
             except Exception as exc:
                 error = exc
         if error is not None:
-            cleanup = cleanup_job_directory(self._store, job_id)
-            self._store.release(job_id)
-            diagnostic = error.diagnostic if isinstance(error, ProjectError) else Diagnostic("BUILD_PREPARATION_FAILED", str(error), self._store.root)
+            if not isinstance(error, ProjectError):
+                incident_id = log_exception("build.preparation", error, operation="build", job_id=job_id, phase="preparation", mode=pending.mode)
+                error = ProjectError(Diagnostic("BUILD_PREPARATION_FAILED", "Preparation failed", incident_id=incident_id, message_key="error.preparation_failed"))
+            else:
+                log_event("build.preparation", operation="build", status="cancelled" if error.diagnostic.code == "BUILD_CANCELLED" else "failed", job_id=job_id, phase="preparation", mode=pending.mode, code=error.diagnostic.code)
+            try:
+                cleanup = cleanup_job_directory(self._store, job_id)
+            except Exception as exc:
+                incident_id = log_exception("build.preparation_cleanup", exc, operation="build", job_id=job_id, phase="cleanup", mode=pending.mode)
+                cleanup = (Diagnostic("CLEANUP_PENDING", "очистку подготовки повторит следующее открытие проекта", severity="warning", incident_id=incident_id),)
+            try:
+                self._store.release(job_id)
+            except Exception as exc:
+                log_exception("build.preparation_release", exc, operation="build", job_id=job_id, phase="lock_release", mode=pending.mode)
+            diagnostic = error.diagnostic
             status = "cancelled" if diagnostic.code == "BUILD_CANCELLED" else "failed"
             result = BuildResult(
                 job_id,
@@ -138,7 +152,10 @@ class BuildService(QObject):
                 mode=pending.mode,
             )
             if pending.on_finished is not None:
-                pending.on_finished(result)
+                try:
+                    pending.on_finished(result)
+                except Exception as exc:
+                    log_exception("build.preparation_callback", exc, operation="build", job_id=job_id, phase="completion", mode=pending.mode)
             return
 
         def finished(result: BuildResult) -> None:
@@ -169,7 +186,10 @@ class BuildService(QObject):
                 mode=pending.mode,
             )
             if pending.on_finished is not None:
-                pending.on_finished(result)
+                try:
+                    pending.on_finished(result)
+                except Exception as exc:
+                    log_exception("build.completion_callback", exc, operation="build", job_id=job_id, phase="completion", mode=pending.mode)
 
     def run(self, session: ProjectSession, request: BuildRequest, *, on_progress=None) -> BuildResult:
         loop = QEventLoop()
@@ -189,13 +209,17 @@ class BuildService(QObject):
         preparing = self._preparing.get(job_id)
         if preparing is not None:
             preparing.token.cancel()
+            log_event("build.cancel_requested", operation="build", status="cancelled", job_id=job_id, phase="preparation", mode=preparing.mode)
             if self._store is not None:
                 try:
                     self._store.update(job_id, phase="cancelling")
                 except ProjectError:
                     pass
             return True
-        return bool(self._runner and self._runner.cancel(job_id))
+        cancelled = bool(self._runner and self._runner.cancel(job_id))
+        if cancelled:
+            log_event("build.cancel_requested", operation="build", status="cancelled", job_id=job_id, phase="rendering")
+        return cancelled
 
     def is_active(self, job_id: str | None = None) -> bool:
         if job_id is None:

@@ -1,36 +1,40 @@
 import argparse
 from pathlib import Path
 import sys
+import atexit
+from PySide6.QtCore import QSettings
 
 from componentpress.bootstrap import project_service
 from componentpress.application.build_service import BuildService
 from componentpress.application.contracts import BuildRequest
 from componentpress.domain.diagnostics import ProjectError
+from componentpress.diagnostics import logging as technical_log
+from componentpress.i18n import set_language, validate_catalogs, tr
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="componentpress", description="Проекты ComponentPress")
+    parser = argparse.ArgumentParser(prog="componentpress", description=tr("cli.description"))
     commands = parser.add_subparsers(dest="command", required=True)
-    new = commands.add_parser("new", help="создать проект")
+    new = commands.add_parser("new", help=tr("cli.create"))
     new.add_argument("folder", type=Path)
     new.add_argument("--name", default="Новая игра")
-    validate = commands.add_parser("validate", help="проверить формат проекта")
+    validate = commands.add_parser("validate", help=tr("cli.validate"))
     validate.add_argument("folder", type=Path)
-    migrate = commands.add_parser("migrate", help="перевести проект формата 1 в формат 2 с резервной копией")
+    migrate = commands.add_parser("migrate", help=tr("cli.migrate"))
     migrate.add_argument("folder", type=Path)
-    rename = commands.add_parser("set-name", help="изменить название проекта")
+    rename = commands.add_parser("set-name", help=tr("cli.rename"))
     rename.add_argument("folder", type=Path)
     rename.add_argument("name")
-    size = commands.add_parser("set-size", help="изменить размер компонента")
+    size = commands.add_parser("set-size", help=tr("cli.resize"))
     size.add_argument("folder", type=Path)
     size.add_argument("component")
     size.add_argument("width_mm", type=float)
     size.add_argument("height_mm", type=float)
-    add = commands.add_parser("add-component", help="зарегистрировать компонент")
+    add = commands.add_parser("add-component", help=tr("cli.add_component"))
     add.add_argument("folder", type=Path)
     add.add_argument("id")
     add.add_argument("name")
-    image = commands.add_parser("import-image", help="импортировать PNG/JPEG в проект")
+    image = commands.add_parser("import-image", help=tr("cli.import_image"))
     image.add_argument("folder", type=Path)
     image.add_argument("source", type=Path)
     image.add_argument("--into", default="", help="вложенная папка внутри assets/images")
@@ -53,31 +57,37 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    technical_log.initialize()
+    technical_log.install_exception_hooks()
+    atexit.register(technical_log.shutdown)
+    validate_catalogs()
+    set_language(QSettings("ComponentPress", "ComponentPress").value("language", "ru", type=str))
     if not sys.stdout.isatty():
         sys.stdout.reconfigure(encoding="utf-8")
     if not sys.stderr.isatty():
         sys.stderr.reconfigure(encoding="utf-8")
     args = build_parser().parse_args(argv)
+    technical_log.log_event("cli.started", operation=args.command)
     service = project_service()
     try:
         if args.command == "new":
             snapshot = service.create(args.folder, args.name)
-            print(f"Проект создан: {snapshot.root}")
+            print(tr("cli.create_ok", path=snapshot.root))
         elif args.command == "validate":
             snapshot = service.open(args.folder)
-            print(f"Проект корректен: {snapshot.model.name}; компонентов: {len(snapshot.documents)}")
+            print(tr("cli.validate_ok", name=snapshot.model.name, count=len(snapshot.documents)))
         elif args.command == "migrate":
             snapshot = service.migrate(args.folder)
-            print(f"Проект переведён в формат {snapshot.model.schema_version}: {snapshot.root}")
+            print(tr("cli.migrate_ok", version=snapshot.model.schema_version, path=snapshot.root))
         elif args.command == "set-name":
             service.rename(args.folder, args.name)
-            print("Название сохранено")
+            print(tr("cli.rename_ok"))
         elif args.command == "set-size":
             service.resize(args.folder, args.component, args.width_mm, args.height_mm)
             print("Размер сохранён")
         elif args.command == "add-component":
             service.register(args.folder, args.id, args.name)
-            print("Компонент добавлен")
+            print(tr("cli.add_ok"))
         elif args.command == "import-image":
             relative = service.import_image(args.folder, args.source, args.into)
             print(relative)
@@ -125,6 +135,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"PDF: {result.pdf_path}")
         return 0
     except ProjectError as exc:
+        technical_log.log_event("cli.failed", operation=args.command, status="failed", code=exc.diagnostic.code)
         print(exc.diagnostic, file=sys.stderr)
         return 2
 

@@ -9,13 +9,19 @@ settings = runpy.run_path(str(spec_directory / "common.py"))
 root = settings["ROOT"]
 executable_name = settings["EXECUTABLE_NAME"]
 application_assets = root / "src" / "componentpress" / "app_assets"
+qt_translations = root / ".venv" / "Lib" / "site-packages" / "PySide6" / "translations"
+i18n_assets = root / "src" / "componentpress" / "i18n"
 windows_icon = spec_directory / "componentpress.ico"
 
 analysis = Analysis(
     [str(spec_directory / "windows_entry.py")],
     pathex=[str(root / "src")],
     binaries=[],
-    datas=[(str(asset), "componentpress/app_assets") for asset in application_assets.glob("*.png")],
+    datas=[
+        *((str(asset), "componentpress/app_assets") for asset in application_assets.glob("*.png")),
+        *((str(asset), "componentpress/i18n") for asset in i18n_assets.glob("*.json")),
+        *((str(qt_translations / f"qtbase_{language}.qm"), "PySide6/translations") for language in ("ru", "en") if (qt_translations / f"qtbase_{language}.qm").is_file()),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

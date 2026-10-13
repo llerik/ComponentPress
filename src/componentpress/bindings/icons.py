@@ -116,6 +116,8 @@ def expand_icons(
                     raise ProjectError(Diagnostic(
                         exc.diagnostic.code, exc.diagnostic.message, owner, field,
                         source=source, sheet=sheet, cell=cell, node_id=node_id,
+                        message_key=exc.diagnostic.message_key, params=exc.diagnostic.params,
+                        incident_id=exc.diagnostic.incident_id,
                     )) from exc
             width = mm_to_html_pixels(icon.width_mm)
             height = mm_to_html_pixels(icon.height_mm)

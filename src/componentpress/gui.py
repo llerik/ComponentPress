@@ -5,10 +5,14 @@ import json
 import inspect
 import sys
 import traceback
+import atexit
+import os
+import zipfile
 
 from PySide6.QtCore import QEventLoop, Qt, QTimer
+from PySide6.QtCore import QLibraryInfo, QSettings, QTranslator
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QMessageBox, QTreeView
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QTreeView
 
 from componentpress.bootstrap import project_controller
 from componentpress.domain.component import SizeMM
@@ -16,6 +20,8 @@ from componentpress.application.contracts import BuildRequest
 from componentpress.application.build_service import BuildService
 from componentpress.app_assets import load_application_icon
 from componentpress.editor import MainWindow
+from componentpress.diagnostics import logging as technical_log
+from componentpress.i18n import language as current_language, set_language, validate_catalogs
 
 
 def _smoke_failure(root: Path, line: int) -> bool:
@@ -29,6 +35,44 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     """Exercise stage-six Excel preview plus the preceding editing workflow."""
     from componentpress.editor.dialogs import format_error
     from componentpress.editor.qt_models import ID_ROLE
+    from componentpress.diagnostics import logging as technical_log
+    from componentpress.i18n import set_language, tr, validate_catalogs
+
+    validate_catalogs()
+    set_language("en")
+    english_ok = tr("menu.file") == "File" and tr("about.schema", version=5).startswith("Supported")
+    set_language("ru")
+    expected_log_root = os.environ.get("COMPONENTPRESS_LOG_DIR")
+    log_path = technical_log.session_log()
+    if not english_ok or (expected_log_root and (log_path is None or not log_path.is_relative_to(Path(expected_log_root)))):
+        return _smoke_failure(root, inspect.currentframe().f_lineno)
+    report_path = root / ".componentpress" / "release-smoke-support.zip"
+    try:
+        technical_log.create_report(report_path, status="failed", phase="rendering", mode="test")
+        with zipfile.ZipFile(report_path) as report:
+            support = json.loads(report.read("report.json"))
+            if support["runtime"]["version"] != "0.15" or (expected_log_root and "session.log" not in report.namelist()):
+                return _smoke_failure(root, inspect.currentframe().f_lineno)
+            if "session.log" in report.namelist() and str(root).encode("utf-8") in report.read("session.log"):
+                return _smoke_failure(root, inspect.currentframe().f_lineno)
+    except (OSError, ValueError, zipfile.BadZipFile):
+        return _smoke_failure(root, inspect.currentframe().f_lineno)
+
+    about_checks = []
+
+    def inspect_about() -> None:
+        dialog = QApplication.activeModalWidget()
+        if dialog is None:
+            about_checks.append(False)
+            return
+        labels = [label.text() for label in dialog.findChildren(QLabel)]
+        about_checks.append(any("GNU GPL" in label for label in labels) and any("0.15" in label for label in labels))
+        dialog.reject()
+
+    QTimer.singleShot(0, inspect_about)
+    window._show_about()
+    if not about_checks or not about_checks[0]:
+        return _smoke_failure(root, inspect.currentframe().f_lineno)
 
     if window.project_settings_action.isEnabled() or window.delete_component_action.isEnabled() or window.windows_menu.menuAction().isEnabled():
         return _smoke_failure(root, inspect.currentframe().f_lineno)
@@ -359,12 +403,31 @@ def main(argv: list[str] | None = None) -> int:
     application.setWindowIcon(load_application_icon())
     smoke = len(arguments) == 2 and arguments[0] == "--release-smoke"
     if smoke:
-        from PySide6.QtCore import QSettings
-
         settings_root = Path(arguments[1]) / ".componentpress" / "release-smoke-settings"
         settings_root.mkdir(parents=True, exist_ok=True)
         QSettings.setDefaultFormat(QSettings.Format.IniFormat)
         QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(settings_root))
+        os.environ["COMPONENTPRESS_LOG_DIR"] = str(Path(arguments[1]) / ".componentpress" / "release-smoke-logs")
+    technical_log.initialize()
+    technical_log.install_exception_hooks()
+    application.aboutToQuit.connect(technical_log.shutdown)
+    atexit.register(technical_log.shutdown)
+    validate_catalogs()
+    settings = QSettings(QSettings.Format.IniFormat, QSettings.Scope.UserScope, "ComponentPress", "ComponentPress")
+    language = settings.value("language", "ru", type=str)
+    set_language(language)
+    language = current_language()
+    if language != "ru":
+        import PySide6
+
+        translator = QTranslator(application)
+        translations = str(Path(PySide6.__file__).parent / "translations")
+        if not Path(translations).is_dir():
+            translations = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+        if translator.load(f"qtbase_{language}", translations):
+            application.installTranslator(translator)
+            application._componentpress_translator = translator
+    technical_log.log_event("application.language", language=language)
     window = MainWindow(project_controller())
     if arguments and not smoke:
         return 2
