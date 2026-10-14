@@ -26,6 +26,7 @@ from componentpress.project_io.repository import FileProjectRepository
 from componentpress.project_io.yaml_codec import dump_yaml, parse_project, update_tree
 from componentpress.project_io.yaml_codec import parse_component
 from componentpress.platforms.services import ProjectWriteLock
+from componentpress.i18n import tr
 
 
 MANIFEST = "manifest.json"
@@ -183,7 +184,7 @@ def _verify_archive(archive: zipfile.ZipFile, *, extract_to: Path | None = None,
         if size != expected["size"] or digest.hexdigest() != expected["sha256"]:
             raise ProjectError(Diagnostic("ARCHIVE_HASH", f"контрольная сумма или размер не совпадают: {relative}"))
         if on_progress is not None:
-            on_progress(index, len(file_infos), "Проверка архива" if extract_to is None else "Восстановление файлов")
+            on_progress(index, len(file_infos), tr("ui.archive_progress_verify") if extract_to is None else tr("ui.archive_progress_restore"))
     if extract_to is None:
         for relative, expected in metadata["files"].items():
             try:
@@ -437,7 +438,7 @@ def export_project_version(
                             break
                         outgoing.write(block)
                 if on_progress is not None:
-                    on_progress(index, len(files), "Упаковка архива")
+                    on_progress(index, len(files), tr("ui.archive_progress_pack"))
         with zipfile.ZipFile(temporary, "r") as archive:
             _verify_archive(archive, cancellation=cancellation, on_progress=on_progress)
         if cancellation is not None:

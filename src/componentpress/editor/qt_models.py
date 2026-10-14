@@ -5,6 +5,7 @@ from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import QStyle
 from PySide6.QtWidgets import QAbstractItemView, QStyleOptionViewItem, QStyledItemDelegate, QTreeView
 
+from componentpress.i18n import tr
 from componentpress.application.sessions import ProjectSession
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
@@ -78,7 +79,7 @@ class LockIconDelegate(QStyledItemDelegate):
 
 def component_model(session: ProjectSession) -> QStandardItemModel:
     model = QStandardItemModel()
-    model.setHorizontalHeaderLabels(["Компоненты"])
+    model.setHorizontalHeaderLabels([tr("ui.component_header")])
     for ref in session.snapshot.model.components:
         document = session.documents[ref.id]
         item = QStandardItem(document.model.name)
@@ -95,11 +96,11 @@ def _node_label(node: Node) -> str:
 
 def _node_type(node: Node) -> str:
     if isinstance(node, GroupNode):
-        return "Группа"
+        return tr("ui.component_type_group")
     if isinstance(node, ImageNode):
-        return "Изображение"
+        return tr("ui.image")
     if isinstance(node, HtmlNode):
-        return "HTML-текст"
+        return tr("ui.html_text")
     return type(node).__name__
 
 
@@ -115,7 +116,7 @@ def _node_row(node: Node, locked_ids: frozenset[str]) -> list[QStandardItem]:
             name.appendRow(_node_row(child, locked_ids))
     locked = node.id in locked_ids
     name.setIcon(load_icon("lock.png" if locked else "lock_open.png"))
-    name.setToolTip(("Заблокированная группа" if isinstance(node, GroupNode) else "Заблокированный элемент") if locked else "Нажмите значок, чтобы заблокировать")
+    name.setToolTip((tr("ui.item_locked_group") if isinstance(node, GroupNode) else tr("ui.item_locked")) if locked else tr("ui.item_lock_hint"))
     name.setData(locked, LOCKED_ROLE)
     return [name, kind]
 
@@ -125,7 +126,7 @@ LOCKED_ROLE = ID_ROLE + 2
 
 def element_model(component: ComponentDefinition) -> QStandardItemModel:
     model = QStandardItemModel()
-    model.setHorizontalHeaderLabels(["Элемент", "Тип"])
+    model.setHorizontalHeaderLabels([tr("ui.layer_header"), tr("ui.layer_type_header")])
     from componentpress.domain.tree import effectively_locked_ids
 
     locked_ids = effectively_locked_ids(component)

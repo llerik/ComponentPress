@@ -10,21 +10,22 @@ from PySide6.QtWidgets import (
     QSpinBox,
 )
 
+from componentpress.i18n import tr
 from componentpress.domain.project import PrintSettings
 
 
 class BuildOptionsDialog(QDialog):
     def __init__(self, settings: PrintSettings, parent=None, *, mode: str = "prod"):
         super().__init__(parent)
-        self.setWindowTitle("Настройки печатной сборки")
+        self.setWindowTitle(tr("ui.build_settings"))
         layout = QFormLayout(self)
-        layout.addRow("Режим тиража", QLabel("Prod" if mode == "prod" else "Test"))
+        layout.addRow(tr("ui.copy_mode"), QLabel("Prod" if mode == "prod" else "Test"))
         self.paper = QComboBox()
         self.paper.addItems(["A4", "Letter"])
         self.paper.setCurrentText(settings.paper)
         self.orientation = QComboBox()
-        self.orientation.addItem("Книжная", "portrait")
-        self.orientation.addItem("Альбомная", "landscape")
+        self.orientation.addItem(tr("ui.portrait"), "portrait")
+        self.orientation.addItem(tr("ui.landscape"), "landscape")
         self.orientation.setCurrentIndex(0 if settings.orientation == "portrait" else 1)
         self.margin = QDoubleSpinBox()
         self.margin.setRange(0, 1000)
@@ -45,13 +46,13 @@ class BuildOptionsDialog(QDialog):
         self.workers.setRange(1, 64)
         self.workers.setValue(2)
         for label, widget in (
-            ("Бумага", self.paper),
-            ("Ориентация", self.orientation),
-            ("Поля, мм", self.margin),
-            ("Зазор, мм", self.gap),
+            (tr("ui.paper"), self.paper),
+            (tr("ui.orientation"), self.orientation),
+            (tr("ui.margins"), self.margin),
+            (tr("ui.gap"), self.gap),
             ("DPI", self.dpi),
-            ("Толщина линий реза, мм", self.cut_width),
-            ("Потоки PNG", self.workers),
+            (tr("ui.cut_line_width"), self.cut_width),
+            (tr("ui.png_workers"), self.workers),
         ):
             layout.addRow(label, widget)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)

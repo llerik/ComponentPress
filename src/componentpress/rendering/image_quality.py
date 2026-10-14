@@ -46,6 +46,9 @@ class ImageQuality:
             source=source,
             sheet=sheet,
             node_id=self.node_id,
+            message_key="ui.image_quality_diagnostic",
+            params={"source": self.source, "width": self.pixel_width, "height": self.pixel_height,
+                    "dpi_x": self.dpi_x, "dpi_y": self.dpi_y},
         )
 
 

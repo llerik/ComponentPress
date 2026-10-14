@@ -8,13 +8,14 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget,
 )
 
+from componentpress.i18n import tr
 from componentpress.application.sessions import ProjectSession
 
 
 class ProjectSettingsDialog(QDialog):
     def __init__(self, session: ProjectSession, preview, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Настройки проекта")
+        self.setWindowTitle(tr("ui.project_settings"))
         self._project_root = session.snapshot.root.resolve()
         self._picked_file: Path | None = None
         model = session.snapshot.model
@@ -24,8 +25,8 @@ class ProjectSettingsDialog(QDialog):
         self.test = QLineEdit(model.copies_columns.test)
         self.source = QLineEdit(model.data_source.path if model.data_source else "")
         self.source.setReadOnly(True)
-        choose = QPushButton("Выбрать…")
-        clear = QPushButton("Очистить")
+        choose = QPushButton(tr("ui.choose"))
+        clear = QPushButton(tr("ui.clear"))
         choose.clicked.connect(self._choose_file)
         clear.clicked.connect(self._clear_source)
         source_row = QWidget()
@@ -35,21 +36,21 @@ class ProjectSettingsDialog(QDialog):
         source_layout.addWidget(choose)
         source_layout.addWidget(clear)
         form = QFormLayout()
-        form.addRow("Название", self.name)
-        form.addRow("Версия", self.version)
-        form.addRow("Книга Excel", source_row)
-        form.addRow("Столбец тиража Prod", self.prod)
-        form.addRow("Столбец тиража Test", self.test)
+        form.addRow(tr("ui.name"), self.name)
+        form.addRow(tr("ui.version"), self.version)
+        form.addRow(tr("ui.workbook"), source_row)
+        form.addRow(tr("ui.copies_prod"), self.prod)
+        form.addRow(tr("ui.copies_test"), self.test)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
         layout.addLayout(form)
-        layout.addWidget(QLabel("Изменения сохраняются после нажатия «ОК»."))
+        layout.addWidget(QLabel(tr("ui.settings_saved_hint")))
         layout.addWidget(buttons)
 
     def _choose_file(self) -> None:
-        filename, _ = QFileDialog.getOpenFileName(self, "Выбрать книгу Excel", "", "Excel (*.xlsx)")
+        filename, _ = QFileDialog.getOpenFileName(self, tr("ui.choose_workbook"), "", "Excel (*.xlsx)")
         if filename:
             self._picked_file = Path(filename)
             try:

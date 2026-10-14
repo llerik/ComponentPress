@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from componentpress.i18n import tr
 from componentpress.application.sessions import ProjectSession
 from componentpress.domain.diagnostics import ProjectError
 from componentpress.rendering import render_component_image
@@ -73,16 +74,16 @@ class DocumentTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         controls = QHBoxLayout()
-        self.layout_mode = QPushButton("Макет")
+        self.layout_mode = QPushButton(tr("ui.layout"))
         self.layout_mode.setObjectName("layoutMode")
-        self.text_mode = QPushButton("Текст")
+        self.text_mode = QPushButton(tr("ui.text"))
         self.text_mode.setObjectName("textMode")
         self.mode_group = QButtonGroup(self)
         self.mode_group.setExclusive(True)
         for button in (self.layout_mode, self.text_mode):
             button.setCheckable(True)
             self.mode_group.addButton(button)
-            button.setToolTip("Перетаскивание" if button is self.layout_mode else "Текст")
+            button.setToolTip(tr("ui.drag") if button is self.layout_mode else tr("ui.text"))
             button.setAccessibleName(button.toolTip())
             button.setText("")
             button.setIcon(load_icon("brick.png" if button is self.layout_mode else "code.png"))
@@ -94,7 +95,7 @@ class DocumentTab(QWidget):
         minus.setObjectName("zoomOut")
         plus = QPushButton("+")
         plus.setObjectName("zoomIn")
-        fit = QPushButton("По размеру")
+        fit = QPushButton(tr("ui.fit"))
         fit.setObjectName("zoomFit")
         actual = QPushButton("100%")
         actual.setObjectName("zoomActual")

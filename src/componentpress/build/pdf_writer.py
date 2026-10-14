@@ -10,6 +10,7 @@ from PySide6.QtCore import QMarginsF, QRectF, QSizeF
 from PySide6.QtGui import QColor, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter, QPen
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.i18n import tr
 from componentpress.execution.cancellation import CancellationToken
 from .imposition import ImpositionPlan
 from .input_snapshot import BuildInputSnapshot
@@ -66,7 +67,7 @@ def write_print_pdf(
                         painter.drawRect(rect)
                         painter.restore()
                 if progress is not None:
-                    progress(page_number + 1, len(plan.pages), f"Страница {page_number + 1} из {len(plan.pages)}")
+                    progress(page_number + 1, len(plan.pages), tr("ui.pdf_page_progress", page=page_number + 1, total=len(plan.pages)))
         finally:
             painter.end()
         cancellation.check()

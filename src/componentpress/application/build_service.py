@@ -19,6 +19,7 @@ from componentpress.execution.cleanup import cleanup_job_directory
 from componentpress.execution.job_store import JobStore
 from componentpress.execution.thread_runner import ThreadBuildRunner
 from componentpress.platforms.services import ProjectWriteLock
+from componentpress.i18n import tr
 from .project_service import ProjectService
 
 
@@ -95,7 +96,7 @@ class BuildService(QObject):
         token = CancellationToken()
         self._preparing[job_id] = _Preparing(token, recovery_diagnostics, on_progress, on_finished, mode)
         if on_progress is not None:
-            on_progress(BuildProgress(job_id, "preparing", 0, 0, "Подготовка неизменяемого снимка"))
+            on_progress(BuildProgress(job_id, "preparing", 0, 0, tr("ui.build_prepare")))
         self._preparation_pool.start(_PreparationTask(
             self.snapshot_builder,
             session.snapshot,

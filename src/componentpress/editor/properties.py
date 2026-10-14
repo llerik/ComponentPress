@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from componentpress.i18n import tr
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, LineNode, Node, ShapeNode
 
@@ -45,21 +46,21 @@ class ComponentProperties(QWidget):
         self.background_edit = QLineEdit()
         self.background_edit.setObjectName("componentBackground")
         self.background_edit.setPlaceholderText("#FFFFFF")
-        self.background_button = QPushButton("Выбрать цвет…")
+        self.background_button = QPushButton(tr("ui.select_color"))
         self.background_button.setObjectName("componentBackgroundPicker")
         self.sheet = QComboBox()
         self.sheet.setObjectName("componentPropertySheet")
-        self.sheet.addItem("Без привязки к Excel", None)
+        self.sheet.addItem(tr("ui.no_sheet"), None)
         self.sheet.addItems(list(sheets))
         background_row = QHBoxLayout()
         background_row.addWidget(self.background_edit, 1)
         background_row.addWidget(self.background_button)
-        layout.addRow("ID", self.identity)
-        layout.addRow("Название", self.name_edit)
-        layout.addRow("Ширина, мм", self.width_spin)
-        layout.addRow("Высота, мм", self.height_spin)
-        layout.addRow("Фон", background_row)
-        layout.addRow("Лист Excel", self.sheet)
+        layout.addRow(tr("ui.component_id"), self.identity)
+        layout.addRow(tr("ui.name"), self.name_edit)
+        layout.addRow(tr("ui.width_mm"), self.width_spin)
+        layout.addRow(tr("ui.height_mm"), self.height_spin)
+        layout.addRow(tr("ui.component_background"), background_row)
+        layout.addRow(tr("ui.component_sheet"), self.sheet)
         self.name_edit.editingFinished.connect(lambda: self.nameChanged.emit(self.name_edit.text()))
         self.background_edit.editingFinished.connect(lambda: self.backgroundChanged.emit(self.background_edit.text()))
         self.width_spin.editingFinished.connect(self._emit_size)
@@ -101,11 +102,11 @@ class ComponentProperties(QWidget):
         self.background_edit.setText(component.background)
         current_sheet = component.data.sheet if component.data else None
         self.sheet.clear()
-        self.sheet.addItem("Без привязки к Excel", None)
+        self.sheet.addItem(tr("ui.no_sheet"), None)
         for sheet in self._available_sheets:
             self.sheet.addItem(sheet, sheet)
         if current_sheet and self.sheet.findData(current_sheet) < 0:
-            self.sheet.addItem(f"{current_sheet} (не найден)", current_sheet)
+            self.sheet.addItem(tr("ui.sheet_missing", sheet=current_sheet), current_sheet)
         self.sheet.setCurrentIndex(max(0, self.sheet.findData(current_sheet)))
         del blockers
 
@@ -138,7 +139,7 @@ class ElementProperties(QWidget):
         self.rotation_spin.setSuffix("°")
         self._rotation_initial_value = 0.0
         self._rotation_text_edited = False
-        self.optional_image = QCheckBox("Изображение может отсутствовать")
+        self.optional_image = QCheckBox(tr("ui.image_optional"))
         self.optional_image.setObjectName("optionalImage")
         self.source_edit = QLineEdit()
         self.source_edit.setObjectName("imageSource")
@@ -147,15 +148,15 @@ class ElementProperties(QWidget):
         self.fit_combo.addItems(["contain", "cover", "stretch"])
         self.content_mode = QComboBox()
         self.content_mode.setObjectName("contentMode")
-        self.content_mode.addItem("Ручной ввод", "manual")
-        self.content_mode.addItem("Столбец", "column")
+        self.content_mode.addItem(tr("ui.content_manual"), "manual")
+        self.content_mode.addItem(tr("ui.column"), "column")
         self.content_column = QComboBox()
         self.content_column.setObjectName("contentColumn")
         self.condition_column = QComboBox()
         self.condition_column.setObjectName("conditionColumn")
         self.condition_operator = QComboBox()
         self.condition_operator.setObjectName("conditionOperator")
-        for operator, label in (("equals", "Равно"), ("not_equals", "Не равно"), ("is_empty", "Пусто"), ("is_not_empty", "Не пусто")):
+        for operator, label in (("equals", tr("ui.condition_equals")), ("not_equals", tr("ui.condition_not_equals")), ("is_empty", tr("ui.condition_is_empty")), ("is_not_empty", tr("ui.condition_is_not_empty"))):
             self.condition_operator.addItem(label, operator)
         self.condition_value = QLineEdit()
         self.condition_value.setObjectName("conditionValue")
@@ -170,9 +171,9 @@ class ElementProperties(QWidget):
         self.stroke_width = self._number("shapeStrokeWidth", 0.001, 1000.0)
         self.stroke_style = QComboBox()
         self.stroke_style.setObjectName("shapeStrokeStyle")
-        self.stroke_style.addItem("Сплошная", "solid")
-        self.stroke_style.addItem("Штриховая", "dash")
-        self.stroke_style.addItem("Точечная", "dot")
+        self.stroke_style.addItem(tr("ui.stroke_solid"), "solid")
+        self.stroke_style.addItem(tr("ui.stroke_dash"), "dash")
+        self.stroke_style.addItem(tr("ui.stroke_dot"), "dot")
         self.line_dx = self._number("lineDX", -10000.0, 10000.0)
         self.line_dy = self._number("lineDY", -10000.0, 10000.0)
         self.font_combo = QComboBox()
@@ -187,8 +188,8 @@ class ElementProperties(QWidget):
         self.color_swatch = QPushButton()
         self.color_swatch.setObjectName("htmlColorPicker")
         self.color_swatch.setFixedSize(28, 28)
-        self.color_swatch.setAccessibleName("Выбрать цвет текста")
-        self.color_swatch.setToolTip("Выбрать цвет текста")
+        self.color_swatch.setAccessibleName(tr("ui.select_text_color"))
+        self.color_swatch.setToolTip(tr("ui.select_text_color"))
         self.color_widget = QWidget()
         color_row = QHBoxLayout(self.color_widget)
         color_row.setContentsMargins(0, 0, 0, 0)
@@ -203,7 +204,7 @@ class ElementProperties(QWidget):
         alignment_row.setContentsMargins(0, 0, 0, 0)
         from componentpress.app_assets import load_icon
 
-        for value, label, icon in (("left", "Слева", "format_align_left.png"), ("center", "По центру", "format_align_center.png"), ("right", "Справа", "format_align_right.png")):
+        for value, label, icon in (("left", tr("ui.text_align_left"), "format_align_left.png"), ("center", tr("ui.text_align_center"), "format_align_center.png"), ("right", tr("ui.text_align_right"), "format_align_right.png")):
             button = QPushButton()
             button.setObjectName(f"htmlAlign{value.title()}")
             button.setCheckable(True)
@@ -220,11 +221,11 @@ class ElementProperties(QWidget):
         self.lock_button.setObjectName("elementLocked")
         self.lock_button.setCheckable(True)
         self.lock_button.setFixedSize(34, 34)
-        self.fill_button = QPushButton("Выбрать цвет…")
+        self.fill_button = QPushButton(tr("ui.select_color"))
         self.fill_button.setObjectName("shapeFillPicker")
-        self.stroke_button = QPushButton("Выбрать цвет…")
+        self.stroke_button = QPushButton(tr("ui.select_color"))
         self.stroke_button.setObjectName("shapeStrokePicker")
-        self.no_fill_button = QPushButton("Без заливки")
+        self.no_fill_button = QPushButton(tr("ui.no_fill"))
         self.no_fill_button.setObjectName("shapeNoFill")
         fill_row = QWidget()
         self.fill_widget = fill_row
@@ -237,45 +238,45 @@ class ElementProperties(QWidget):
         self.quality_label = QLabel()
         self.quality_label.setObjectName("imageQuality")
         self.quality_label.setWordWrap(True)
-        form.addRow("Элемент", self.identity)
-        form.addRow("Защита", self.lock_button)
-        form.addRow("Габариты группы, мм", self.group_bounds)
-        form.addRow("Разрешение рисунков", self.quality_label)
-        form.addRow("Название", self.name_edit)
-        form.addRow("X, мм", self.x_spin)
-        form.addRow("Y, мм", self.y_spin)
-        form.addRow("Ширина, мм", self.width_spin)
-        form.addRow("Высота, мм", self.height_spin)
-        form.addRow("Поворот", self.rotation_spin)
-        form.addRow("Необязательное изображение", self.optional_image)
-        form.addRow("Изображение", self.source_edit)
-        form.addRow("Источник содержимого", self.content_mode)
-        form.addRow("Столбец Excel", self.content_column)
-        form.addRow("Столбец условия", self.condition_column)
-        form.addRow("Оператор условия", self.condition_operator)
-        form.addRow("Значение условия", self.condition_value)
-        form.addRow("Состояние", self.condition_state)
-        form.addRow("Заливка", fill_row)
-        form.addRow("Контур", self.stroke_button)
-        form.addRow("Толщина контура, мм", self.stroke_width)
-        form.addRow("Стиль контура", self.stroke_style)
-        form.addRow("Конец линии ΔX, мм", self.line_dx)
-        form.addRow("Конец линии ΔY, мм", self.line_dy)
-        form.addRow("Режим", self.fit_combo)
-        form.addRow("Шрифт", self.font_combo)
-        form.addRow("Размер, pt", self.font_spin)
-        form.addRow("Цвет", self.color_widget)
+        form.addRow(tr("ui.element"), self.identity)
+        form.addRow(tr("ui.lock"), self.lock_button)
+        form.addRow(tr("ui.group_bounds"), self.group_bounds)
+        form.addRow(tr("ui.image_resolution"), self.quality_label)
+        form.addRow(tr("ui.name"), self.name_edit)
+        form.addRow(tr("ui.x_mm"), self.x_spin)
+        form.addRow(tr("ui.y_mm"), self.y_spin)
+        form.addRow(tr("ui.width_mm"), self.width_spin)
+        form.addRow(tr("ui.height_mm"), self.height_spin)
+        form.addRow(tr("ui.rotation"), self.rotation_spin)
+        form.addRow(tr("ui.optional_image"), self.optional_image)
+        form.addRow(tr("ui.image"), self.source_edit)
+        form.addRow(tr("ui.content_source"), self.content_mode)
+        form.addRow(tr("ui.excel_column"), self.content_column)
+        form.addRow(tr("ui.condition_column"), self.condition_column)
+        form.addRow(tr("ui.condition_operator"), self.condition_operator)
+        form.addRow(tr("ui.condition_value"), self.condition_value)
+        form.addRow(tr("ui.condition_state"), self.condition_state)
+        form.addRow(tr("ui.fill"), fill_row)
+        form.addRow(tr("ui.stroke"), self.stroke_button)
+        form.addRow(tr("ui.stroke_width"), self.stroke_width)
+        form.addRow(tr("ui.stroke_style"), self.stroke_style)
+        form.addRow(tr("ui.line_end_dx"), self.line_dx)
+        form.addRow(tr("ui.line_end_dy"), self.line_dy)
+        form.addRow(tr("ui.mode"), self.fit_combo)
+        form.addRow(tr("ui.font"), self.font_combo)
+        form.addRow(tr("ui.size_pt"), self.font_spin)
+        form.addRow(tr("ui.color"), self.color_widget)
         self.alignment_widget = alignment_widget
-        form.addRow("Выравнивание текста", self.alignment_widget)
+        form.addRow(tr("ui.text_alignment"), self.alignment_widget)
         outer.addLayout(form)
         self.html_edit = QPlainTextEdit()
         self.html_edit.setObjectName("htmlSource")
         self.html_edit.setMinimumHeight(100)
         outer.addWidget(self.html_edit)
         buttons = QHBoxLayout()
-        self.insert_image = QPushButton("Вставить изображение в текст…")
+        self.insert_image = QPushButton(tr("ui.insert_image_html"))
         self.insert_image.setObjectName("insertHtmlImage")
-        self.apply_html = QPushButton("Применить HTML")
+        self.apply_html = QPushButton(tr("ui.apply_html"))
         self.apply_html.setObjectName("applyHtml")
         buttons.addWidget(self.insert_image)
         buttons.addWidget(self.apply_html)
@@ -297,7 +298,7 @@ class ElementProperties(QWidget):
         self.stroke_width.editingFinished.connect(lambda: self.nodeChanged.emit({"stroke_width_mm": self.stroke_width.value()}))
         self.stroke_style.currentIndexChanged.connect(lambda _index: self.nodeChanged.emit({"stroke_style": self.stroke_style.currentData()}))
         self.fit_combo.currentTextChanged.connect(lambda value: self.nodeChanged.emit({"fit": value}))
-        self.font_combo.currentTextChanged.connect(lambda value: self.nodeChanged.emit({"font_family": value}))
+        self.font_combo.currentIndexChanged.connect(lambda _index: self.nodeChanged.emit({"font_family": self.font_combo.currentData()}))
         self.font_spin.editingFinished.connect(lambda: self.nodeChanged.emit({"font_size_pt": self.font_spin.value()}))
         self.color_edit.editingFinished.connect(self._commit_html_color)
         self.color_swatch.clicked.connect(lambda: self.colorRequested.emit(self.color_edit.text()))
@@ -326,7 +327,7 @@ class ElementProperties(QWidget):
 
         self.lock_button.setIcon(load_icon("lock.png" if locked else "lock_open.png"))
         self.lock_button.setIconSize(QSize(22, 22))
-        self.lock_button.setAccessibleName("Разблокировать элемент" if locked else "Заблокировать элемент")
+        self.lock_button.setAccessibleName(tr("ui.unlock_element") if locked else tr("ui.lock_element"))
 
     def _geometry_changed(self) -> None:
         changes: dict[str, float] = {"x_mm": self.x_spin.value(), "y_mm": self.y_spin.value()}
@@ -410,7 +411,7 @@ class ElementProperties(QWidget):
         self.lock_button.setChecked(effectively_locked)
         self._set_lock_icon(effectively_locked)
         self.lock_button.setEnabled(not inherited_lock)
-        self.lock_button.setToolTip("Разблокируйте родительскую группу" if inherited_lock else ("Разблокировать элемент" if effectively_locked else "Заблокировать элемент"))
+        self.lock_button.setToolTip(tr("ui.unlock_parent") if inherited_lock else (tr("ui.unlock_element") if effectively_locked else tr("ui.lock_element")))
         self.form.setRowVisible(self.lock_button, True)
         self.x_spin.setValue(node.x_mm)
         self.y_spin.setValue(node.y_mm)
@@ -457,7 +458,7 @@ class ElementProperties(QWidget):
             self.condition_operator.setCurrentIndex(max(0, self.condition_operator.findData(node.condition_operator)))
             self.condition_value.setEnabled(node.condition_operator in {"equals", "not_equals"})
             self.form.setRowVisible(self.condition_value, node.condition_operator in {"equals", "not_equals"})
-            self.condition_state.setText("Показывается" if condition_matches is True else "Скрыта" if condition_matches is False else "Нет строки")
+            self.condition_state.setText(tr("ui.condition_visible") if condition_matches is True else tr("ui.condition_hidden") if condition_matches is False else tr("ui.condition_no_row"))
         if is_group and component is not None:
             from componentpress.domain.tree import node_bounds
 
@@ -514,11 +515,13 @@ class ElementProperties(QWidget):
             self.html_edit.setReadOnly(mode != "manual")
             self.apply_html.setEnabled(mode == "manual")
             self.insert_image.setEnabled(mode == "manual")
-            self.font_combo.addItems(list(font_families or sorted(QFontDatabase.families(), key=str.casefold)))
-            if self.font_combo.findText(node.font_family, Qt.MatchFlag.MatchFixedString) < 0:
-                self.font_combo.insertItem(0, f"{node.font_family} (недоступен)", node.font_family)
-            self.font_combo.setCurrentText(node.font_family if self.font_combo.findText(node.font_family) >= 0 else f"{node.font_family} (недоступен)")
-            self.font_combo.setToolTip("Семейство будет сохранено без автоматической замены" if self.font_combo.currentIndex() == 0 and "(недоступен)" in self.font_combo.currentText() else "")
+            families = list(font_families or sorted(QFontDatabase.families(), key=str.casefold))
+            for family in families:
+                self.font_combo.addItem(family, family)
+            if node.font_family not in families:
+                self.font_combo.insertItem(0, tr("ui.font_unavailable", font=node.font_family), node.font_family)
+            self.font_combo.setCurrentIndex(max(0, self.font_combo.findData(node.font_family)))
+            self.font_combo.setToolTip(tr("ui.font_preserved") if node.font_family not in families else "")
             self.font_spin.setValue(node.font_size_pt)
             self._node_color = node.color.upper()
             self._html_color = self._node_color
@@ -558,12 +561,11 @@ class ElementProperties(QWidget):
         lines = []
         has_warning = False
         for item in items:
-            status = " — ниже 300 dpi" if item.warning else ""
+            status = tr("ui.image_quality_status") if item.warning else ""
             has_warning = has_warning or item.warning
             lines.append(
-                f"{item.source}: {item.pixel_width}×{item.pixel_height} px → "
-                f"{item.width_mm:.2f}×{item.height_mm:.2f} мм; "
-                f"{item.dpi_x:.1f}×{item.dpi_y:.1f} dpi{status}"
+                tr("ui.image_quality", source=item.source, width_px=item.pixel_width, height_px=item.pixel_height,
+                   width_mm=item.width_mm, height_mm=item.height_mm, dpi_x=item.dpi_x, dpi_y=item.dpi_y, warning=status)
             )
         self.quality_label.setText("\n".join(lines))
         self.quality_label.setStyleSheet("color: #A00000" if has_warning else "")

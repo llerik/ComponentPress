@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from componentpress.i18n import tr
 from componentpress.application.sessions import ProjectSession
 from componentpress.application.contracts import BuildRequest, BuildResult, BuildProgress
 from componentpress.domain.component import ComponentDefinition, SizeMM
@@ -164,7 +165,7 @@ class MainWindow(QMainWindow):
         self.export_png_zip_action = self._action(tr("action.export_png"))
         self.add_component_action = self._action(tr("action.add_component"), "Ctrl+Shift+N")
         self.project_settings_action = self._action(tr("action.project_settings"))
-        self.image_manager_action = self._action("Изображения проекта…")
+        self.image_manager_action = self._action(tr("ui.image_manager"))
         self.about_action = self._action(tr("menu.about"))
         self.undo_action = self._action(tr("action.undo"), QKeySequence.StandardKey.Undo)
         self.redo_action = self._action(tr("action.redo"), QKeySequence.StandardKey.Redo)
@@ -252,7 +253,7 @@ class MainWindow(QMainWindow):
             action = dock.toggleViewAction()
             self.windows_menu.addAction(action)
             action.triggered.connect(lambda visible, item=dock, default=area: self._dock_visibility_requested(item, default, visible))
-        self.quick_toolbar = QToolBar("Быстрые действия", self)
+        self.quick_toolbar = QToolBar(tr("ui.quick_actions"), self)
         self.quick_toolbar.setObjectName("quickActions")
         self.quick_toolbar.setMovable(False)
         self.quick_toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
@@ -273,7 +274,7 @@ class MainWindow(QMainWindow):
             action.setToolTip(action.text())
             action.setProperty("accessibleName", action.text())
         self._build_icon_toolbar()
-        self.status_project = QLabel("Проект не открыт")
+        self.status_project = QLabel(tr("ui.project_closed"))
         self.status_zoom = QLabel("")
         self.statusBar().addWidget(self.status_project, 1)
         self.statusBar().addPermanentWidget(self.status_zoom)
@@ -297,7 +298,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(3, 5, 3, 5)
         # Kept as a child for compatibility with existing data-selection handlers;
         # project source settings now live in the single project dialog.
-        data = QGroupBox("Данные Excel")
+        data = QGroupBox(tr("ui.excel_data"))
         data_layout = QVBoxLayout(data)
         self.data_source = QComboBox()
         self.data_source.setObjectName("dataSource")
@@ -307,25 +308,25 @@ class MainWindow(QMainWindow):
         self.data_row.setObjectName("dataRow")
         self.data_column = QComboBox()
         self.data_column.setObjectName("dataColumn")
-        self.data_chain = QLabel("Нет привязки")
+        self.data_chain = QLabel(tr("ui.no_binding"))
         self.data_chain.setObjectName("dataChain")
         self.data_chain.setWordWrap(True)
         for label, widget in (
-            ("Источник проекта", self.data_source), ("Лист компонента", self.data_sheet),
-            ("Строка", self.data_row), ("Столбец", self.data_column),
+            (tr("ui.project_source"), self.data_source), (tr("ui.component_sheet"), self.data_sheet),
+            (tr("ui.row"), self.data_row), (tr("ui.column"), self.data_column),
         ):
             data_layout.addWidget(QLabel(label))
             data_layout.addWidget(widget)
         data_layout.addWidget(self.data_chain)
         data_buttons = QHBoxLayout()
-        self.data_import = QPushButton("Импорт XLSX…")
-        self.data_refresh = QPushButton("Обновить")
-        self.data_insert = QPushButton("Вставить {Столбец}")
-        self.data_export = QPushButton("Экспорт PNG…")
-        self.data_export_zip = QPushButton("PNG ZIP…")
-        self.data_validate = QPushButton("Валидировать")
-        self.data_validate_all = QPushButton("Валидировать всё")
-        self.data_clear = QPushButton("Удалить XLSX")
+        self.data_import = QPushButton(tr("ui.import_xlsx"))
+        self.data_refresh = QPushButton(tr("ui.refresh"))
+        self.data_insert = QPushButton(tr("ui.insert_column", column=tr("ui.column")))
+        self.data_export = QPushButton(tr("ui.export_png"))
+        self.data_export_zip = QPushButton(tr("ui.png_zip"))
+        self.data_validate = QPushButton(tr("ui.validate"))
+        self.data_validate_all = QPushButton(tr("ui.validate_all"))
+        self.data_clear = QPushButton(tr("ui.remove_xlsx"))
         for button in (self.data_import, self.data_refresh, self.data_insert, self.data_export, self.data_export_zip):
             data_buttons.addWidget(button)
         data_layout.addLayout(data_buttons)
@@ -339,19 +340,19 @@ class MainWindow(QMainWindow):
         data.hide()
         tools = QGroupBox(tr("panel.tools_group"))
         tools_layout = QVBoxLayout(tools)
-        self.image_tool = QPushButton("Изображение")
+        self.image_tool = QPushButton(tr("ui.image"))
         self.image_tool.setObjectName("imageTool")
-        self.html_tool = QPushButton("HTML-текст")
+        self.html_tool = QPushButton(tr("ui.html_text"))
         self.html_tool.setObjectName("htmlTool")
-        self.conditional_group_tool = QPushButton("Условная группа")
+        self.conditional_group_tool = QPushButton(tr("ui.conditional_group"))
         self.conditional_group_tool.setObjectName("conditionalGroupTool")
-        self.rectangle_tool = QPushButton("Прямоугольник")
+        self.rectangle_tool = QPushButton(tr("ui.rectangle"))
         self.rectangle_tool.setObjectName("rectangleTool")
-        self.ellipse_tool = QPushButton("Эллипс")
+        self.ellipse_tool = QPushButton(tr("ui.ellipse"))
         self.ellipse_tool.setObjectName("ellipseTool")
-        self.line_tool = QPushButton("Линия")
+        self.line_tool = QPushButton(tr("ui.line"))
         self.line_tool.setObjectName("lineTool")
-        self.select_tool = QPushButton("Выбор")
+        self.select_tool = QPushButton(tr("ui.select"))
         tool_icons = {
             self.select_tool: "cursor.png", self.image_tool: "image.png", self.html_tool: "text.png",
             self.conditional_group_tool: "condition.png", self.rectangle_tool: "rectangle.png",
@@ -411,7 +412,7 @@ class MainWindow(QMainWindow):
     def _preview_panel(self) -> QWidget:
         panel = QWidget()
         layout = QVBoxLayout(panel)
-        self.preview_image = QLabel("Выберите компонент и проверьте данные")
+        self.preview_image = QLabel(tr("ui.preview_initial"))
         self.preview_image.setObjectName("previewImage")
         self.preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_image.setMinimumHeight(120)
@@ -428,13 +429,13 @@ class MainWindow(QMainWindow):
         self.preview_zoom_in = QPushButton()
         self.preview_fit = QPushButton()
         preview_icons = (
-            (self.preview_first, "begin.png", "Первый экземпляр"),
-            (self.preview_previous, "left.png", "Предыдущий"),
-            (self.preview_next, "right.png", "Следующий"),
-            (self.preview_last, "end.png", "Последний экземпляр"),
-            (self.preview_zoom_in, "zoom_in.png", "Увеличить"),
-            (self.preview_zoom_out, "zoom_out.png", "Уменьшить"),
-            (self.preview_fit, "real_size.png", "По размеру"),
+            (self.preview_first, "begin.png", tr("ui.preview_first")),
+            (self.preview_previous, "left.png", tr("ui.preview_previous")),
+            (self.preview_next, "right.png", tr("ui.preview_next")),
+            (self.preview_last, "end.png", tr("ui.preview_last")),
+            (self.preview_zoom_in, "zoom_in.png", tr("ui.preview_zoom_in")),
+            (self.preview_zoom_out, "zoom_out.png", tr("ui.preview_zoom_out")),
+            (self.preview_fit, "real_size.png", tr("ui.fit")),
         )
         for button, icon, label in preview_icons:
             button.setIcon(load_icon(icon))
@@ -478,8 +479,8 @@ class MainWindow(QMainWindow):
         component_header.addWidget(QLabel(tr("panel.components")), 1)
         self.add_component_button = QToolButton()
         self.add_component_button.setText("+")
-        self.add_component_button.setToolTip("Добавить компонент")
-        self.add_component_button.setAccessibleName("Добавить компонент")
+        self.add_component_button.setToolTip(tr("ui.add_component"))
+        self.add_component_button.setAccessibleName(tr("ui.add_component"))
         self.add_component_button.setIcon(load_icon("add.png"))
         self.add_component_button.setText("")
         self.add_component_button.clicked.connect(self.add_component_dialog)
@@ -497,19 +498,19 @@ class MainWindow(QMainWindow):
         self.element_tree = LayerTreeView()
         self.element_tree.setObjectName("elementTree")
         element_layout.addWidget(self.element_tree)
-        self.layer_up = QPushButton("Вверх")
+        self.layer_up = QPushButton(tr("ui.layer_up"))
         self.layer_up.setObjectName("layerUp")
-        self.layer_down = QPushButton("Вниз")
+        self.layer_down = QPushButton(tr("ui.layer_down"))
         self.layer_down.setObjectName("layerDown")
-        self.group_button = QPushButton("Создать группу")
-        self.ungroup_button = QPushButton("Разгруппировать")
-        self.reparent_button = QPushButton("Переместить…")
+        self.group_button = QPushButton(tr("ui.group_create"))
+        self.ungroup_button = QPushButton(tr("ui.ungroup"))
+        self.reparent_button = QPushButton(tr("ui.reparent"))
         self.right_tabs.addTab(elements, tr("panel.elements"))
         layout.addWidget(self.right_tabs, 2)
-        self.multi_properties_group = QGroupBox("Выравнивание выделения")
+        self.multi_properties_group = QGroupBox(tr("ui.align_group"))
         multi_layout = QHBoxLayout(self.multi_properties_group)
         self.align_buttons: dict[str, QPushButton] = {}
-        for edge, label in (("left", "По левому"), ("right", "По правому"), ("top", "По верхнему"), ("bottom", "По нижнему")):
+        for edge, label in (("left", tr("ui.align_left")), ("right", tr("ui.align_right")), ("top", tr("ui.align_top")), ("bottom", tr("ui.align_bottom"))):
             button = QPushButton(label)
             button.setObjectName(f"align{edge.title()}")
             button.clicked.connect(lambda _checked=False, edge=edge: self._align_selected(edge))
@@ -517,13 +518,13 @@ class MainWindow(QMainWindow):
             multi_layout.addWidget(button)
         self.multi_properties_group.hide()
         layout.addWidget(self.multi_properties_group)
-        self.component_properties_group = QGroupBox("Свойства компонента")
+        self.component_properties_group = QGroupBox(tr("ui.component_properties"))
         property_layout = QVBoxLayout(self.component_properties_group)
         self.properties = ComponentProperties()
         self.properties.sheetChanged.connect(self._component_property_sheet_changed)
         property_layout.addWidget(self.properties)
         layout.addWidget(self.component_properties_group, 1)
-        self.element_properties_group = QGroupBox("Свойства элемента")
+        self.element_properties_group = QGroupBox(tr("ui.element_properties"))
         element_property_layout = QVBoxLayout(self.element_properties_group)
         self.element_properties = ElementProperties()
         element_property_layout.addWidget(self.element_properties)
@@ -578,10 +579,10 @@ class MainWindow(QMainWindow):
         if not component_id or self.session is None:
             return
         menu = QMenu(self)
-        open_action = menu.addAction("Открыть")
-        properties_action = menu.addAction("Свойства…")
+        open_action = menu.addAction(tr("ui.open"))
+        properties_action = menu.addAction(tr("ui.properties"))
         menu.addSeparator()
-        delete_action = menu.addAction("Удалить…")
+        delete_action = menu.addAction(tr("ui.delete"))
         chosen = menu.exec(self.component_tree.viewport().mapToGlobal(point))
         if chosen is open_action:
             self.open_component(component_id)
@@ -596,8 +597,8 @@ class MainWindow(QMainWindow):
         if not isinstance(tab, DocumentTab):
             return
         menu = QMenu(self)
-        properties_action = menu.addAction("Свойства…")
-        delete_action = menu.addAction("Удалить компонент…")
+        properties_action = menu.addAction(tr("ui.properties"))
+        delete_action = menu.addAction(tr("ui.delete_component"))
         chosen = menu.exec(self.tabs.tabBar().mapToGlobal(point))
         if chosen is properties_action:
             self.edit_component_dialog(tab.component_id)
@@ -921,8 +922,8 @@ class MainWindow(QMainWindow):
         self._version_task_kind = kind
         self._version_task_payload = payload
         self._version_cancellation = cancellation
-        self._version_progress = QProgressDialog("Подготовка архива…", "Отменить", 0, 0, self)
-        self._version_progress.setWindowTitle("Архив проекта")
+        self._version_progress = QProgressDialog(tr("ui.archive_prepare"), tr("action.cancel_build"), 0, 0, self)
+        self._version_progress.setWindowTitle(tr("ui.archive_title"))
         self._version_progress.setWindowModality(Qt.WindowModality.ApplicationModal)
         self._version_progress.setAutoClose(False)
         self._version_progress.setAutoReset(False)
@@ -934,11 +935,12 @@ class MainWindow(QMainWindow):
     def _version_task_progress(self, completed: int, total: int, phase: str) -> None:
         if self._version_progress is None:
             return
-        self._version_progress.setLabelText(phase)
+        label = tr("ui.import_progress", completed=completed, total=total) if self._version_task_kind == "image_import" else phase
+        self._version_progress.setLabelText(label)
         self._version_progress.setRange(0, max(1, total))
         self._version_progress.setValue(min(completed, max(1, total)))
         if self._version_task_kind == "image_import" and getattr(self, "_image_manager_dialog", None) is not None:
-            self._image_manager_dialog.set_import_progress(completed, total, phase)
+            self._image_manager_dialog.set_import_progress(completed, total, label)
 
     def _version_task_finished(self, result, error) -> None:
         kind, payload = self._version_task_kind, self._version_task_payload
@@ -1418,7 +1420,7 @@ class MainWindow(QMainWindow):
             self.status_zoom.setText("")
             self._preview_source = None
             self.preview_image.setPixmap(QPixmap())
-            self.preview_image.setText("Выберите компонент")
+            self.preview_image.setText(tr("ui.preview_select_component"))
             self.preview_next.setEnabled(False)
             self.preview_previous.setEnabled(False)
         else:
@@ -1429,7 +1431,7 @@ class MainWindow(QMainWindow):
             self._install_element_model(document.model, selected)
             self.properties.show_component(document.model)
             tab.set_text(document.current_text)
-            self.status_zoom.setText(f"Масштаб: {tab.canvas.zoom_percent}%")
+            self.status_zoom.setText(tr("ui.zoom_status", percent=tab.canvas.zoom_percent))
             self._populate_data_panel()
             self._project_history_focus = False
             self._refresh_preview(tab)
@@ -1454,7 +1456,7 @@ class MainWindow(QMainWindow):
         document = self.session.documents[tab.component_id]
         binding = document.model.data
         source = self.session.snapshot.model.data_source
-        sources = [("Без XLSX", None)] + ([(source.path, "main")] if source else [])
+        sources = [(tr("ui.data_no_xlsx"), None)] + ([(source.path, "main")] if source else [])
         self._fill_combo(self.data_source, sources, "main" if source else None)
         sheets: list[tuple[str, object]] = []
         if source is not None and self.controller.preview is not None:
@@ -1484,7 +1486,7 @@ class MainWindow(QMainWindow):
         current = tab.preview_row_number if tab is not None else None
         mode = self.data_mode.mode
         values = [] if data is None else [
-            (f"{row.instance_id} — строка {row.row_number} — тираж {copies_for_mode(row, mode)}", row.row_number)
+            (tr("ui.row_copy_count", id=row.instance_id, row=row.row_number, copies=copies_for_mode(row, mode)), row.row_number)
             for row in data.rows if copies_for_mode(row, mode) > 0
         ]
         self._fill_combo(self.data_row, values, current)
@@ -1502,18 +1504,18 @@ class MainWindow(QMainWindow):
                 self.active_tab.preview_row_number = None
                 self.active_tab.canvas.clear_document()
                 self.preview_image.setPixmap(QPixmap())
-                self.preview_image.setText("Проверьте данные Excel, чтобы увидеть экземпляры")
-                self.statusBar().showMessage("Сначала обновите данные или провалидируйте их, затем выберите экземпляр в текущем режиме", 5000)
+                self.preview_image.setText(tr("ui.preview_no_data"))
+                self.statusBar().showMessage(tr("ui.mode_requires_validation"), 5000)
             elif is_excel and data is not None and not any(copies_for_mode(row, self.data_mode.mode) > 0 for row in data.rows):
                 self.active_tab.preview_row_number = None
                 self.active_tab.canvas.clear_document()
                 self.preview_image.setPixmap(QPixmap())
-                self.preview_image.setText("В выбранном режиме нет экземпляров")
+                self.preview_image.setText(tr("ui.preview_no_instances"))
                 self.preview_first.setEnabled(False)
                 self.preview_last.setEnabled(False)
                 self.preview_next.setEnabled(False)
                 self.preview_previous.setEnabled(False)
-                self.statusBar().showMessage("В выбранном режиме нет экземпляров", 5000)
+                self.statusBar().showMessage(tr("ui.preview_no_instances"), 5000)
             else:
                 self._refresh_preview(self.active_tab)
             self._update_preview_navigation()
@@ -1560,23 +1562,23 @@ class MainWindow(QMainWindow):
                 current_failed = any(item.path == snapshot.documents[component_id].path for item in diagnostics)
                 if current_failed or not all(item.path in other_paths for item in diagnostics):
                     self._add_events(diagnostics)
-                    self.statusBar().showMessage(f"Ошибок: {len(diagnostics)}; подробности в панели событий", 7000)
+                    self.statusBar().showMessage(tr("ui.error_count", count=len(diagnostics)), 7000)
                     return
                 self._add_events(diagnostics)
-                self.statusBar().showMessage("Текущий компонент проверен; ошибки найдены в других компонентах", 7000)
+                self.statusBar().showMessage(tr("ui.validation_other_components"), 7000)
             data = self.controller.preview.cached_data(snapshot, component_id, component=component)
         except ValidationIssues as exc:
             self._add_events(exc.diagnostics)
-            self.statusBar().showMessage(f"Ошибок: {len(exc.diagnostics)}; подробности в панели событий", 7000)
+            self.statusBar().showMessage(tr("ui.error_count", count=len(exc.diagnostics)), 7000)
             return
         except ProjectError as exc:
             self._add_events((exc.diagnostic,))
-            self.statusBar().showMessage("Проверка не пройдена; подробности в панели событий", 7000)
+            self.statusBar().showMessage(tr("ui.validation_failed"), 7000)
             return
         if data is None:
-            self._add_events((Diagnostic("VALIDATION_OK", f"Компонент {component.name} и его ресурсы проверены", snapshot.documents[component_id].path, source="main", severity="info"),))
+            self._add_events((Diagnostic("VALIDATION_OK", "", snapshot.documents[component_id].path, source="main", severity="info", message_key="ui.validation_component_ok", params={"name": component.name}),))
         else:
-            self._add_events((Diagnostic("VALIDATION_OK", f"Лист {data.sheet}, область {data.area} проверена; строк: {len(data.rows)}", data.path, source="main", sheet=data.sheet, severity="info"),))
+            self._add_events((Diagnostic("VALIDATION_OK", "", data.path, source="main", sheet=data.sheet, severity="info", message_key="ui.validation_sheet_ok", params={"sheet": data.sheet, "area": data.area, "count": len(data.rows)}),))
         self._populate_data_panel()
         self._refresh_preview(self.active_tab)
 
@@ -1590,11 +1592,11 @@ class MainWindow(QMainWindow):
         if snapshot is None:
             return
         diagnostics = self.controller.preview.validate_all(snapshot, force_read=force_read, manual=True)
-        self._add_events(diagnostics or (Diagnostic("VALIDATION_OK", "Все компоненты проекта проверены", self.session.snapshot.root, severity="info"),))
+        self._add_events(diagnostics or (Diagnostic("VALIDATION_OK", "", self.session.snapshot.root, severity="info", message_key="ui.validation_all_ok"),))
         if diagnostics:
-            self.statusBar().showMessage(f"Ошибок: {len(diagnostics)}; подробности в панели событий", 7000)
+            self.statusBar().showMessage(tr("ui.error_count", count=len(diagnostics)), 7000)
         else:
-            self.statusBar().showMessage("Все компоненты проекта проверены", 5000)
+            self.statusBar().showMessage(tr("ui.validation_all_ok"), 5000)
         if self.active_tab is not None:
             self._populate_data_panel()
             self._refresh_preview(self.active_tab)
@@ -1628,7 +1630,7 @@ class MainWindow(QMainWindow):
             self._fill_combo(self.data_column, headers, self.data_column.currentData())
             if render:
                 self._refresh_preview(tab)
-            self.statusBar().showMessage(f"Данные обновлены: {data.sheet}, версия {data.version}", 3500)
+            self.statusBar().showMessage(tr("ui.data_updated", sheet=data.sheet, version=data.version), 3500)
         return data
 
     def _refresh_preview(self, tab: DocumentTab, *, fit: bool = False, selected: tuple[str, ...] | None = None) -> bool:
@@ -1647,7 +1649,7 @@ class MainWindow(QMainWindow):
             if cached is None:
                 tab.canvas.clear_document()
                 self.preview_image.setPixmap(QPixmap())
-                self.preview_image.setText("Проверьте данные Excel, чтобы увидеть экземпляры")
+                self.preview_image.setText(tr("ui.preview_no_data"))
                 self.preview_first.setEnabled(False)
                 self.preview_last.setEnabled(False)
                 self.preview_next.setEnabled(False)
@@ -1658,7 +1660,7 @@ class MainWindow(QMainWindow):
                 tab.preview_row_number = None
                 tab.canvas.clear_document()
                 self.preview_image.setPixmap(QPixmap())
-                self.preview_image.setText("В выбранном режиме нет экземпляров")
+                self.preview_image.setText(tr("ui.preview_no_instances"))
                 self.preview_first.setEnabled(False)
                 self.preview_last.setEnabled(False)
                 self.preview_next.setEnabled(False)
@@ -1690,7 +1692,7 @@ class MainWindow(QMainWindow):
             self.session, component=active_component, dpi=dpi, fit=fit,
             selected=selected, bindings_resolved=bindings_resolved,
         )
-        self.preview_image.setText("Подготовка превью…")
+        self.preview_image.setText(tr("ui.preview_preparing"))
         return True
 
     def _step_preview(self, direction: int, *, endpoint: str | None = None) -> None:
@@ -1842,12 +1844,12 @@ class MainWindow(QMainWindow):
                         if diagnostics:
                             self._add_events(diagnostics)
                             self.statusBar().showMessage(
-                                f"Изображений ниже 300 dpi: {len(diagnostics)}; сборка доступна",
+                                tr("ui.preview_quality_count", count=len(diagnostics)),
                                 6000,
                             )
             elif error is not None and self.active_tab is tab and tab.fail_preview(str(error.diagnostic) if isinstance(error, ProjectError) else str(error), generation=request.generation):
                 self.preview_image.setPixmap(QPixmap())
-                self.preview_image.setText("Не удалось подготовить превью")
+                self.preview_image.setText(tr("ui.preview_failed"))
                 self.event_list.setCurrentRow(self.event_list.count() - 1)
                 self.event_list.setFocus()
             elif self.active_tab is not tab:
@@ -1880,10 +1882,11 @@ class MainWindow(QMainWindow):
                     else None
                 )
                 cell = next((value.coordinate for name, value in row.values.items() if column and name.strip().casefold() == column.strip().casefold()), None)
+                message = tr(warning.message_key, **(warning.params or {})) if warning.message_key else warning.message
                 warning = Diagnostic(
-                    warning.code, f"строка Excel {row.row_number}: {warning.message}",
-                    warning.path, warning.field, warning.line, warning.severity,
+                    warning.code, "", warning.path, warning.field, warning.line, warning.severity,
                     warning.source, warning.sheet, cell, warning.node_id,
+                    message_key="ui.excel_row_prefix", params={"row": row.row_number, "message": message},
                 )
             diagnostics.append(warning)
         return tuple(diagnostics)
@@ -1927,7 +1930,7 @@ class MainWindow(QMainWindow):
         source = self.data_source.currentData()
         sheet = self.data_sheet.currentData()
         column = self.data_column.currentData()
-        self.data_chain.setText(" → ".join(str(item) for item in (source, sheet, column) if item) or "Нет привязки")
+        self.data_chain.setText(" → ".join(str(item) for item in (source, sheet, column) if item) or tr("ui.no_binding"))
 
     def _insert_column_binding(self) -> None:
         if self.session is None or self.active_tab is None:
@@ -1935,11 +1938,11 @@ class MainWindow(QMainWindow):
         column = self.data_column.currentData()
         selected = self._selected_ids()
         if not column or len(selected) != 1:
-            self.statusBar().showMessage("Выберите один HTML-элемент и столбец", 5000)
+            self.statusBar().showMessage(tr("ui.select_html_column"), 5000)
             return
         item = locations(self.session.documents[self.active_tab.component_id].model).get(selected[0])
         if item is None or not isinstance(item.node, HtmlNode):
-            self.statusBar().showMessage("Привязка столбца вставляется в HTML-элемент", 5000)
+            self.statusBar().showMessage(tr("ui.column_binding_html"), 5000)
             return
         self._edit_selected_node({"content_mode": "column", "content_column": str(column)})
 
@@ -1960,7 +1963,7 @@ class MainWindow(QMainWindow):
     def _clear_xlsx(self) -> None:
         if self.session is None:
             return
-        choice = QMessageBox.question(self, "Удалить XLSX", "Отвязать все листы компонентов и убрать источник Excel из проекта?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        choice = QMessageBox.question(self, tr("ui.remove_xlsx"), "Отвязать все листы компонентов и убрать источник Excel из проекта?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         if choice != QMessageBox.StandardButton.Yes:
             return
         try:
@@ -2014,7 +2017,7 @@ class MainWindow(QMainWindow):
             from componentpress.execution.cancellation import CancellationToken
 
             cancellation = CancellationToken()
-            progress = QProgressDialog("Подготовка PNG ZIP…", "Отменить", 0, 0, self)
+            progress = QProgressDialog(tr("ui.archive_prepare"), tr("action.cancel_build"), 0, 0, self)
             progress.setWindowTitle("Экспорт PNG ZIP")
             progress.setAutoClose(False)
             progress.setAutoReset(False)
@@ -2074,7 +2077,7 @@ class MainWindow(QMainWindow):
             print_settings=dialog.print_settings(),
             max_render_workers=dialog.workers.value(),
         )
-        progress = QProgressDialog("Подготовка снимка…", "Отменить", 0, 0, self)
+        progress = QProgressDialog(tr("ui.build_prepare"), tr("action.cancel_build"), 0, 0, self)
         progress.setWindowTitle("Сборка ComponentPress")
         progress.setAutoClose(False)
         progress.setAutoReset(False)
@@ -2532,7 +2535,7 @@ class MainWindow(QMainWindow):
             return False
         component = self.session.documents[self.active_tab.component_id].model
         if name is None:
-            name, accepted = QInputDialog.getText(self, "Новая группа", "Название", text="Группа")
+            name, accepted = QInputDialog.getText(self, "Новая группа", tr("ui.name"), text="Группа")
             if not accepted:
                 return False
         if not name.strip():
@@ -2548,7 +2551,7 @@ class MainWindow(QMainWindow):
         if found is None or not isinstance(found.node, GroupNode):
             return False
         children = tuple(child.id for child in found.node.children)
-        return self._apply_tree("Разгруппировать", ungroup_node, ids[0], selected=children)
+        return self._apply_tree(tr("ui.ungroup"), ungroup_node, ids[0], selected=children)
 
     def reparent_selected_dialog(self) -> None:
         ids = self._selected_ids()
@@ -2630,7 +2633,7 @@ class MainWindow(QMainWindow):
                 self._show_error(ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", "сначала задайте лист Excel и проверьте его заголовки")))
                 accepted = False
             else:
-                name, accepted = QInputDialog.getText(self, "Условная группа", "Название", text="Условная группа")
+                name, accepted = QInputDialog.getText(self, tr("ui.conditional_group"), tr("ui.name"), text=tr("ui.conditional_group"))
                 if accepted and name.strip():
                     component_id = self.active_tab.component_id
                     node_id = self.controller.node_id(component_id, name, "condition")
@@ -2677,7 +2680,7 @@ class MainWindow(QMainWindow):
             dx, dy = x2 - x1, y2 - y1
             if abs(dx) < 0.01 and abs(dy) < 0.01:
                 return
-            name = "Линия"
+            name = tr("ui.line")
             node_id = self.controller.node_id(component_id, name, "line")
             node = LineNode(id=node_id, type="line", name=name, x_mm=x1, y_mm=y1, dx_mm=dx, dy_mm=dy)
         elif tool in ("rectangle", "ellipse"):
@@ -2685,7 +2688,7 @@ class MainWindow(QMainWindow):
             width, height = abs(x2 - x1), abs(y2 - y1)
             if min(width, height) < 0.01:
                 return
-            name = "Прямоугольник" if tool == "rectangle" else "Эллипс"
+            name = tr("ui.rectangle") if tool == "rectangle" else tr("ui.ellipse")
             node_id = self.controller.node_id(component_id, name, tool)
             node = ShapeNode(id=node_id, type=tool, name=name, x_mm=x, y_mm=y, width_mm=width, height_mm=height)
         else:
@@ -2698,7 +2701,7 @@ class MainWindow(QMainWindow):
         x_mm: float,
         y_mm: float,
         *,
-        name: str = "Изображение",
+        name: str = tr("ui.image"),
         fit: str = "contain",
         source_mode: str = "manual",
         source_column: str | None = None,
@@ -2715,7 +2718,7 @@ class MainWindow(QMainWindow):
         except ValidationError as exc:
             self._show_error(exc)
             return False
-        return self._apply_tree("Добавить изображение", add_node, node, selected=(node_id,))
+        return self._apply_tree(tr("ui.image_add_title"), add_node, node, selected=(node_id,))
 
     def add_html(
         self,
@@ -2723,7 +2726,7 @@ class MainWindow(QMainWindow):
         x_mm: float,
         y_mm: float,
         *,
-        name: str = "HTML-текст",
+        name: str = tr("ui.html_text"),
         font_family: str = "Arial",
         font_size_pt: float = 10.0,
         color: str = "#111111",
@@ -2759,13 +2762,13 @@ class MainWindow(QMainWindow):
         picker = ResourcePickerDialog(self.session.snapshot.root, self._import_image, self)
         if picker.exec() != picker.DialogCode.Accepted:
             return
-        width, accepted = QInputDialog.getInt(self, "Размер изображения", "Ширина, px", 16, 1, 4096)
+        width, accepted = QInputDialog.getInt(self, tr("ui.image_size"), tr("ui.width_px"), 16, 1, 4096)
         if not accepted:
             return
-        height, accepted = QInputDialog.getInt(self, "Размер изображения", "Высота, px", 16, 1, 4096)
+        height, accepted = QInputDialog.getInt(self, tr("ui.image_size"), tr("ui.height_px"), 16, 1, 4096)
         if not accepted:
             return
-        align, accepted = QInputDialog.getItem(self, "Выравнивание", "Положение", ["", "middle", "top", "bottom"], 0, False)
+        align, accepted = QInputDialog.getItem(self, tr("ui.align"), tr("ui.position"), ["", "middle", "top", "bottom"], 0, False)
         if not accepted:
             return
         self.element_properties.insert_html_image(picker.selected_path, width, height, align)
@@ -2939,7 +2942,7 @@ class MainWindow(QMainWindow):
 
     def _zoom_changed(self, percent: int) -> None:
         if self.sender() is self.active_tab:
-            self.status_zoom.setText(f"Масштаб: {percent}%")
+            self.status_zoom.setText(tr("ui.zoom_status", percent=percent))
 
     def _update_actions(self) -> None:
         has_project = self.session is not None
@@ -2952,8 +2955,8 @@ class MainWindow(QMainWindow):
         document_undo = bool(visual and active_stack and active_stack.canUndo())
         document_redo = bool(visual and active_stack and active_stack.canRedo())
         text_mode = bool(has_tab and self.active_tab.mode == "text")
-        self.undo_action.setText("Отменить")
-        self.redo_action.setText("Повторить")
+        self.undo_action.setText(tr("action.undo"))
+        self.redo_action.setText(tr("action.redo"))
         text_undo = bool(text_mode and self.active_tab.text_editor.document().isUndoAvailable())
         text_redo = bool(text_mode and self.active_tab.text_editor.document().isRedoAvailable())
         self.undo_action.setEnabled(bool(text_undo or project_undo or document_undo))
@@ -3027,7 +3030,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._version_task is not None:
-            QMessageBox.information(self, "Архив проекта", "Дождитесь завершения операции или отмените её.")
+            QMessageBox.information(self, tr("ui.archive_title"), "Дождитесь завершения операции или отмените её.")
             event.ignore()
             return
         for tab in self._tabs.values():

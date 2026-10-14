@@ -1,5 +1,7 @@
 """Localization catalog and startup-language contracts for stage 15."""
 
+from pathlib import Path
+
 from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtWidgets import QApplication, QComboBox, QLabel
 
@@ -7,6 +9,12 @@ from componentpress.domain.diagnostics import Diagnostic
 from componentpress.domain.schema import SCHEMA_VERSION
 from componentpress.i18n import catalogs, language, set_language, tr, validate_catalogs
 from componentpress.version import APPLICATION_VERSION
+from componentpress.editor.component_dialog import ComponentDialog
+from componentpress.editor.copy_mode_switch import CopyModeSwitch
+from componentpress.editor.document_tab import DocumentTab
+from componentpress.editor.properties import ElementProperties
+from componentpress.domain.nodes import HtmlNode
+from componentpress.rendering.image_quality import ImageQuality
 
 
 def test_catalogs_have_matching_keys_and_placeholders() -> None:
@@ -50,3 +58,72 @@ def test_about_saves_language_for_restart(monkeypatch, tmp_path: Path, qtbot) ->
     assert english_window.new_action.text() == "New project…"
     assert english_window.right_tabs.tabText(0) == "Components"
     set_language("ru")
+
+
+def test_editor_panels_and_dynamic_controls_use_english_catalog(tmp_path: Path, qtbot) -> None:
+    from test_stage14_ui import make_window
+
+    previous = language()
+    set_language("en")
+    try:
+        root = tmp_path / "editor-en"
+        root.mkdir()
+        _root, window, _service = make_window(root, qtbot)
+        assert window.image_manager_action.text() == "Project images…"
+        assert window.preview_image.text() == "Select a component and validate its data"
+        assert window.preview_first.toolTip() == "First instance"
+        assert window.preview_first.accessibleName() == "First instance"
+        assert window.data_insert.text() == "Insert Column"
+        assert window.add_component_button.accessibleName() == "Add component"
+        assert window.undo_action.text() == "Undo"
+        assert window.redo_action.text() == "Redo"
+        window._update_actions()
+        assert window.undo_action.text() == "Undo"
+        assert window.redo_action.text() == "Redo"
+
+        switch = CopyModeSwitch()
+        qtbot.addWidget(switch)
+        assert switch.accessibleName() == "Copy mode"
+        assert switch.toolTip() == "Copy mode: Prod"
+        switch.setChecked(True)
+        assert switch.accessibleDescription() == "Copy mode: Test"
+
+        tab = DocumentTab("card")
+        qtbot.addWidget(tab)
+        assert tab.layout_mode.toolTip() == "Drag and drop"
+        assert tab.text_mode.accessibleName() == "Text"
+
+        dialog = ComponentDialog()
+        qtbot.addWidget(dialog)
+        assert dialog.windowTitle() == "New component"
+        assert dialog.size.itemText(0) == "Custom size…"
+        assert dialog.size.itemData(1) == (63, 88)
+
+        html = HtmlNode(
+            id="node", name="User name", type="html", x_mm=0, y_mm=0,
+            width_mm=20, height_mm=10, font_family="Unavailable Test Font",
+            font_size_pt=10, html="<p>Keep this text</p>",
+        )
+        properties = ElementProperties()
+        qtbot.addWidget(properties)
+        changes = []
+        properties.nodeChanged.connect(changes.append)
+        properties.show_node(html, font_families=("Arial",))
+        assert properties.font_combo.currentText() == "Unavailable Test Font (unavailable)"
+        assert properties.font_combo.currentData() == "Unavailable Test Font"
+        assert not changes
+        properties.font_combo.setCurrentIndex(properties.font_combo.findData("Arial"))
+        assert changes[-1] == {"font_family": "Arial"}
+        assert html.name == "User name"
+        assert html.html == "<p>Keep this text</p>"
+
+        diagnostic = ImageQuality("node", "assets/icon.png", 80, 60, 20, 15, 101.6, 101.6).diagnostic(
+            tmp_path / "project.yaml", source="main", sheet="Cards",
+        )
+        assert diagnostic is not None
+        rendered = str(diagnostic)
+        assert "source main" in rendered and "sheet Cards" in rendered and "element node" in rendered
+        assert "Image assets/icon.png: 80×60 px" in rendered
+        assert "effective resolution 101.6×101.6 dpi" in rendered
+    finally:
+        set_language(previous)

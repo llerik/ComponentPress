@@ -11,6 +11,7 @@ from typing import Callable
 import zipfile
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.i18n import tr
 
 
 EXCLUDED_ROOTS = {"archive", "output", ".componentpress", ".git"}
@@ -77,7 +78,7 @@ def snapshot_sources(root: Path, destination: Path, *, cancellation=None, on_pro
                     original_files[path.relative_to(root).as_posix()] = _digest_stream(stream, cancellation)
                 checked_count += 1
                 if on_progress is not None:
-                    on_progress(checked_count, source_count, "Проверка исходников")
+                    on_progress(checked_count, source_count, tr("ui.archive_progress_check"))
             except OSError as exc:
                 raise ProjectError(Diagnostic("ARCHIVE_READ", f"не удалось проверить исходный файл: {exc}", path)) from exc
 
@@ -128,7 +129,7 @@ def snapshot_sources(root: Path, destination: Path, *, cancellation=None, on_pro
                     raise ProjectError(Diagnostic("ARCHIVE_SOURCE_CHANGED", "файл изменился во время создания архива", source))
                 copied_count += 1
                 if on_progress is not None:
-                    on_progress(copied_count, source_count, "Создание снимка")
+                    on_progress(copied_count, source_count, tr("ui.archive_progress_snapshot"))
             except OSError as exc:
                 raise ProjectError(Diagnostic("ARCHIVE_READ", f"не удалось зафиксировать файл: {exc}", source)) from exc
             files[relative] = {"size": size, "sha256": digest.hexdigest()}
@@ -182,7 +183,7 @@ def verify_source_inventory(root: Path, files: dict[str, dict[str, object]], dir
             current_files[path.relative_to(root).as_posix()] = {"size": size, "sha256": digest}
             checked_count += 1
             if on_progress is not None:
-                on_progress(checked_count, len(files), "Повторная проверка исходников")
+                on_progress(checked_count, len(files), tr("ui.archive_progress_recheck"))
     if current_files != files or current_directories != set(directories):
         raise ProjectError(Diagnostic("ARCHIVE_SOURCE_CHANGED", "файлы или папки проекта изменились после создания снимка", root))
 

@@ -19,26 +19,26 @@ class Diagnostic:
     incident_id: str | None = None
 
     def __str__(self) -> str:
-        location = str(self.path) if self.path else "проект"
+        from componentpress.i18n import tr
+
+        location = str(self.path) if self.path else tr("ui.diagnostic_project")
         if self.line is not None:
             location += f":{self.line}"
         if self.field:
             location += f" ({self.field})"
         details = []
         if self.source:
-            details.append(f"источник {self.source}")
+            details.append(tr("ui.diagnostic_source", value=self.source))
         if self.sheet:
-            details.append(f"лист {self.sheet}")
+            details.append(tr("ui.diagnostic_sheet", value=self.sheet))
         if self.cell:
-            details.append(f"ячейка {self.cell}")
+            details.append(tr("ui.diagnostic_cell", value=self.cell))
         if self.node_id:
-            details.append(f"элемент {self.node_id}")
+            details.append(tr("ui.diagnostic_node", value=self.node_id))
         if details:
             location += " [" + ", ".join(details) + "]"
         message = self.message
         if self.message_key:
-            from componentpress.i18n import tr
-
             message = tr(self.message_key, **(self.params or {}))
         else:
             from componentpress.i18n import language, tr

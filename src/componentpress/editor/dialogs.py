@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from componentpress.i18n import tr
 from componentpress.project_io.files import file_hash
 from componentpress.project_io.paths import resolve_project_path
 from componentpress.resources.repository import ResourceRepository
@@ -37,7 +38,7 @@ from componentpress.rendering.fonts import available_font_families
 
 def format_error(error: Exception) -> str:
     message = str(error).strip()
-    return message or f"Не удалось выполнить операцию ({type(error).__name__})."
+    return message or tr("ui.operation_failed", error=type(error).__name__)
 
 
 class ResourcePickerDialog(QDialog):
@@ -46,7 +47,7 @@ class ResourcePickerDialog(QDialog):
         self.root = root
         self.importer = importer
         self.selected_path = ""
-        self.setWindowTitle("Изображение проекта")
+        self.setWindowTitle(tr("ui.resource_picker"))
         self.resize(700, 480)
         layout = QVBoxLayout(self)
         self.model = QFileSystemModel(self)
@@ -62,7 +63,7 @@ class ResourcePickerDialog(QDialog):
         self.tree.setRootIndex(self.model.index(str(images)))
         self.tree.setColumnWidth(0, 420)
         layout.addWidget(self.tree)
-        import_button = QPushButton("Импортировать PNG/JPEG…")
+        import_button = QPushButton(tr("ui.import_png_jpeg"))
         layout.addWidget(import_button)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         layout.addWidget(buttons)
@@ -80,7 +81,7 @@ class ImageManagerDialog(QDialog):
         self.root = root
         self.importer = importer
         self.replacer = replacer
-        self.setWindowTitle("Изображения проекта")
+        self.setWindowTitle(tr("ui.image_manager_title"))
         self.resize(720, 520)
         layout = QVBoxLayout(self)
         self.images = QListWidget()
@@ -88,10 +89,10 @@ class ImageManagerDialog(QDialog):
         self.images.setIconSize(QSize(64, 64))
         layout.addWidget(self.images)
         actions = QHBoxLayout()
-        self.add_button = QPushButton("Добавить изображение…")
-        self.replace_button = QPushButton("Заменить выбранное…")
-        self.folder_button = QPushButton("Импортировать папку…")
-        self.refresh_button = QPushButton("Обновить")
+        self.add_button = QPushButton(tr("ui.image_add"))
+        self.replace_button = QPushButton(tr("ui.image_replace"))
+        self.folder_button = QPushButton(tr("ui.image_import_folder"))
+        self.refresh_button = QPushButton(tr("ui.refresh"))
         for button in (self.add_button, self.replace_button, self.folder_button, self.refresh_button):
             actions.addWidget(button)
         layout.addLayout(actions)
@@ -111,22 +112,22 @@ class ImageManagerDialog(QDialog):
             for path in paths:
                 relative = path.relative_to(self.root).as_posix()
                 image = QPixmap(str(path))
-                size = f"{image.width()}×{image.height()} px" if not image.isNull() else "Не удалось прочитать изображение"
+                size = f"{image.width()}×{image.height()} px" if not image.isNull() else tr("ui.image_unreadable")
                 item = QListWidgetItem(f"{path.name} — {relative} — {size}")
                 item.setData(Qt.ItemDataRole.UserRole, relative)
                 if not image.isNull():
                     item.setIcon(QIcon(QPixmap(image.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))))
                 self.images.addItem(item)
         except Exception as exc:
-            QMessageBox.warning(self, "Изображения проекта", format_error(exc))
+            QMessageBox.warning(self, tr("ui.image_manager_title"), format_error(exc))
         self.replace_button.setEnabled(self.images.count() > 0)
 
     def _destination_folder(self) -> str | None:
-        folder, accepted = QInputDialog.getText(self, "Папка назначения", "Подпапка внутри assets/images (можно пустую):")
+        folder, accepted = QInputDialog.getText(self, tr("ui.image_destination"), tr("ui.image_subfolder"))
         return folder.replace("\\", "/").strip("/") if accepted else None
 
     def _add_image(self) -> None:
-        source, _ = QFileDialog.getOpenFileName(self, "Добавить изображение", "", "Изображения (*.png *.jpg *.jpeg)")
+        source, _ = QFileDialog.getOpenFileName(self, tr("ui.image_add_title"), "", tr("ui.image_filter"))
         if not source:
             return
         folder = self._destination_folder()
@@ -136,27 +137,27 @@ class ImageManagerDialog(QDialog):
             self.importer(Path(source), folder)
             self.refresh()
         except Exception as exc:
-            QMessageBox.warning(self, "Не удалось добавить изображение", format_error(exc))
+            QMessageBox.warning(self, tr("ui.image_add_failed"), format_error(exc))
 
     def _replace_image(self) -> None:
         item = self.images.currentItem()
         if item is None:
             return
-        source, _ = QFileDialog.getOpenFileName(self, "Выбрать замену", "", "Изображения (*.png *.jpg *.jpeg)")
+        source, _ = QFileDialog.getOpenFileName(self, tr("ui.image_replace_title"), "", tr("ui.image_filter"))
         if not source:
             return
         relative = item.data(Qt.ItemDataRole.UserRole)
-        if QMessageBox.question(self, "Заменить изображение", f"Заменить ресурс «{relative}» без изменения ссылок?") != QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(self, tr("ui.image_replace_confirm_title"), tr("ui.image_manager_confirm", path=relative)) != QMessageBox.StandardButton.Yes:
             return
         try:
             target = resolve_project_path(self.root, relative)
             self.replacer(relative, Path(source), file_hash(target))
             self.refresh()
         except Exception as exc:
-            QMessageBox.warning(self, "Не удалось заменить изображение", format_error(exc))
+            QMessageBox.warning(self, tr("ui.image_replace_failed"), format_error(exc))
 
     def _import_folder(self) -> None:
-        source = QFileDialog.getExistingDirectory(self, "Выбрать папку изображений")
+        source = QFileDialog.getExistingDirectory(self, tr("ui.image_choose_folder"))
         if not source:
             return
         folder = self._destination_folder()
@@ -164,17 +165,17 @@ class ImageManagerDialog(QDialog):
             self.folderImportRequested.emit(Path(source), folder)
 
     def set_import_progress(self, completed: int, total: int, message: str = "") -> None:
-        self.import_progress.setText(message or f"Импорт: {completed} из {total}")
+        self.import_progress.setText(message or tr("ui.import_progress", completed=completed, total=total))
 
     def finish_import(self, paths: tuple[str, ...] | None, error: Exception | None) -> None:
         self.folder_button.setEnabled(True)
         if error is not None:
             self.set_import_progress(0, 0, "")
-            QMessageBox.warning(self, "Импорт папки", format_error(error))
+            QMessageBox.warning(self, tr("ui.image_import_title"), format_error(error))
             self.refresh()
             return
         self.refresh()
-        self.set_import_progress(len(paths or ()), len(paths or ()), f"Импортировано файлов: {len(paths or ())}")
+        self.set_import_progress(len(paths or ()), len(paths or ()), tr("ui.image_import_complete", count=len(paths or ())))
 
     def _relative(self, path: Path) -> str:
         return PurePosixPath(path.relative_to(self.root)).as_posix()
@@ -182,26 +183,26 @@ class ImageManagerDialog(QDialog):
     def _accept_selection(self) -> None:
         path = Path(self.model.filePath(self.tree.currentIndex()))
         if not path.is_file():
-            QMessageBox.information(self, "Выбор изображения", "Выберите PNG или JPEG.")
+            QMessageBox.information(self, tr("ui.image_select_title"), tr("ui.image_select_format"))
             return
         self.selected_path = self._relative(path)
         self.accept()
 
     def _import(self) -> None:
-        source, _ = QFileDialog.getOpenFileName(self, "Импорт изображения", "", "Изображения (*.png *.jpg *.jpeg)")
+        source, _ = QFileDialog.getOpenFileName(self, tr("ui.image_import_one"), "", tr("ui.image_filter"))
         if not source:
             return
         folder, accepted = QInputDialog.getText(
             self,
-            "Папка ресурсов",
-            "Вложенная папка внутри assets/images (можно оставить пустой)",
+            tr("ui.image_resource_folder"),
+            tr("ui.image_resource_subfolder"),
         )
         if not accepted:
             return
         try:
             self.selected_path = self.importer(Path(source), folder.strip().replace("\\", "/"))
         except Exception as exc:
-            QMessageBox.critical(self, "Ошибка импорта", format_error(exc))
+            QMessageBox.critical(self, tr("ui.image_import_error"), format_error(exc))
             return
         self.accept()
 
@@ -211,30 +212,30 @@ class ImageAddDialog(QDialog):
         super().__init__(parent)
         self.root = root
         self.importer = importer
-        self.setWindowTitle("Новое изображение")
+        self.setWindowTitle(tr("ui.image_new"))
         layout = QVBoxLayout(self)
         form = QFormLayout()
-        self.name = QLineEdit("Изображение")
+        self.name = QLineEdit(tr("ui.image"))
         self.name.setObjectName("newImageName")
         self.content_mode = QComboBox()
-        self.content_mode.addItem("Файл проекта", "manual")
-        self.content_mode.addItem("Столбец Excel", "column")
+        self.content_mode.addItem(tr("ui.image_project_file"), "manual")
+        self.content_mode.addItem(tr("ui.excel_column"), "column")
         self.content_mode.setEnabled(bool(columns))
         self.content_column = QComboBox()
         self.content_column.addItems(list(columns))
         row = QHBoxLayout()
         self.source = QLineEdit()
         self.source.setObjectName("newImageSource")
-        choose = QPushButton("Выбрать…")
+        choose = QPushButton(tr("ui.choose"))
         row.addWidget(self.source, 1)
         row.addWidget(choose)
         self.fit = QComboBox()
         self.fit.addItems(["contain", "cover", "stretch"])
-        form.addRow("Название", self.name)
-        form.addRow("Источник", self.content_mode)
-        form.addRow("Ресурс", row)
-        form.addRow("Столбец", self.content_column)
-        form.addRow("Режим", self.fit)
+        form.addRow(tr("ui.name"), self.name)
+        form.addRow(tr("ui.source"), self.content_mode)
+        form.addRow(tr("ui.image_resource"), row)
+        form.addRow(tr("ui.column"), self.content_column)
+        form.addRow(tr("ui.mode"), self.fit)
         layout.addLayout(form)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         layout.addWidget(buttons)
@@ -253,13 +254,13 @@ class ImageAddDialog(QDialog):
 
     def _accept(self) -> None:
         if not self.name.text().strip():
-            QMessageBox.information(self, "Новое изображение", "Введите название.")
+            QMessageBox.information(self, tr("ui.image_new"), tr("ui.image_name_required"))
             return
         if self.content_mode.currentData() == "manual" and not self.source.text().strip():
-            QMessageBox.information(self, "Новое изображение", "Выберите изображение.")
+            QMessageBox.information(self, tr("ui.image_new"), tr("ui.image_required"))
             return
         if self.content_mode.currentData() == "column" and not self.content_column.currentText():
-            QMessageBox.information(self, "Новое изображение", "Проверьте Excel и выберите столбец.")
+            QMessageBox.information(self, tr("ui.image_new"), tr("ui.check_excel_column"))
             return
         self.accept()
 
@@ -274,15 +275,15 @@ class HtmlAddDialog(QDialog):
         super().__init__(parent)
         self.root = root
         self.importer = importer
-        self.setWindowTitle("Новый HTML-текст")
+        self.setWindowTitle(tr("ui.html_new"))
         self.resize(620, 480)
         layout = QVBoxLayout(self)
         form = QFormLayout()
-        self.name = QLineEdit("HTML-текст")
+        self.name = QLineEdit(tr("ui.html_text"))
         self.name.setObjectName("newHtmlName")
         self.content_mode = QComboBox()
-        self.content_mode.addItem("Ручной HTML", "manual")
-        self.content_mode.addItem("Столбец Excel", "column")
+        self.content_mode.addItem(tr("ui.html_manual"), "manual")
+        self.content_mode.addItem(tr("ui.excel_column"), "column")
         self.content_mode.setEnabled(bool(columns))
         self.content_column = QComboBox()
         self.content_column.addItems(list(columns))
@@ -300,22 +301,22 @@ class HtmlAddDialog(QDialog):
         self.color = QLineEdit("#111111")
         self.color.setReadOnly(True)
         self.color.setObjectName("newHtmlColor")
-        self.color_button = QPushButton("Выбрать цвет…")
+        self.color_button = QPushButton(tr("ui.select_color"))
         self.color_button.setObjectName("newHtmlColorPicker")
         color_row = QHBoxLayout()
         color_row.addWidget(self.color, 1)
         color_row.addWidget(self.color_button)
-        form.addRow("Название", self.name)
-        form.addRow("Источник", self.content_mode)
-        form.addRow("Столбец", self.content_column)
-        form.addRow("Шрифт", self.font)
-        form.addRow("Размер, pt", self.font_size)
-        form.addRow("Цвет", color_row)
+        form.addRow(tr("ui.name"), self.name)
+        form.addRow(tr("ui.source"), self.content_mode)
+        form.addRow(tr("ui.column"), self.content_column)
+        form.addRow(tr("ui.font"), self.font)
+        form.addRow(tr("ui.size_pt"), self.font_size)
+        form.addRow(tr("ui.color"), color_row)
         layout.addLayout(form)
-        self.html = QPlainTextEdit("<p>Текст</p>")
+        self.html = QPlainTextEdit(f"<p>{tr('ui.default_html')}</p>")
         self.html.setObjectName("newHtmlSource")
         layout.addWidget(self.html, 1)
-        insert = QPushButton("Вставить изображение…")
+        insert = QPushButton(tr("ui.insert_image"))
         layout.addWidget(insert)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         layout.addWidget(buttons)
@@ -332,13 +333,13 @@ class HtmlAddDialog(QDialog):
         picker = ResourcePickerDialog(self.root, self.importer, self)
         if picker.exec() != QDialog.DialogCode.Accepted:
             return
-        width, accepted = QInputDialog.getInt(self, "Размер изображения", "Ширина, px", 16, 1, 4096)
+        width, accepted = QInputDialog.getInt(self, tr("ui.image_size"), tr("ui.width_px"), 16, 1, 4096)
         if not accepted:
             return
-        height, accepted = QInputDialog.getInt(self, "Размер изображения", "Высота, px", 16, 1, 4096)
+        height, accepted = QInputDialog.getInt(self, tr("ui.image_size"), tr("ui.height_px"), 16, 1, 4096)
         if not accepted:
             return
-        align, accepted = QInputDialog.getItem(self, "Выравнивание", "Положение", ["", "middle", "top", "bottom"], 0, False)
+        align, accepted = QInputDialog.getItem(self, tr("ui.align"), tr("ui.position"), ["", "middle", "top", "bottom"], 0, False)
         if not accepted:
             return
         suffix = f' align="{align}"' if align else ""
@@ -348,15 +349,15 @@ class HtmlAddDialog(QDialog):
 
     def _accept(self) -> None:
         if not self.name.text().strip():
-            QMessageBox.information(self, "Новый HTML-текст", "Введите название.")
+            QMessageBox.information(self, tr("ui.html_new"), tr("ui.image_name_required"))
             return
         if self.content_mode.currentData() == "column" and not self.content_column.currentText():
-            QMessageBox.information(self, "Новый HTML-текст", "Проверьте Excel и выберите столбец.")
+            QMessageBox.information(self, tr("ui.html_new"), tr("ui.check_excel_column"))
             return
         self.accept()
 
     def _pick_color(self) -> None:
-        selected = QColorDialog.getColor(QColor(self.color.text()), self, "Цвет текста")
+        selected = QColorDialog.getColor(QColor(self.color.text()), self, tr("ui.select_text_color"))
         if selected.isValid():
             self.color.setText(selected.name(QColor.NameFormat.HexRgb).upper())
 

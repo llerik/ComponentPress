@@ -20,6 +20,7 @@ from componentpress.diagnostics.logging import log_event, log_exception
 from componentpress.execution.cancellation import CancellationToken
 from componentpress.execution.cleanup import cleanup_job_directory
 from componentpress.execution.job_store import JobStore
+from componentpress.i18n import tr
 from componentpress.execution.tasks import RenderInstanceTask
 
 
@@ -69,7 +70,7 @@ def export_png_archive(
         snapshot = builder.register_snapshot_fonts(snapshot)
         registered_font_ids = snapshot.registered_font_ids
         if on_progress is not None:
-            on_progress(0, len(snapshot.instances), "Рендер PNG")
+            on_progress(0, len(snapshot.instances), tr("ui.png_progress_render"))
         for index, instance in enumerate(snapshot.instances, 1):
             token.check()
             errors: list[Exception] = []
@@ -80,7 +81,7 @@ def export_png_archive(
                     raise error
                 raise ProjectError(Diagnostic("PNG_EXPORT_FAILED", str(error), instance.document_path)) from error
             if on_progress is not None:
-                on_progress(index, len(snapshot.instances), "Рендер PNG")
+                on_progress(index, len(snapshot.instances), tr("ui.png_progress_render"))
 
         token.check()
         png_records = []
@@ -103,7 +104,7 @@ def export_png_archive(
                     "sha256": digest,
                 })
                 if on_progress is not None:
-                    on_progress(index, len(snapshot.instances), "Упаковка ZIP")
+                    on_progress(index, len(snapshot.instances), tr("ui.png_progress_pack"))
             manifest = {
                 "manifest_version": 1,
                 "project_id": snapshot.project.id,

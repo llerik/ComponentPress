@@ -3,16 +3,17 @@
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QCheckBox, QStyle, QStyleOptionFocusRect
+from componentpress.i18n import tr
 
 
 class CopyModeSwitch(QCheckBox):
     def __init__(self, parent=None) -> None:
         super().__init__("Prod", parent)
         self.setObjectName("dataMode")
-        self.setAccessibleName("Режим тиража")
+        self.setAccessibleName(tr("ui.copy_mode"))
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setToolTip("Режим тиража: Prod")
-        self.setAccessibleDescription("Режим тиража: Prod")
+        self.setToolTip(tr("ui.copy_mode_value", mode="Prod"))
+        self.setAccessibleDescription(tr("ui.copy_mode_value", mode="Prod"))
         self.toggled.connect(self._update_label)
 
     @property
@@ -46,7 +47,7 @@ class CopyModeSwitch(QCheckBox):
     def _update_label(self, checked: bool) -> None:
         mode = "Test" if checked else "Prod"
         self.setText(mode)
-        self.setToolTip(f"Режим тиража: {mode}")
-        self.setAccessibleDescription(f"Режим тиража: {mode}")
+        self.setToolTip(tr("ui.copy_mode_value", mode=mode))
+        self.setAccessibleDescription(tr("ui.copy_mode_value", mode=mode))
         self.updateGeometry()
         self.update()

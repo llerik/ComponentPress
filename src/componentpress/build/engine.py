@@ -11,6 +11,7 @@ from typing import Callable
 from PySide6.QtCore import QThreadPool
 
 from componentpress.application.contracts import BuildProgress, BuildResult
+from componentpress.i18n import tr
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.diagnostics.logging import log_event, log_exception
 from componentpress.execution.cancellation import CancellationToken
@@ -47,7 +48,7 @@ class BuildEngine:
                 snapshot,
                 plan,
                 cancellation,
-                lambda done, total, message: progress(BuildProgress(snapshot.job_id, "assembling_pdf", done, total, message)),
+                lambda done, total, message: progress(BuildProgress(snapshot.job_id, "assembling_pdf", done, total, tr("ui.pdf_page_progress", page=done, total=total))),
             )
             cancellation.check()
             output_hashes = {
@@ -173,7 +174,7 @@ class BuildEngine:
                     errors.append(error)
                     cancellation.cancel()
                 try:
-                    progress(BuildProgress(snapshot.job_id, "rendering", completed, total, f"PNG {completed} из {total}"))
+                    progress(BuildProgress(snapshot.job_id, "rendering", completed, total, tr("ui.png_build_progress", completed=completed, total=total)))
                 except Exception as exc:
                     log_exception("build.progress", exc, operation="build", job_id=snapshot.job_id, phase="rendering", mode=snapshot.mode)
                 finally:

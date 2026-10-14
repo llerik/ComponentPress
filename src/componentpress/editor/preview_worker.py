@@ -86,7 +86,7 @@ class PreviewFontReadTask(QRunnable):
                     if path.is_symlink():
                         from componentpress.domain.diagnostics import Diagnostic, ProjectError
 
-                        raise ProjectError(Diagnostic("PATH_SYMLINK", "символические ссылки шрифтов не поддерживаются", path))
+                        raise ProjectError(Diagnostic("PATH_SYMLINK", "", path, message_key="ui.font_symlink_unsupported"))
                     if path.is_file() and path.suffix.lower() in (".ttf", ".otf"):
                         before = path.stat()
                         data = path.read_bytes()
@@ -94,7 +94,7 @@ class PreviewFontReadTask(QRunnable):
                         if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns) or len(data) != after.st_size:
                             from componentpress.domain.diagnostics import Diagnostic, ProjectError
 
-                            raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "шрифт изменился во время чтения", path))
+                            raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "", path, message_key="ui.font_changed"))
                         files.append((path, data))
         except Exception as exc:
             if not isinstance(exc, ProjectError):
