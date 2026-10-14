@@ -61,10 +61,10 @@ from componentpress.domain.tree import (
     align_nodes,
     effectively_locked_ids,
     add_node,
+    drop_nodes,
     group_nodes,
     locations,
     move_nodes,
-    place_nodes,
     remove_nodes,
     reorder_nodes,
     reparent_nodes,
@@ -88,7 +88,6 @@ from .component_dialog import ComponentDialog
 from .ui_state import UiState
 from .project_settings_dialog import ProjectSettingsDialog
 from .copy_mode_switch import CopyModeSwitch
-from .canvas import ComponentPreview
 from componentpress.i18n import language, set_language, tr
 from componentpress.diagnostics import logging as technical_log
 import zipfile
@@ -110,7 +109,6 @@ class MainWindow(QMainWindow):
         self._preview_signals.finished.connect(self._preview_task_finished, Qt.ConnectionType.QueuedConnection)
         self._preview_active: tuple[DocumentTab, PreviewRequest, ProjectFonts | None] | None = None
         self._preview_pending: DocumentTab | None = None
-        self._preview_render_key: tuple[Path, str, int | None] | None = None
         self._build_retry_scheduled = False
         self._version_pool = QThreadPool(self)
         self._version_pool.setMaxThreadCount(1)
@@ -223,34 +221,20 @@ class MainWindow(QMainWindow):
         self.tabs.setMinimumWidth(0)
         self.setCentralWidget(self.tabs)
         self.right_panel = self._right_panel()
-        self.toolbox_dock = QDockWidget(tr("panel.tools"), self)
-        self.toolbox_dock.setObjectName("toolboxDock")
         self.right_dock = QDockWidget(tr("panel.workspace"), self)
         self.right_dock.setObjectName("rightDock")
         self.right_dock.setWidget(self.right_panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.right_dock)
         self.left_panel = self._left_panel()
-        self.toolbox_dock.setWidget(self.left_panel)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.toolbox_dock)
         self.events_dock = QDockWidget(tr("panel.events"), self)
         self.events_dock.setObjectName("eventsDock")
         self.events_dock.setWidget(self._events_panel())
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.events_dock)
-        self.preview_dock = QDockWidget(tr("panel.preview"), self)
-        self.preview_dock.setObjectName("previewDock")
-        self.preview_dock.setWidget(self._preview_panel())
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.preview_dock)
-        self.splitDockWidget(self.events_dock, self.preview_dock, Qt.Orientation.Horizontal)
-        self.docks = (self.toolbox_dock, self.right_dock, self.events_dock, self.preview_dock)
+        self.docks = (self.right_dock, self.events_dock)
         self.resizeDocks([self.right_dock], [300], Qt.Orientation.Horizontal)
         self._saved_dock_visibility = {dock.objectName(): True for dock in self.docks}
         self._project_ui_visible = False
-        for dock, area in zip(self.docks, (
-            Qt.DockWidgetArea.LeftDockWidgetArea,
-            Qt.DockWidgetArea.RightDockWidgetArea,
-            Qt.DockWidgetArea.BottomDockWidgetArea,
-            Qt.DockWidgetArea.BottomDockWidgetArea,
-        )):
+        for dock, area in zip(self.docks, (Qt.DockWidgetArea.RightDockWidgetArea, Qt.DockWidgetArea.BottomDockWidgetArea)):
             action = dock.toggleViewAction()
             self.windows_menu.addAction(action)
             action.triggered.connect(lambda visible, item=dock, default=area: self._dock_visibility_requested(item, default, visible))
@@ -261,8 +245,22 @@ class MainWindow(QMainWindow):
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.quick_toolbar)
         self.quick_toolbar.addWidget(self.data_mode)
         self.quick_toolbar.addSeparator()
+        for action in (self.add_component_action, self.project_settings_action, self.save_action, self.undo_action, self.redo_action):
+            self.quick_toolbar.addAction(action)
+        self.quick_toolbar.addSeparator()
         for action in (self.validate_active_action, self.validate_all_action, self.build_active_action, self.build_all_action, self.cancel_build_action):
             self.quick_toolbar.addAction(action)
+        quick_icons = {
+            self.add_component_action: "add.png",
+            self.project_settings_action: "settings.png",
+            self.save_action: "save.png",
+            self.undo_action: "undo.png",
+            self.redo_action: "redo.png",
+        }
+        for action, filename in quick_icons.items():
+            action.setIcon(load_icon(filename))
+            action.setToolTip(action.text())
+            action.setProperty("accessibleName", action.text())
         quick_icons = {
             self.validate_active_action: QStyle.StandardPixmap.SP_DialogApplyButton,
             self.validate_all_action: QStyle.StandardPixmap.SP_DialogYesButton,
@@ -280,7 +278,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.status_project, 1)
         self.statusBar().addPermanentWidget(self.status_zoom)
         self._update_project_visibility()
-        for panel in (self.left_panel, self.right_panel):
+        for panel in (self.right_panel,):
             panel.installEventFilter(self)
             for child in panel.findChildren(QWidget):
                 child.installEventFilter(self)
@@ -294,7 +292,7 @@ class MainWindow(QMainWindow):
         return super().eventFilter(watched, event)
 
     def _left_panel(self) -> QWidget:
-        panel = QWidget()
+        panel = QWidget(self)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(3, 5, 3, 5)
         # Kept as a child for compatibility with existing data-selection handlers;
@@ -336,11 +334,8 @@ class MainWindow(QMainWindow):
         validation_buttons.addWidget(self.data_validate_all)
         validation_buttons.addWidget(self.data_clear)
         data_layout.addLayout(validation_buttons)
-        data.setParent(panel)
         self.compat_data_panel = data
         data.hide()
-        tools = QGroupBox(tr("panel.tools_group"))
-        tools_layout = QVBoxLayout(tools)
         self.image_tool = QPushButton(tr("ui.image"))
         self.image_tool.setObjectName("imageTool")
         self.html_tool = QPushButton(tr("ui.html_text"))
@@ -372,13 +367,6 @@ class MainWindow(QMainWindow):
             button.setIcon(load_icon(tool_icons[button]))
             button.setText("")
             button.setFixedSize(34, 34)
-            tools_layout.addWidget(button)
-        layout.addWidget(tools)
-        actions = QGroupBox(tr("panel.layers"))
-        action_layout = QVBoxLayout(actions)
-        for button in (self.layer_up, self.layer_down, self.group_button, self.ungroup_button, self.reparent_button):
-            action_layout.addWidget(button)
-        layout.addWidget(actions)
         for button, icon in ((self.layer_up, "up.png"), (self.layer_down, "down.png")):
             button.setAccessibleName(button.text())
             button.setToolTip(button.text())
@@ -410,62 +398,19 @@ class MainWindow(QMainWindow):
         events_layout.addWidget(self.clear_events)
         return panel
 
-    def _preview_panel(self) -> QWidget:
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        self.preview_image = ComponentPreview()
-        self.preview_image.setAccessibleName(tr("ui.component_preview"))
-        self.preview_image.setMinimumHeight(120)
-        self.preview_image.setStyleSheet("background: palette(base); border: 1px solid palette(mid);")
-        self.preview_image.setText(tr("ui.preview_initial"))
-        layout.addWidget(self.preview_image, 1)
-        controls = QHBoxLayout()
-        self.preview_previous = QPushButton()
-        self.preview_next = QPushButton()
-        self.preview_first = QPushButton()
-        self.preview_last = QPushButton()
-        self.preview_first.setEnabled(False)
-        self.preview_last.setEnabled(False)
-        self.preview_zoom_out = QPushButton()
-        self.preview_zoom_in = QPushButton()
-        self.preview_fit = QPushButton()
-        self.preview_actual = QPushButton()
-        preview_icons = (
-            (self.preview_first, "begin.png", tr("ui.preview_first")),
-            (self.preview_previous, "left.png", tr("ui.preview_previous")),
-            (self.preview_next, "right.png", tr("ui.preview_next")),
-            (self.preview_last, "end.png", tr("ui.preview_last")),
-            (self.preview_zoom_in, "zoom_in.png", tr("ui.preview_zoom_in")),
-            (self.preview_zoom_out, "zoom_out.png", tr("ui.preview_zoom_out")),
-            (self.preview_fit, "by_screen.png", tr("ui.fit")),
-            (self.preview_actual, "real_size.png", tr("ui.zoom_actual")),
-        )
-        for button, icon, label in preview_icons:
-            button.setIcon(load_icon(icon))
-            button.setIconSize(QSize(22, 22))
-            button.setFixedSize(34, 34)
-            button.setToolTip(label)
-            button.setAccessibleName(label)
-            controls.addWidget(button)
-        layout.addLayout(controls)
-        return panel
-
     def _build_icon_toolbar(self) -> None:
         self.icon_toolbar = QToolBar(tr("panel.edit_tools"), self)
         self.icon_toolbar.setObjectName("editTools")
         self.icon_toolbar.setMovable(False)
         self.icon_toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, self.icon_toolbar)
-        action_icons = {
-            self.add_component_action: "add.png", self.project_settings_action: "settings.png",
-            self.save_action: "save.png", self.undo_action: "undo.png", self.redo_action: "redo.png",
-            self.delete_action: "remove.png", self.group_action: "group.png", self.ungroup_action: "ungroup.png",
-            self.zoom_in_action: "zoom_in.png", self.zoom_out_action: "zoom_out.png", self.fit_action: "by_screen.png",
-            self.actual_size_action: "real_size.png",
-            self.validate_active_action: "validate.png", self.validate_all_action: "validate_all.png",
-            self.build_active_action: "build.png", self.build_all_action: "build_all.png",
-        }
-        for action, icon in action_icons.items():
+        for button in self.drawing_tools.values():
+            self.icon_toolbar.addWidget(button)
+        self.icon_toolbar.addSeparator()
+        for button in (self.layer_up, self.layer_down, self.group_button, self.ungroup_button, self.reparent_button):
+            self.icon_toolbar.addWidget(button)
+        self.icon_toolbar.addSeparator()
+        for action, icon in ((self.delete_action, "remove.png"), (self.actual_size_action, "real_size.png")):
             action.setIcon(load_icon(icon))
             action.setToolTip(action.text())
             action.setProperty("accessibleName", action.text())
@@ -571,11 +516,6 @@ class MainWindow(QMainWindow):
             return
         dock.setFloating(False)
         self.addDockWidget(area, dock)
-        if area == Qt.DockWidgetArea.BottomDockWidgetArea:
-            other = self.preview_dock if dock is self.events_dock else self.events_dock
-            if other.isVisible() and self.dockWidgetArea(other) == area:
-                first, second = (dock, other) if dock is self.events_dock else (other, dock)
-                self.splitDockWidget(first, second, Qt.Orientation.Horizontal)
 
     def _component_context_menu(self, point) -> None:
         index = self.component_tree.indexAt(point)
@@ -729,7 +669,6 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
 
     def _connect_signals(self) -> None:
-        self.preview_dock.visibilityChanged.connect(lambda _visible: self._request_visible_preview_resolution())
         self.new_action.triggered.connect(self.new_project_dialog)
         self.open_action.triggered.connect(self.open_project_dialog)
         self.save_action.triggered.connect(self.save_active)
@@ -801,15 +740,6 @@ class MainWindow(QMainWindow):
         self.data_column.currentIndexChanged.connect(self._update_data_chain)
         self.data_mode.toggled.connect(self._data_mode_changed)
         self.event_search.textChanged.connect(self._filter_events)
-        self.preview_next.clicked.connect(lambda: self._step_preview(1))
-        self.preview_previous.clicked.connect(lambda: self._step_preview(-1))
-        self.preview_first.clicked.connect(lambda: self._step_preview(-1, endpoint="first"))
-        self.preview_last.clicked.connect(lambda: self._step_preview(1, endpoint="last"))
-        self.preview_zoom_in.clicked.connect(lambda: self._scale_preview(1.2))
-        self.preview_zoom_out.clicked.connect(lambda: self._scale_preview(1 / 1.2))
-        self.preview_fit.clicked.connect(self.preview_image.fit_page)
-        self.preview_actual.clicked.connect(self.preview_image.actual_size)
-        self.preview_image.zoomChanged.connect(self._preview_zoom_changed)
 
     def load_session(self, session: ProjectSession) -> None:
         """Install an already opened session; useful to bootstrap and to test the UI."""
@@ -1390,6 +1320,10 @@ class MainWindow(QMainWindow):
         tab.zoomChanged.connect(self._zoom_changed)
         tab.previewResolutionRequested.connect(self._request_visible_preview_resolution)
         tab.previewRequested.connect(lambda item=tab: self._preview_requested(item))
+        tab.preview_first.clicked.connect(lambda: self._step_preview(-1, endpoint="first"))
+        tab.preview_previous.clicked.connect(lambda: self._step_preview(-1))
+        tab.preview_next.clicked.connect(lambda: self._step_preview(1))
+        tab.preview_last.clicked.connect(lambda: self._step_preview(1, endpoint="last"))
         tab.previewError.connect(lambda message: (self.statusBar().showMessage(message, 7000), self._add_events((Diagnostic("PREVIEW_ERROR", message),))))
         tab.modeRequested.connect(lambda mode, item=tab: self._request_mode(item, mode))
         tab.draftChanged.connect(lambda text, item=tab: self._draft_changed(item, text))
@@ -1426,10 +1360,6 @@ class MainWindow(QMainWindow):
             self.component_properties_group.show()
             self.element_properties_group.hide()
             self.status_zoom.setText("")
-            self._preview_render_key = None
-            self.preview_image.clear_frame(tr("ui.preview_select_component"))
-            self.preview_next.setEnabled(False)
-            self.preview_previous.setEnabled(False)
         else:
             self.undo_group.setActiveStack(tab.undo_stack)
             document = self.session.documents[tab.component_id]
@@ -1510,16 +1440,10 @@ class MainWindow(QMainWindow):
             if data is None and is_excel:
                 self.active_tab.preview_row_number = None
                 self.active_tab.canvas.clear_document()
-                self.preview_image.clear_frame(tr("ui.preview_no_data"))
                 self.statusBar().showMessage(tr("ui.mode_requires_validation"), 5000)
             elif is_excel and data is not None and not any(copies_for_mode(row, self.data_mode.mode) > 0 for row in data.rows):
                 self.active_tab.preview_row_number = None
                 self.active_tab.canvas.clear_document()
-                self.preview_image.clear_frame(tr("ui.preview_no_instances"))
-                self.preview_first.setEnabled(False)
-                self.preview_last.setEnabled(False)
-                self.preview_next.setEnabled(False)
-                self.preview_previous.setEnabled(False)
                 self.statusBar().showMessage(tr("ui.preview_no_instances"), 5000)
             else:
                 self._refresh_preview(self.active_tab)
@@ -1646,28 +1570,19 @@ class MainWindow(QMainWindow):
             tab.resolved_component = None
             active_component = document.model
             bindings_resolved = False
-            self.preview_first.setEnabled(False)
-            self.preview_last.setEnabled(False)
+            self._update_preview_navigation(tab)
         else:
             tab.resolved_component = None
             cached = self.controller.preview.cached_data(self.session.snapshot, tab.component_id, component=document.model)
             if cached is None:
                 tab.canvas.clear_document()
-                self.preview_image.clear_frame(tr("ui.preview_no_data"))
-                self.preview_first.setEnabled(False)
-                self.preview_last.setEnabled(False)
-                self.preview_next.setEnabled(False)
-                self.preview_previous.setEnabled(False)
+                self._update_preview_navigation(tab)
                 return False
             eligible = [row for row in cached.rows if copies_for_mode(row, self.data_mode.mode) > 0]
             if not eligible:
                 tab.preview_row_number = None
                 tab.canvas.clear_document()
-                self.preview_image.clear_frame(tr("ui.preview_no_instances"))
-                self.preview_first.setEnabled(False)
-                self.preview_last.setEnabled(False)
-                self.preview_next.setEnabled(False)
-                self.preview_previous.setEnabled(False)
+                self._update_preview_navigation(tab)
                 return False
             if tab.preview_row_number not in {row.row_number for row in eligible}:
                 tab.preview_row_number = eligible[0].row_number
@@ -1687,13 +1602,12 @@ class MainWindow(QMainWindow):
             tab.resolved_component = resolved.component
             active_component = resolved.component
             bindings_resolved = True
-        self._set_preview_request_identity(self.session.snapshot.root, tab.component_id, tab.preview_row_number)
         dpi = self._preview_dpi_for_visible_views(tab, active_component)
         tab.queue_preview(
             self.session, component=active_component, dpi=dpi, fit=fit,
             selected=selected, bindings_resolved=bindings_resolved,
         )
-        self.preview_image.setText(tr("ui.preview_preparing"))
+        self._update_preview_navigation(tab)
         return True
 
     def _step_preview(self, direction: int, *, endpoint: str | None = None) -> None:
@@ -1717,19 +1631,9 @@ class MainWindow(QMainWindow):
         self._populate_rows(data)
         self._refresh_preview(tab)
 
-    def _scale_preview(self, factor: float, *, fit: bool = False) -> None:
-        if fit:
-            self.preview_image.fit_page()
-        else:
-            self.preview_image.zoom_by(factor)
-
     def _preview_dpi_for_visible_views(self, tab: DocumentTab, component: ComponentDefinition) -> int:
-        demands = []
-        if tab.mode == "layout":
-            demands.append(tab.canvas.transform().m11() * tab.canvas.viewport().devicePixelRatioF())
-        if self.preview_dock.isVisible() and self.active_tab is tab:
-            demands.append(self.preview_image.transform().m11() * self.preview_image.viewport().devicePixelRatioF())
-        return tab._preview_dpi(component, max(demands, default=1.0), 1.0)
+        demand = tab.canvas.transform().m11() * tab.canvas.viewport().devicePixelRatioF() if tab.mode == "layout" else 1.0
+        return tab._preview_dpi(component, demand, 1.0)
 
     def _request_visible_preview_resolution(self) -> None:
         tab = self.active_tab
@@ -1743,50 +1647,27 @@ class MainWindow(QMainWindow):
         tab._preview_arguments = (snapshot, component, target_dpi, False, selected, bindings_resolved)
         tab.preview_timer.start()
 
-    def _preview_zoom_changed(self, _percent: int) -> None:
-        self._request_visible_preview_resolution()
-
-    def _set_preview_request_identity(self, root: Path, component_id: str, row_number: int | None) -> None:
-        identity = (root, component_id, row_number)
-        if self._preview_render_key is None or self._preview_render_key[:2] != identity[:2]:
-            self.preview_image.clear_frame(tr("ui.preview_preparing"))
-        self._preview_render_key = identity
-
     def _invalidate_preview_cache(self) -> None:
         if self.controller.preview is not None and self.session is not None:
             self.controller.preview.invalidate(self.session.snapshot.root)
-        self._preview_render_key = None
-        self.preview_image.clear_frame(tr("ui.preview_preparing"))
         self._validate_all()
 
-    def _display_preview_frame(self, component_id: str, image, row_number: int | None) -> None:
-        tab = self.active_tab
-        if tab is None or tab.component_id != component_id:
-            return
-        if self.session is None:
-            return
-        self._preview_render_key = (self.session.snapshot.root, component_id, row_number)
-        if tab.resolved_component is not None:
-            self.preview_image.set_frame(image, tab.resolved_component)
-        self._update_preview_navigation()
-
-    def _update_preview_navigation(self) -> None:
-        tab = self.active_tab
+    def _update_preview_navigation(self, tab: DocumentTab | None = None) -> None:
+        tab = tab or self.active_tab
         data = None
         if self.session is not None and tab is not None and self.controller.preview is not None:
             data = self.controller.preview.cached_data(self.session.snapshot, tab.component_id)
         if data is None or tab is None or tab.resolved_component is None:
-            self.preview_first.setEnabled(False)
-            self.preview_last.setEnabled(False)
-            self.preview_next.setEnabled(False)
-            self.preview_previous.setEnabled(False)
+            if tab is not None:
+                for button in (tab.preview_first, tab.preview_previous, tab.preview_next, tab.preview_last):
+                    button.setEnabled(False)
             return
         eligible = [row for row in data.rows if copies_for_mode(row, self.data_mode.mode) > 0]
         index = next((i for i, row in enumerate(eligible) if row.row_number == tab.preview_row_number), -1)
-        self.preview_previous.setEnabled(index > 0)
-        self.preview_next.setEnabled(0 <= index < len(eligible) - 1)
-        self.preview_first.setEnabled(index > 0)
-        self.preview_last.setEnabled(0 <= index < len(eligible) - 1)
+        tab.preview_previous.setEnabled(index > 0)
+        tab.preview_next.setEnabled(0 <= index < len(eligible) - 1)
+        tab.preview_first.setEnabled(index > 0)
+        tab.preview_last.setEnabled(0 <= index < len(eligible) - 1)
 
     @staticmethod
     def _preview_font_families(component: ComponentDefinition) -> set[str]:
@@ -1852,7 +1733,7 @@ class MainWindow(QMainWindow):
             if error is None and self.active_tab is tab:
                 image, quality = result
                 if tab.apply_preview(image, quality, generation=request.generation):
-                    self._display_preview_frame(request.component_id, image, request.row_number)
+                    self._update_preview_navigation(tab)
                     self._update_selected_image_quality(tab)
                     diagnostics = self._preview_quality_diagnostics(request, quality)
                     fingerprint = tuple((item.node_id, item.source, item.message, item.cell) for item in diagnostics)
@@ -1865,7 +1746,6 @@ class MainWindow(QMainWindow):
                                 6000,
                             )
             elif error is not None and self.active_tab is tab and tab.fail_preview(str(error.diagnostic) if isinstance(error, ProjectError) else str(error), generation=request.generation):
-                self.preview_image.setText(tr("ui.preview_failed"))
                 self.event_list.setCurrentRow(self.event_list.count() - 1)
                 self.event_list.setFocus()
             elif self.active_tab is not tab:
@@ -2541,9 +2421,33 @@ class MainWindow(QMainWindow):
         if node is not None:
             self._apply_tree("Изменить блокировку элемента", update_node, node_id, locked=not node.node.locked, selected=(node_id,))
 
-    def _layer_drop(self, ids: object, target_id: str) -> None:
+    def _layer_drop(self, model, ids: object, target_id: str | None, position) -> None:
+        tab = self.active_tab
+        if tab is None or model is not self.element_tree.model() or self.session is None:
+            return
         selected = tuple(ids)
-        self._apply_tree("Перетащить слой", place_nodes, selected, target_id, selected=selected)
+        parent_id = None
+        sibling_id = None
+        before = False
+        if target_id is not None:
+            index = locations(self.session.documents[tab.component_id].model).get(target_id)
+            if index is None:
+                return
+            if position == LayerTreeView.DropIndicatorPosition.OnItem and isinstance(index.node, GroupNode):
+                parent_id = target_id
+            else:
+                parent_id = index.parent_id
+                sibling_id = target_id
+                before = position == LayerTreeView.DropIndicatorPosition.BelowItem
+        self._apply_tree(
+            "Перетащить слой",
+            drop_nodes,
+            selected,
+            parent_id,
+            sibling_id,
+            before=before,
+            selected=selected,
+        )
 
     def group_selected(self, group_id: str | None = None, name: str | None = None) -> bool:
         ids = self._selected_ids()

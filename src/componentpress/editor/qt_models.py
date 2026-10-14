@@ -19,7 +19,7 @@ TYPE_ROLE = int(Qt.ItemDataRole.UserRole) + 2
 class LayerTreeView(QTreeView):
     """Layer tree whose drag is interpreted by the document model."""
 
-    layerDropRequested = Signal(object, str)
+    layerDropRequested = Signal(object, object, object, object)
     lockToggleRequested = Signal(str)
 
     def __init__(self, parent=None):
@@ -58,13 +58,19 @@ class LayerTreeView(QTreeView):
         target = self.indexAt(event.position().toPoint())
         target_id = target.data(ID_ROLE) if target.isValid() else None
         ids = tuple(index.data(ID_ROLE) for index in self.selectionModel().selectedRows(0))
-        if target_id and ids:
+        position = self.dropIndicatorPosition()
+        if ids and (target_id or position == QAbstractItemView.DropIndicatorPosition.OnViewport):
+            model = self.model()
             event.setDropAction(Qt.DropAction.CopyAction)
             event.accept()
             # Rebuilding the model inside QAbstractItemView.dropEvent leaves
             # its internal source indexes dangling.  Apply after the gesture
             # has fully unwound instead.
-            QTimer.singleShot(0, lambda: self.layerDropRequested.emit(ids, target_id))
+            QTimer.singleShot(
+                0,
+                lambda: self.layerDropRequested.emit(model, ids, target_id, position)
+                if self.model() is model else None,
+            )
         else:
             event.ignore()
 

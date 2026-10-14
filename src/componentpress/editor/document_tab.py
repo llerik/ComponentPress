@@ -91,6 +91,24 @@ class DocumentTab(QWidget):
             button.setIconSize(QSize(22, 22))
             controls.addWidget(button)
         self.layout_mode.setChecked(True)
+        self.preview_first = QPushButton()
+        self.preview_previous = QPushButton()
+        self.preview_next = QPushButton()
+        self.preview_last = QPushButton()
+        for button, icon, label in (
+            (self.preview_first, "begin.png", tr("ui.preview_first")),
+            (self.preview_previous, "left.png", tr("ui.preview_previous")),
+            (self.preview_next, "right.png", tr("ui.preview_next")),
+            (self.preview_last, "end.png", tr("ui.preview_last")),
+        ):
+            button.setIcon(load_icon(icon))
+            button.setIconSize(QSize(22, 22))
+            button.setFixedSize(34, 34)
+            button.setToolTip(label)
+            button.setAccessibleName(label)
+            button.setEnabled(False)
+            controls.addWidget(button)
+        self.instance_controls = (self.preview_first, self.preview_previous, self.preview_next, self.preview_last)
         controls.addStretch()
         minus = QPushButton()
         minus.setObjectName("zoomOut")
@@ -171,7 +189,7 @@ class DocumentTab(QWidget):
         self.pages.setCurrentIndex(1 if text else 0)
         self.text_mode.setChecked(text)
         self.layout_mode.setChecked(not text)
-        for widget in self.zoom_controls:
+        for widget in (*self.instance_controls, *self.zoom_controls):
             widget.setVisible(not text)
 
     def set_text(self, text: str) -> None:

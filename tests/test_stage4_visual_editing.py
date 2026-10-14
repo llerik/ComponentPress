@@ -11,6 +11,7 @@ from componentpress.bootstrap import project_service
 from componentpress.domain.component import ComponentDefinition, SizeMM
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode
 from componentpress.domain.tree import (
+    drop_nodes,
     group_nodes,
     locations,
     move_nodes,
@@ -20,7 +21,7 @@ from componentpress.domain.tree import (
 )
 from componentpress.editor.controllers import ProjectController
 from componentpress.editor.main_window import MainWindow
-from componentpress.editor.qt_models import ID_ROLE
+from componentpress.editor.qt_models import ID_ROLE, LayerTreeView
 from componentpress.project_io.repository import FileProjectRepository
 from componentpress.project_io.yaml_codec import dump_yaml, parse_component, update_tree
 from componentpress.rendering import render_component
@@ -70,6 +71,20 @@ def test_layer_drop_changes_storage_order_used_by_painter() -> None:
     component = simple_component()
     changed = place_nodes(component, ("back",), "other")
     assert [node.id for node in changed.elements] == ["front", "back", "other"]
+
+
+def test_drop_into_group_preserves_world_position_and_sibling_drop_sets_order() -> None:
+    component = simple_component()
+    grouped = group_nodes(component, ("back", "front"), "pair", "Пара")
+    moved = drop_nodes(grouped, ("other",), "pair")
+    index = locations(moved)
+    assert index["other"].parent_id == "pair"
+    assert (index["other"].global_x, index["other"].global_y) == (1, 2)
+
+    below = drop_nodes(component, ("back",), None, "other", before=True)
+    above = drop_nodes(component, ("back",), None, "other", before=False)
+    assert [node.id for node in below.elements] == ["front", "back", "other"]
+    assert [node.id for node in above.elements] == ["front", "other", "back"]
 
 
 def test_grouping_keeps_comments_attached_to_moved_nodes(tmp_path: Path) -> None:
@@ -196,7 +211,7 @@ def test_layer_tree_uses_non_destructive_drop_mode(tmp_path: Path, qtbot, monkey
     window, _root = editor(tmp_path, qtbot)
     assert window.element_tree.dragDropMode() == QAbstractItemView.DragDropMode.DragDrop
     assert window.element_tree.defaultDropAction() == Qt.DropAction.CopyAction
-    before = set(locations(window.session.documents["forest-card"].model))
+    before = locations(window.session.documents["forest-card"].model)
     source = window._index_for_id("leaf-art")
     target = window._index_for_id("text-group")
     window.element_tree.selectionModel().select(
@@ -205,6 +220,11 @@ def test_layer_tree_uses_non_destructive_drop_mode(tmp_path: Path, qtbot, monkey
         | window.element_tree.selectionModel().SelectionFlag.Rows,
     )
     target_center = window.element_tree.visualRect(target).center()
+    monkeypatch.setattr(
+        window.element_tree,
+        "dropIndicatorPosition",
+        lambda: LayerTreeView.DropIndicatorPosition.OnItem,
+    )
     event = QDropEvent(
         QPointF(target_center),
         Qt.DropAction.CopyAction | Qt.DropAction.MoveAction,
@@ -216,9 +236,85 @@ def test_layer_tree_uses_non_destructive_drop_mode(tmp_path: Path, qtbot, monkey
     # The presentation model is never edited by Qt itself during the drop.
     assert window._index_for_id("leaf-art").isValid()
     qtbot.wait(1)
-    after = set(locations(window.session.documents["forest-card"].model))
-    assert after == before
+    after = locations(window.session.documents["forest-card"].model)
+    assert after["leaf-art"].parent_id == "text-group"
+    assert (after["leaf-art"].global_x, after["leaf-art"].global_y) == (
+        before["leaf-art"].global_x,
+        before["leaf-art"].global_y,
+    )
     assert window._index_for_id("leaf-art").isValid()
+    assert window.active_tab.undo_stack.canUndo()
+    window.active_tab.undo_stack.undo()
+    assert locations(window.session.documents["forest-card"].model)["leaf-art"].parent_id == before["leaf-art"].parent_id
+    window.active_tab.undo_stack.redo()
+    assert locations(window.session.documents["forest-card"].model)["leaf-art"].parent_id == "text-group"
+
+
+def test_deferred_layer_drop_is_discarded_after_switching_models(tmp_path: Path, qtbot, monkeypatch) -> None:
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Discard))
+    window, _root = editor(tmp_path, qtbot)
+    tab = window.active_tab
+    assert tab is not None
+    original = window.session.documents[tab.component_id].model
+    assert window.add_component("second", "Вторая карта")
+    second_tab = window.active_tab
+    assert second_tab is not None
+    window.controller.update_component("second", elements=original.elements)
+    window.tabs.setCurrentWidget(tab)
+    source = window._index_for_id("leaf-art")
+    target = window._index_for_id("text-group")
+    window.element_tree.selectionModel().select(
+        source,
+        window.element_tree.selectionModel().SelectionFlag.ClearAndSelect
+        | window.element_tree.selectionModel().SelectionFlag.Rows,
+    )
+    monkeypatch.setattr(
+        window.element_tree,
+        "dropIndicatorPosition",
+        lambda: LayerTreeView.DropIndicatorPosition.OnItem,
+    )
+    center = window.element_tree.visualRect(target).center()
+    event = QDropEvent(
+        QPointF(center), Qt.DropAction.CopyAction | Qt.DropAction.MoveAction,
+        QMimeData(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    )
+    before_original = window.session.documents[tab.component_id].model
+    before_second = window.session.documents[second_tab.component_id].model
+    history_index = tab.undo_stack.index()
+    window.element_tree.dropEvent(event)
+    window.tabs.setCurrentWidget(second_tab)
+    qtbot.wait(1)
+    assert window.session.documents[tab.component_id].model == before_original
+    assert window.session.documents[second_tab.component_id].model == before_second
+    assert tab.undo_stack.index() == history_index
+
+
+def test_drop_outside_group_moves_element_to_root(tmp_path: Path, qtbot, monkeypatch) -> None:
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Discard))
+    window, _root = editor(tmp_path, qtbot)
+    tab = window.active_tab
+    assert tab is not None
+    component = window.session.documents[tab.component_id].model
+    source_id = "caption"
+    assert locations(component)[source_id].parent_id is not None
+    source = window._index_for_id(source_id)
+    window.element_tree.selectionModel().select(
+        source,
+        window.element_tree.selectionModel().SelectionFlag.ClearAndSelect
+        | window.element_tree.selectionModel().SelectionFlag.Rows,
+    )
+    monkeypatch.setattr(
+        window.element_tree,
+        "dropIndicatorPosition",
+        lambda: LayerTreeView.DropIndicatorPosition.OnViewport,
+    )
+    event = QDropEvent(
+        QPointF(-5, -5), Qt.DropAction.CopyAction | Qt.DropAction.MoveAction,
+        QMimeData(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    )
+    window.element_tree.dropEvent(event)
+    qtbot.wait(1)
+    assert locations(window.session.documents[tab.component_id].model)[source_id].parent_id is None
 
 
 def test_one_shot_tool_is_cancelled_by_escape_and_tab_switch(tmp_path: Path, qtbot, monkeypatch) -> None:

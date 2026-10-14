@@ -184,18 +184,18 @@ def test_preview_first_and_last_follow_filtered_excel_rows(make_editor, qtbot):
     eligible = [row.row_number for row in data.rows if row.test_copies > 0]
     assert len(eligible) >= 2
 
-    assert not window.preview_first.isEnabled()
-    window.preview_last.click()
+    assert not tab.preview_first.isEnabled()
+    tab.preview_last.click()
     assert tab.preview_row_number == eligible[-1]
     assert window.data_row.currentData() == eligible[-1]
     qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
-    assert not window.preview_last.isEnabled() and window.preview_first.isEnabled()
+    assert not tab.preview_last.isEnabled() and tab.preview_first.isEnabled()
 
-    window.preview_first.click()
+    tab.preview_first.click()
     assert tab.preview_row_number == eligible[0]
     assert window.data_row.currentData() == eligible[0]
     qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
-    assert not window.preview_first.isEnabled() and window.preview_last.isEnabled()
+    assert not tab.preview_first.isEnabled() and tab.preview_last.isEnabled()
     assert not errors
 
 

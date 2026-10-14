@@ -374,6 +374,34 @@ def reparent_nodes(component: ComponentDefinition, node_ids: Iterable[str], new_
     return _refresh_frames(_replace_children(result, new_parent_id, (*parent_nodes(result, new_parent_id), *moved)))
 
 
+def drop_nodes(
+    component: ComponentDefinition,
+    node_ids: Iterable[str],
+    new_parent_id: str | None,
+    target_id: str | None = None,
+    *,
+    before: bool = True,
+) -> ComponentDefinition:
+    """Reparent nodes and place them before/after a sibling in document order."""
+    ids = tuple(dict.fromkeys(node_ids))
+    if target_id in ids:
+        return component
+    result = reparent_nodes(component, ids, new_parent_id)
+    if target_id is None:
+        return result
+
+    siblings = list(parent_nodes(result, new_parent_id))
+    moved = [node for node in siblings if node.id in ids]
+    if len(moved) != len(ids):
+        raise TreeOperationError("не все элементы можно перенести в выбранный уровень")
+    remaining = [node for node in siblings if node.id not in ids]
+    position = next((i for i, node in enumerate(remaining) if node.id == target_id), None)
+    if position is None:
+        raise TreeOperationError("целевой элемент не найден на выбранном уровне")
+    remaining[position + (not before):position + (not before)] = moved
+    return _refresh_frames(_replace_children(result, new_parent_id, tuple(remaining)))
+
+
 def _is_effectively_locked(component: ComponentDefinition, node_id: str) -> bool:
     index = locations(component)
     item = index[node_id]

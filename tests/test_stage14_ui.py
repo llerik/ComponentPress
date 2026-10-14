@@ -206,7 +206,7 @@ def test_project_settings_action_tracks_project_and_tab_state(tmp_path: Path, qt
 def test_window_menu_actions_toggle_panels_and_sync_close_button(tmp_path: Path, qtbot) -> None:
     root, window, service = make_window(tmp_path, qtbot)
     actions = window.windows_menu.actions()
-    assert [action.text() for action in actions] == ["Инструменты", "Рабочие панели", "События", "Превью"]
+    assert [action.text() for action in actions] == ["Рабочие панели", "События"]
     assert all(action.isCheckable() for action in actions)
     window.controller.set_session(None)
     window._update_project_visibility()
@@ -215,8 +215,7 @@ def test_window_menu_actions_toggle_panels_and_sync_close_button(tmp_path: Path,
     assert all(action.isEnabled() for action in actions)
 
     for action, dock, area in zip(actions, window.docks, (
-        Qt.DockWidgetArea.LeftDockWidgetArea, Qt.DockWidgetArea.RightDockWidgetArea,
-        Qt.DockWidgetArea.BottomDockWidgetArea, Qt.DockWidgetArea.BottomDockWidgetArea,
+        Qt.DockWidgetArea.RightDockWidgetArea, Qt.DockWidgetArea.BottomDockWidgetArea,
     )):
         dock.hide()
         action.trigger()
@@ -229,7 +228,7 @@ def test_window_menu_actions_toggle_panels_and_sync_close_button(tmp_path: Path,
         dock.hide()
         assert not action.isChecked()
 
-    window.toolbox_dock.hide()
+    window.events_dock.hide()
     window.ui_state.save(window)
     window._update_project_visibility()
     restored = MainWindow(ProjectController(project_service()))
@@ -238,10 +237,19 @@ def test_window_menu_actions_toggle_panels_and_sync_close_button(tmp_path: Path,
     qtbot.addWidget(restored)
     restored.load_session(project_service().open_session(root))
     restored.show()
-    assert not restored.toolbox_dock.isVisible()
-    restored.toolbox_dock.toggleViewAction().trigger()
-    assert restored.toolbox_dock.isVisible()
-    assert restored.dockWidgetArea(restored.toolbox_dock) == Qt.DockWidgetArea.LeftDockWidgetArea
+    assert not restored.events_dock.isVisible()
+    assert not hasattr(restored, "toolbox_dock")
+    assert not hasattr(restored, "preview_dock")
+
+
+def test_quick_settings_action_opens_project_settings(tmp_path: Path, qtbot, monkeypatch) -> None:
+    _root, window, _service = make_window(tmp_path, qtbot)
+    opened = []
+    monkeypatch.setattr(ProjectSettingsDialog, "exec", lambda dialog: opened.append(dialog._project_root))
+
+    window.project_settings_action.trigger()
+
+    assert opened == [window.session.snapshot.root]
 
 
 def test_menu_popup_renders_native_window_contents_with_effects_disabled(tmp_path: Path, qtbot) -> None:
@@ -544,10 +552,11 @@ def test_loading_excel_project_reports_bad_component_and_keeps_other_validation(
     assert not window.events_dock.isHidden()
     tab = window.open_component("forest-card")
     assert tab is not None
-    assert window.preview_image.text() == "Проверьте данные Excel, чтобы увидеть экземпляры"
+    assert not tab.preview_first.isEnabled()
+    assert not tab.preview_next.isEnabled()
 
 
-def test_loading_excel_project_with_no_prod_instances_keeps_preview_message(tmp_path: Path, qtbot) -> None:
+def test_loading_excel_project_with_no_prod_instances_disables_instance_navigation(tmp_path: Path, qtbot) -> None:
     from openpyxl import load_workbook
     from componentpress.bootstrap import project_controller
 
@@ -568,7 +577,8 @@ def test_loading_excel_project_with_no_prod_instances_keeps_preview_message(tmp_
     tab = window.open_component("forest-card")
 
     assert tab is not None
-    assert window.preview_image.text() == "В выбранном режиме нет экземпляров"
+    assert not tab.preview_first.isEnabled()
+    assert not tab.preview_next.isEnabled()
     assert window.controller.preview.cached_data(window.session.snapshot, "forest-card") is not None
     assert not any("VALIDATION_ERROR" in window.event_list.item(i).text() for i in range(window.event_list.count()))
 
@@ -605,14 +615,20 @@ def test_compact_shell_has_icon_tools_and_project_docks(tmp_path: Path, qtbot) -
     assert window.right_tabs.tabText(0) == "Компоненты"
     assert window.right_tabs.tabText(1) == "Элементы"
     assert window.events_dock.isVisible()
-    assert window.preview_dock.isVisible()
+    assert len(window.icon_toolbar.actions()) == 16
+    assert sum(action.isSeparator() for action in window.icon_toolbar.actions()) == 2
+    assert window.project_settings_action in window.quick_toolbar.actions()
+    assert window.project_settings_action not in window.icon_toolbar.actions()
+    assert all(action.text() not in {"Инструменты", "Превью"} for action in window.windows_menu.actions())
+    assert not hasattr(window, "toolbox_dock")
+    assert not hasattr(window, "preview_dock")
     assert window.select_tool.icon().isNull() is False
     assert window.select_tool.text() == ""
     assert window.select_tool.toolTip() == "Выбор"
     assert window.about_menu.title() == "О программе"
 
 
-def test_command_and_preview_buttons_use_the_assigned_png_icons(tmp_path: Path, qtbot) -> None:
+def test_command_and_instance_buttons_use_the_assigned_png_icons(tmp_path: Path, qtbot) -> None:
     _root, window, _service = make_window(tmp_path, qtbot)
     assets = Path(__file__).resolve().parents[1] / "src" / "componentpress" / "app_assets"
 
@@ -627,10 +643,7 @@ def test_command_and_preview_buttons_use_the_assigned_png_icons(tmp_path: Path, 
     action_icons = {
         window.project_settings_action: "settings.png", window.add_component_action: "add.png",
         window.save_action: "save.png", window.undo_action: "undo.png", window.redo_action: "redo.png",
-        window.delete_action: "remove.png", window.group_action: "group.png", window.ungroup_action: "ungroup.png",
-        window.zoom_in_action: "zoom_in.png", window.zoom_out_action: "zoom_out.png", window.fit_action: "by_screen.png",
-        window.validate_active_action: "validate.png", window.validate_all_action: "validate_all.png",
-        window.build_active_action: "build.png", window.build_all_action: "build_all.png",
+        window.delete_action: "remove.png", window.actual_size_action: "real_size.png",
     }
     for action, filename in action_icons.items():
         assert matches_asset(action.icon(), filename), (action.text(), filename)
@@ -650,27 +663,31 @@ def test_command_and_preview_buttons_use_the_assigned_png_icons(tmp_path: Path, 
     assert window.clear_events.text() == "Очистить"
     assert window.add_component_button.text() == ""
 
-    preview_icons = (
-        (window.preview_first, "begin.png", "Первый экземпляр"),
-        (window.preview_previous, "left.png", "Предыдущий"),
-        (window.preview_next, "right.png", "Следующий"),
-        (window.preview_last, "end.png", "Последний экземпляр"),
-        (window.preview_zoom_in, "zoom_in.png", "Увеличить"),
-        (window.preview_zoom_out, "zoom_out.png", "Уменьшить"),
-        (window.preview_fit, "by_screen.png", "По размеру"),
-        (window.preview_actual, "real_size.png", "Масштаб 100% (96 логических DPI)"),
+    tab = window.open_component("forest-card")
+    assert tab is not None
+    instance_icons = (
+        (tab.preview_first, "begin.png", "Первый экземпляр"),
+        (tab.preview_previous, "left.png", "Предыдущий"),
+        (tab.preview_next, "right.png", "Следующий"),
+        (tab.preview_last, "end.png", "Последний экземпляр"),
     )
-    for button, filename, label in preview_icons:
+    for button, filename, label in instance_icons:
         assert matches_asset(button.icon(), filename)
         assert button.text() == ""
         assert button.toolTip() == label
         assert button.accessibleName() == label
         assert button.iconSize() == QSize(22, 22)
-
-    tab = window.open_component("forest-card")
-    assert tab is not None
+    assert not tab.preview_first.isHidden()
+    tab.set_mode("text")
+    assert all(button.isHidden() for button in tab.instance_controls)
+    tab.set_mode("layout")
+    assert all(not button.isHidden() for button in tab.instance_controls)
     assert matches_asset(tab.layout_mode.icon(), "brick.png")
     assert matches_asset(tab.text_mode.icon(), "code.png")
+
+    settings_action = window.project_settings_action
+    assert settings_action in window.quick_toolbar.actions()
+    assert settings_action.icon().isNull() is False
 
 
 def test_component_creation_and_deletion_round_trip_preserves_draft_and_tab(tmp_path: Path, qtbot, monkeypatch) -> None:

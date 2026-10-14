@@ -70,9 +70,10 @@ def test_editor_panels_and_dynamic_controls_use_english_catalog(tmp_path: Path, 
         root.mkdir()
         _root, window, _service = make_window(root, qtbot)
         assert window.image_manager_action.text() == "Project images…"
-        assert window.preview_image.text() == "Select a component and validate its data"
-        assert window.preview_first.toolTip() == "First instance"
-        assert window.preview_first.accessibleName() == "First instance"
+        tab = window.open_component("forest-card")
+        assert tab is not None
+        assert tab.preview_first.toolTip() == "First instance"
+        assert tab.preview_first.accessibleName() == "First instance"
         assert window.data_insert.text() == "Insert Column"
         assert window.add_component_button.accessibleName() == "Add component"
         assert window.undo_action.text() == "Undo"

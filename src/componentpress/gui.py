@@ -82,13 +82,17 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     window.load_session(window.controller.open(root))
     if window.session is None:
         return _smoke_failure(root, inspect.currentframe().f_lineno)
-    expected_docks = {"Инструменты", "Рабочие панели", "События", "Превью"}
+    expected_docks = {"Рабочие панели", "События"}
     if (
         not window.project_settings_action.isEnabled()
         or window.delete_component_action.isEnabled()
         or not window.windows_menu.menuAction().isEnabled()
         or {action.text() for action in window.windows_menu.actions()} != expected_docks
         or any(not action.isCheckable() for action in window.windows_menu.actions())
+        or hasattr(window, "toolbox_dock")
+        or hasattr(window, "preview_dock")
+        or window.project_settings_action not in window.quick_toolbar.actions()
+        or window.project_settings_action in window.icon_toolbar.actions()
         or format_error(Exception()).strip() == ""
         or format_error(Exception("   ")).strip() == ""
     ):
