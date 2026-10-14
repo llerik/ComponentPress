@@ -1,9 +1,10 @@
 """Component properties shown for an active document."""
 
 import math
+import re
 
 from PySide6.QtCore import QSignalBlocker, QSize, Qt, Signal
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtGui import QColor, QFontDatabase, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -132,7 +133,11 @@ class ElementProperties(QWidget):
         self.width_spin = self._number("elementWidth", 0.001, 10000.0)
         self.height_spin = self._number("elementHeight", 0.001, 10000.0)
         self.rotation_spin = self._number("elementRotation", -360000.0, 360000.0)
+        self.rotation_spin.setDecimals(1)
+        self.rotation_spin.setSingleStep(0.1)
         self.rotation_spin.setSuffix("°")
+        self._rotation_initial_value = 0.0
+        self._rotation_text_edited = False
         self.optional_image = QCheckBox("Изображение может отсутствовать")
         self.optional_image.setObjectName("optionalImage")
         self.source_edit = QLineEdit()
@@ -177,25 +182,37 @@ class ElementProperties(QWidget):
         self.font_spin.setSingleStep(0.1)
         self.color_edit = QLineEdit()
         self.color_edit.setObjectName("htmlColor")
-        self.color_edit.setReadOnly(True)
-        self.color_button = QPushButton("Выбрать цвет…")
-        self.color_button.setObjectName("htmlColorPicker")
+        self.color_edit.setMaxLength(9)
+        self.color_edit.setFixedWidth(self.color_edit.fontMetrics().horizontalAdvance("#AARRGGBB") + 18)
+        self.color_swatch = QPushButton()
+        self.color_swatch.setObjectName("htmlColorPicker")
+        self.color_swatch.setFixedSize(28, 28)
+        self.color_swatch.setAccessibleName("Выбрать цвет текста")
+        self.color_swatch.setToolTip("Выбрать цвет текста")
         self.color_widget = QWidget()
         color_row = QHBoxLayout(self.color_widget)
         color_row.setContentsMargins(0, 0, 0, 0)
-        color_row.addWidget(self.color_edit, 1)
-        color_row.addWidget(self.color_button)
+        color_row.setSpacing(6)
+        color_row.addWidget(self.color_swatch)
+        color_row.addWidget(self.color_edit)
         self.alignment_group = QButtonGroup(self)
         self.alignment_group.setExclusive(True)
         self.alignment_buttons: dict[str, QPushButton] = {}
         alignment_widget = QWidget()
         alignment_row = QHBoxLayout(alignment_widget)
         alignment_row.setContentsMargins(0, 0, 0, 0)
-        for value, label in (("left", "Слева"), ("center", "По центру"), ("right", "Справа")):
-            button = QPushButton(label)
+        from componentpress.app_assets import load_icon
+
+        for value, label, icon in (("left", "Слева", "format_align_left.png"), ("center", "По центру", "format_align_center.png"), ("right", "Справа", "format_align_right.png")):
+            button = QPushButton()
             button.setObjectName(f"htmlAlign{value.title()}")
             button.setCheckable(True)
             button.setProperty("alignment", value)
+            button.setIcon(load_icon(icon))
+            button.setIconSize(QSize(20, 20))
+            button.setFixedSize(32, 32)
+            button.setToolTip(label)
+            button.setAccessibleName(label)
             self.alignment_group.addButton(button)
             self.alignment_buttons[value] = button
             alignment_row.addWidget(button)
@@ -265,7 +282,8 @@ class ElementProperties(QWidget):
         outer.addLayout(buttons)
         for spin in (self.x_spin, self.y_spin, self.width_spin, self.height_spin, self.stroke_width, self.line_dx, self.line_dy):
             spin.editingFinished.connect(self._geometry_changed)
-        self.rotation_spin.editingFinished.connect(lambda: self.rotationRequested.emit(self.rotation_spin.value()))
+        self.rotation_spin.editingFinished.connect(self._commit_rotation)
+        self.rotation_spin.lineEdit().textEdited.connect(self._rotation_text_was_edited)
         self.optional_image.toggled.connect(lambda value: self.nodeChanged.emit({"optional": value}))
         self.name_edit.editingFinished.connect(lambda: self.nodeChanged.emit({"name": self.name_edit.text()}))
         self.source_edit.editingFinished.connect(lambda: self.nodeChanged.emit({"source": self.source_edit.text()}))
@@ -281,8 +299,8 @@ class ElementProperties(QWidget):
         self.fit_combo.currentTextChanged.connect(lambda value: self.nodeChanged.emit({"fit": value}))
         self.font_combo.currentTextChanged.connect(lambda value: self.nodeChanged.emit({"font_family": value}))
         self.font_spin.editingFinished.connect(lambda: self.nodeChanged.emit({"font_size_pt": self.font_spin.value()}))
-        self.color_edit.editingFinished.connect(lambda: self.nodeChanged.emit({"color": self.color_edit.text()}))
-        self.color_button.clicked.connect(lambda: self.colorRequested.emit(self.color_edit.text()))
+        self.color_edit.editingFinished.connect(self._commit_html_color)
+        self.color_swatch.clicked.connect(lambda: self.colorRequested.emit(self.color_edit.text()))
         self.lock_button.toggled.connect(lambda checked: self.nodeChanged.emit({"locked": checked}))
         self.fill_button.clicked.connect(lambda: self.colorRequested.emit("shapeFill"))
         self.stroke_button.clicked.connect(lambda: self.colorRequested.emit("shapeStroke"))
@@ -319,6 +337,37 @@ class ElementProperties(QWidget):
         if self.stroke_width.isVisible():
             changes["stroke_width_mm"] = self.stroke_width.value()
         self.nodeChanged.emit(changes)
+
+    def _rotation_text_was_edited(self, _text: str) -> None:
+        self._rotation_text_edited = True
+
+    def _commit_rotation(self) -> None:
+        if self._rotation_text_edited or self.rotation_spin.value() != self._rotation_initial_value:
+            self.rotationRequested.emit(self.rotation_spin.value())
+        self._rotation_text_edited = False
+        self._rotation_initial_value = self.rotation_spin.value()
+
+    def _commit_html_color(self) -> None:
+        value = self.color_edit.text().upper()
+        if not re.fullmatch(r"#[0-9A-F]{6}(?:[0-9A-F]{2})?", value):
+            value = getattr(self, "_html_color", "#111111")
+        self._html_color = value
+        self.color_edit.setText(value)
+        self._update_html_color_swatch(value)
+        if value != getattr(self, "_node_color", value):
+            self.nodeChanged.emit({"color": value})
+
+    def _update_html_color_swatch(self, value: str) -> None:
+        pixmap = QPixmap(24, 24)
+        painter = QPainter(pixmap)
+        for y in range(0, 24, 6):
+            for x in range(0, 24, 6):
+                color = Qt.GlobalColor.white if (x // 6 + y // 6) % 2 else Qt.GlobalColor.lightGray
+                painter.fillRect(x, y, 6, 6, color)
+        painter.fillRect(0, 0, 24, 24, QColor(value))
+        painter.end()
+        self.color_swatch.setIcon(QIcon(pixmap))
+        self.color_swatch.setIconSize(QSize(24, 24))
 
     def _condition_operator_changed(self, _index: int) -> None:
         operator = self.condition_operator.currentData()
@@ -369,6 +418,8 @@ class ElementProperties(QWidget):
         self.form.setRowVisible(self.width_spin, sized)
         self.form.setRowVisible(self.height_spin, sized)
         self.rotation_spin.setValue(math.degrees(math.atan2(node.transform.m21, node.transform.m11)) % 360)
+        self._rotation_initial_value = self.rotation_spin.value()
+        self._rotation_text_edited = False
         self.form.setRowVisible(self.rotation_spin, True)
         line = isinstance(node, LineNode)
         shape = isinstance(node, ShapeNode)
@@ -469,7 +520,10 @@ class ElementProperties(QWidget):
             self.font_combo.setCurrentText(node.font_family if self.font_combo.findText(node.font_family) >= 0 else f"{node.font_family} (недоступен)")
             self.font_combo.setToolTip("Семейство будет сохранено без автоматической замены" if self.font_combo.currentIndex() == 0 and "(недоступен)" in self.font_combo.currentText() else "")
             self.font_spin.setValue(node.font_size_pt)
-            self.color_edit.setText(node.color)
+            self._node_color = node.color.upper()
+            self._html_color = self._node_color
+            self.color_edit.setText(self._node_color)
+            self._update_html_color_swatch(self._node_color)
             self.html_edit.setPlainText(node.html)
             for value, button in self.alignment_buttons.items():
                 button.setChecked(node.text_align == value)
@@ -483,7 +537,7 @@ class ElementProperties(QWidget):
             self.condition_column, self.condition_operator, self.condition_value, self.optional_image, self.stroke_button, self.fill_button, self.no_fill_button,
             self.stroke_width, self.stroke_style, self.line_dx, self.line_dy,
             self.source_edit, self.fit_combo, self.content_mode, self.content_column,
-            self.font_combo, self.font_spin, self.color_edit, self.color_button,
+            self.font_combo, self.font_spin, self.color_edit, self.color_swatch,
             self.html_edit, self.insert_image, self.apply_html,
             *self.alignment_buttons.values(),
         ):

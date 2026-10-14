@@ -74,7 +74,7 @@ def main() -> int:
             smoke_project,
             ignore=shutil.ignore_patterns("output", "archive", ".componentpress"),
         )
-        environment = os.environ.copy()
+        environment = build_environment.copy()
         environment.pop("PYTHONHOME", None)
         environment.pop("PYTHONPATH", None)
         try:

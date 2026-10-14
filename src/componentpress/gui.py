@@ -22,6 +22,7 @@ from componentpress.app_assets import load_application_icon
 from componentpress.editor import MainWindow
 from componentpress.diagnostics import logging as technical_log
 from componentpress.i18n import language as current_language, set_language, validate_catalogs
+from componentpress.version import APPLICATION_VERSION
 
 
 def _smoke_failure(root: Path, line: int) -> bool:
@@ -51,7 +52,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
         technical_log.create_report(report_path, status="failed", phase="rendering", mode="test")
         with zipfile.ZipFile(report_path) as report:
             support = json.loads(report.read("report.json"))
-            if support["runtime"]["version"] != "0.16" or (expected_log_root and "session.log" not in report.namelist()):
+            if support["runtime"]["version"] != APPLICATION_VERSION or (expected_log_root and "session.log" not in report.namelist()):
                 return _smoke_failure(root, inspect.currentframe().f_lineno)
             if "session.log" in report.namelist() and str(root).encode("utf-8") in report.read("session.log"):
                 return _smoke_failure(root, inspect.currentframe().f_lineno)
@@ -66,7 +67,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
             about_checks.append(False)
             return
         labels = [label.text() for label in dialog.findChildren(QLabel)]
-        about_checks.append(any("GNU GPL" in label for label in labels) and any("0.16" in label for label in labels))
+        about_checks.append(any("GNU GPL" in label for label in labels) and any(APPLICATION_VERSION in label for label in labels))
         dialog.reject()
 
     QTimer.singleShot(0, inspect_about)

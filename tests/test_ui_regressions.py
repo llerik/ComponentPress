@@ -231,42 +231,32 @@ def selected_node(window):
     return locations(model)[window._selected_ids()[0]].node
 
 
-def test_work_panel_width_limit_survives_float_restore_and_resize(make_editor, qtbot):
-    window, _root, _errors = make_editor()
-    maximum = window.screen().geometry().width() // 2
-    assert window.right_dock.maximumWidth() == maximum
-    window.right_dock.setFloating(True)
-    window.right_dock.resize(maximum + 200, 500)
-    qtbot.waitUntil(lambda: window.right_dock.width() <= maximum)
-    window.ui_state.save(window)
-    window.ui_state.restore(window)
-    window.right_dock.setFloating(False)
-    window.resize(900, 650)
-    qtbot.wait(20)
-    assert window.right_dock.maximumWidth() == maximum
-    assert window.right_dock.width() <= maximum
-
-
-def test_floating_work_panel_uses_its_own_screen_and_tracks_screen_changed(make_editor, qtbot, monkeypatch):
+def test_work_panel_can_grow_without_screen_limit_and_restore_its_size(make_editor, qtbot):
     window, _root, _errors = make_editor()
     dock = window.right_dock
+    assert dock.width() <= 360
+    assert dock.maximumWidth() > window.screen().geometry().width()
+    assert window.right_panel.minimumWidth() == 0 or window.right_panel.minimumWidth() <= 180
     dock.setFloating(True)
-    qtbot.waitUntil(lambda: window._right_dock_handle is dock.windowHandle())
-    screen_width = [1000]
+    target = window.screen().geometry().width() // 2 + 120
+    dock.resize(target, 500)
+    qtbot.waitUntil(lambda: dock.width() >= target)
+    saved_width = dock.width()
+    window.ui_state.save(window)
+    dock.resize(220, 500)
+    window.ui_state.restore(window)
+    qtbot.waitUntil(lambda: abs(dock.width() - saved_width) <= 4)
+    assert dock.maximumWidth() > window.screen().geometry().width()
 
-    class AlternateScreen:
-        def geometry(self):
-            return QRect(0, 0, screen_width[0], 800)
 
-    monkeypatch.setattr(dock, "screen", lambda: AlternateScreen())
-    dock.windowHandle().screenChanged.emit(window.screen())
-    assert dock.maximumWidth() == 500
-    screen_width[0] = 1400
-    dock.windowHandle().screenChanged.emit(window.screen())
-    assert dock.maximumWidth() == 700
-    dock.setFloating(False)
-    qtbot.waitUntil(lambda: window._right_dock_handle is None)
-    assert dock.maximumWidth() == window.screen().geometry().width() // 2
+def test_work_panel_can_grow_past_previous_limit_when_docked(make_editor, qtbot):
+    window, _root, _errors = make_editor()
+    dock = window.right_dock
+    target = window.screen().geometry().width() // 2 + 80
+    dock.setMinimumWidth(target)
+    qtbot.waitUntil(lambda: dock.width() >= target)
+    assert dock.width() > window.screen().geometry().width() // 2
+    assert dock.maximumWidth() > window.screen().geometry().width()
 
 
 def test_malformed_project_font_reports_error_and_cancels_html_placement(make_editor):
@@ -498,6 +488,84 @@ def test_alignment_label_is_hidden_with_unsupported_elements(qtbot):
         label = properties.form.labelForField(properties.alignment_widget)
         assert label.isVisible() == (node.type == "html")
         assert properties.alignment_widget.isVisible() == (node.type == "html")
+
+
+def test_html_color_swatch_keeps_alpha_and_accepts_editable_hex(qtbot):
+    properties = ElementProperties()
+    qtbot.addWidget(properties)
+    node = text_node(color="#80123456")
+    properties.show_node(node)
+    changes = []
+    picked = []
+    properties.nodeChanged.connect(changes.append)
+    properties.colorRequested.connect(picked.append)
+    assert not properties.color_edit.isReadOnly()
+    assert properties.color_edit.maxLength() == 9
+    assert properties.color_edit.width() >= properties.color_edit.fontMetrics().horizontalAdvance("#AARRGGBB")
+    assert not properties.color_swatch.icon().isNull()
+    properties.color_swatch.click()
+    assert picked == ["#80123456"]
+    properties.color_edit.setText("#2468AC80")
+    properties.color_edit.editingFinished.emit()
+    assert changes == [{"color": "#2468AC80"}]
+    assert properties.color_edit.text() == "#2468AC80"
+    properties.show_node(text_node(color="#2468AC80"))
+    properties.color_edit.setText("#NOTHEX")
+    properties.color_edit.editingFinished.emit()
+    assert changes == [{"color": "#2468AC80"}]
+    assert properties.color_edit.text() == "#2468AC80"
+    assert not properties.color_swatch.icon().isNull()
+
+
+def test_rotation_precision_does_not_round_model_when_field_is_untouched(qtbot):
+    properties = ElementProperties()
+    qtbot.addWidget(properties)
+    properties.show_node(text_node(transform={"m11": 0.8, "m12": -0.6, "m21": 0.6, "m22": 0.8}))
+    requested = []
+    properties.rotationRequested.connect(requested.append)
+    assert properties.rotation_spin.decimals() == 1
+    assert properties.rotation_spin.singleStep() == pytest.approx(0.1)
+    properties.rotation_spin.editingFinished.emit()
+    assert requested == []
+    properties.rotation_spin.setValue(properties.rotation_spin.value() + 0.1)
+    properties.rotation_spin.editingFinished.emit()
+    assert requested == [pytest.approx(37.0)]
+
+
+def test_text_alignment_uses_existing_icons_with_accessible_names(qtbot):
+    properties = ElementProperties()
+    qtbot.addWidget(properties)
+    properties.show_node(text_node())
+    expected = {"left": "format_align_left.png", "center": "format_align_center.png", "right": "format_align_right.png"}
+    for value, filename in expected.items():
+        button = properties.alignment_buttons[value]
+        assert not button.text()
+        assert button.toolTip()
+        assert button.accessibleName() == button.toolTip()
+        assert matches_icon(button.icon(), filename)
+
+
+def test_html_swatch_palette_updates_alpha_color_and_undo(make_editor, qtbot, monkeypatch):
+    window, _root, errors = make_editor()
+    assert window.add_html("<p>Text</p>", 2, 2, node_id="text")
+    properties = window.element_properties
+    swatch = properties.findChild(QPushButton, "htmlColorPicker")
+    assert swatch is not None and not swatch.text()
+    original_swatch = swatch.icon().pixmap(24, 24).toImage()
+    chosen = QColor("#802468AC")
+    monkeypatch.setattr(QColorDialog, "getColor", staticmethod(lambda *a, **kw: chosen))
+    swatch.click()
+    assert selected_node(window).color == "#802468AC"
+    assert properties.color_edit.text() == "#802468AC"
+    changed_swatch = swatch.icon().pixmap(24, 24).toImage()
+    assert changed_swatch != original_swatch
+    window.active_tab.undo_stack.undo()
+    assert properties.color_edit.text() == "#111111"
+    assert swatch.icon().pixmap(24, 24).toImage() == original_swatch
+    window.active_tab.undo_stack.redo()
+    assert properties.color_edit.text() == "#802468AC"
+    assert swatch.icon().pixmap(24, 24).toImage() == changed_swatch
+    assert not errors
 
 
 def matches_icon(icon, filename):

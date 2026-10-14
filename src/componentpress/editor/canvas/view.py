@@ -39,29 +39,12 @@ class NodeOverlay(QGraphicsRectItem):
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         super().paint(painter, option, widget)
-        if self.isSelected():
-            transform = painter.transform()
-            scale = max(0.1, ((transform.m11() ** 2 + transform.m12() ** 2) ** 0.5))
-            size = 8.0 / scale
-            for point in self.handle_points():
-                painter.fillRect(QRectF(point.x() - size / 2, point.y() - size / 2, size, size), QColor("#0B78D0"))
 
     def handle_points(self) -> tuple[QPointF, ...]:
         rect = self.rect()
         x1, y1, x2, y2 = rect.left(), rect.top(), rect.right(), rect.bottom()
         xm, ym = (x1 + x2) / 2, (y1 + y2) / 2
         return tuple(QPointF(x, y) for x, y in ((x1,y1),(xm,y1),(x2,y1),(x2,ym),(x2,y2),(xm,y2),(x1,y2),(x1,ym)))
-
-    def handle_at(self, scene_point: QPointF, tolerance: float) -> int | None:
-        point = self.mapFromScene(scene_point)
-        local_tolerance = tolerance / max(0.05, min(abs(self.transform().m11()), abs(self.transform().m22())))
-        candidates = [
-            (index, (point.x() - handle.x()) ** 2 + (point.y() - handle.y()) ** 2)
-            for index, handle in enumerate(self.handle_points())
-            if abs(point.x() - handle.x()) <= local_tolerance and abs(point.y() - handle.y()) <= local_tolerance
-        ]
-        return min(candidates, key=lambda item: item[1])[0] if candidates else None
-
 
 class ComponentCanvas(QGraphicsView):
     zoomChanged = Signal(int)
@@ -88,6 +71,7 @@ class ComponentCanvas(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         self._has_image = False
         self._pixmap_item: QGraphicsPixmapItem | None = None
+        self._preview_pixels: QImage | None = None
         self._component: ComponentDefinition | None = None
         self._overlays: dict[str, NodeOverlay] = {}
         self._tool: str | None = None
@@ -150,6 +134,7 @@ class ComponentCanvas(QGraphicsView):
         self._overlays.clear()
         self.scene().clear()
         self._pixmap_item = self.scene().addPixmap(QPixmap.fromImage(image))
+        self._preview_pixels = image
         self._pixmap_item.setTransform(QTransform.fromScale(
             component.size_mm.width * 96.0 / 25.4 / self._pixmap_item.boundingRect().width(),
             component.size_mm.height * 96.0 / 25.4 / self._pixmap_item.boundingRect().height(),
@@ -230,6 +215,7 @@ class ComponentCanvas(QGraphicsView):
                 self._overlays[node_id].setSelected(True)
         scene.setSceneRect(self._pixmap_item.sceneBoundingRect().adjusted(-24, -24, 24, 24))
         self._syncing_selection = False
+        self.viewport().update()
 
     def set_image(self, image: QImage, *, fit: bool = False) -> None:
         """Compatibility helper for image-only callers."""
@@ -238,6 +224,7 @@ class ComponentCanvas(QGraphicsView):
         self._overlays.clear()
         self._component = None
         self._pixmap_item = scene.addPixmap(QPixmap.fromImage(image))
+        self._preview_pixels = image
         scene.setSceneRect(self._pixmap_item.boundingRect().adjusted(-24, -24, 24, 24))
         first = not self._has_image
         self._has_image = True
@@ -249,11 +236,13 @@ class ComponentCanvas(QGraphicsView):
         for node_id, item in self._overlays.items():
             item.setSelected(node_id in node_ids)
         self._syncing_selection = False
+        self.viewport().update()
 
     def clear_document(self) -> None:
         self.scene().clear()
         self._overlays.clear()
         self._pixmap_item = None
+        self._preview_pixels = None
         self._component = None
         self._has_image = False
         self.selectionChanged.emit(())
@@ -264,6 +253,7 @@ class ComponentCanvas(QGraphicsView):
         if self._pixmap_item is not None and self._pixmap_item.scene() is self.scene():
             self.scene().removeItem(self._pixmap_item)
         self._pixmap_item = None
+        self._preview_pixels = None
         self._has_image = False
         self.viewport().update()
 
@@ -273,7 +263,50 @@ class ComponentCanvas(QGraphicsView):
 
     def _scene_selection_changed(self) -> None:
         if not self._syncing_selection:
+            self.viewport().update()
             self.selectionChanged.emit(self.selected_ids)
+
+    def _handle_centers(self, overlay: NodeOverlay) -> tuple[QPointF, ...]:
+        centers = tuple(self.mapFromScene(overlay.mapToScene(point)) for point in overlay.handle_points())
+        if any((a - b).manhattanLength() < 10 for i, a in enumerate(centers) for b in centers[i + 1:]):
+            offsets = ((-12, -12), (0, -12), (12, -12), (12, 0), (12, 12), (0, 12), (-12, 12), (-12, 0))
+            return tuple(QPointF(point.x() + dx, point.y() + dy) for point, (dx, dy) in zip(centers, offsets))
+        return tuple(QPointF(point) for point in centers)
+
+    def _handle_hit(self, overlay: NodeOverlay, viewport_point: QPointF) -> int | None:
+        if overlay.locked or not overlay.isSelected():
+            return None
+        candidates = [
+            (index, (center.x() - viewport_point.x()) ** 2 + (center.y() - viewport_point.y()) ** 2)
+            for index, center in enumerate(self._handle_centers(overlay))
+            if abs(center.x() - viewport_point.x()) <= 14 and abs(center.y() - viewport_point.y()) <= 14
+        ]
+        return min(candidates, key=lambda value: value[1])[0] if candidates else None
+
+    def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
+        super().drawForeground(painter, rect)
+        selected = [item for item in self._overlays.values() if item.isSelected() and not item.locked]
+        if not selected:
+            return
+        painter.save()
+        painter.resetTransform()
+        blue = QColor("#0B78D0")
+        for overlay in selected:
+            for center in self._handle_centers(overlay):
+                tile = QImage(8, 8, QImage.Format.Format_ARGB32)
+                tile.fill(blue)
+                if self._pixmap_item is not None and self._pixmap_item.isVisible() and self._preview_pixels is not None:
+                    dpr = self._pixmap_item.pixmap().devicePixelRatio()
+                    for y in range(8):
+                        for x in range(8):
+                            scene_point = self.mapToScene(round(center.x() + x - 4), round(center.y() + y - 4))
+                            local = self._pixmap_item.mapFromScene(scene_point)
+                            px, py = round(local.x() * dpr), round(local.y() * dpr)
+                            if 0 <= px < self._preview_pixels.width() and 0 <= py < self._preview_pixels.height():
+                                if self._preview_pixels.pixelColor(px, py) == blue:
+                                    tile.setPixelColor(x, y, QColor("white"))
+                painter.drawImage(QPointF(center.x() - 4, center.y() - 4), tile)
+        painter.restore()
 
     def _overlay_at(self, point: QPointF) -> NodeOverlay | None:
         overlays = [item for item in self.scene().items(point) if isinstance(item, NodeOverlay)]
@@ -302,6 +335,7 @@ class ComponentCanvas(QGraphicsView):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         point = self.mapToScene(event.position().toPoint())
+        viewport_point = event.position()
         if event.button() == Qt.MouseButton.LeftButton and self._tool is not None:
             tool = self._tool
             if not self._page_contains(point) or self._component is None or self._pixmap_item is None:
@@ -337,22 +371,37 @@ class ComponentCanvas(QGraphicsView):
         if event.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(event)
             return
-        item = self._overlay_at(point)
+        hit_overlay = None
+        hit_handle = None
+        nearest = (float("inf"), float("inf"))
+        for overlay in self._overlays.values():
+            index = self._handle_hit(overlay, viewport_point)
+            if index is None:
+                continue
+            center = self._handle_centers(overlay)[index]
+            distance = (center.x() - viewport_point.x()) ** 2 + (center.y() - viewport_point.y()) ** 2
+            candidate = (distance, -overlay.zValue())
+            if candidate < nearest:
+                nearest = candidate
+                hit_overlay, hit_handle = overlay, index
+        item = hit_overlay or self._overlay_at(point)
         if item is None:
             self.clear_selection()
             event.accept()
             return
         ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
         self._syncing_selection = True
-        if ctrl:
-            item.setSelected(not item.isSelected())
-        elif not item.isSelected():
-            self.scene().clearSelection()
-            item.setSelected(True)
+        if hit_overlay is not item:
+            if ctrl:
+                item.setSelected(not item.isSelected())
+            elif not item.isSelected():
+                self.scene().clearSelection()
+                item.setSelected(True)
         self._syncing_selection = False
         self.selectionChanged.emit(self.selected_ids)
+        self.viewport().update()
         selected = [overlay for overlay in self._overlays.values() if overlay.isSelected()]
-        self._resize_handle = item.handle_at(point, 10.0 / max(0.1, self.transform().m11())) if item.isSelected() else None
+        self._resize_handle = hit_handle if hit_overlay is item else self._handle_hit(item, viewport_point)
         if item.locked or (self._resize_handle is None and any(overlay.locked for overlay in selected)):
             self._drag_start = None
             self._drag_positions = {}
@@ -396,9 +445,11 @@ class ComponentCanvas(QGraphicsView):
             if handle in (0, 1, 2): rect.setTop(min(rect.bottom() - 1, rect.top() + dy))
             if handle in (4, 5, 6): rect.setBottom(max(rect.top() + 1, rect.bottom() + dy))
             overlay.setRect(rect)
+            self.viewport().update()
         else:
             for node_id, start in self._drag_positions.items():
                 self._overlays[node_id].setPos(start + delta)
+            self.viewport().update()
         event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -427,8 +478,8 @@ class ComponentCanvas(QGraphicsView):
             component_before = self._component
             node_id = self._resize_id
             handle = self._resize_handle
-            anchor_x = 1.0 if handle in (0, 1, 2) else 0.0 if handle in (4, 5, 6) else 0.5
-            anchor_y = 1.0 if handle in (0, 6, 7) else 0.0 if handle in (2, 3, 4) else 0.5
+            anchor_x = 1.0 if handle in (0, 6, 7) else 0.0 if handle in (2, 3, 4) else 0.5
+            anchor_y = 1.0 if handle in (0, 1, 2) else 0.0 if handle in (4, 5, 6) else 0.5
             width_mm, height_mm = rect.width() * sx, rect.height() * sy
             node = locations(self._component)[node_id].node
             if isinstance(node, LineNode):

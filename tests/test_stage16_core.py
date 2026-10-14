@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 from openpyxl import Workbook
-from PySide6.QtGui import QImage, QColor
-from PySide6.QtCore import QPointF
+from PySide6.QtGui import QImage, QColor, QPainter
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
 
 from componentpress.data_sources.xlsx_reader import XlsxReader
 from componentpress.domain.component import ComponentDefinition, SizeMM
@@ -72,7 +72,122 @@ def test_selected_canvas_node_exposes_eight_screen_space_handles(qtbot):
     overlay = canvas._overlays["shape"]
     assert isinstance(overlay, NodeOverlay)
     assert len(overlay.handle_points()) == 8
-    assert [overlay.handle_at(overlay.mapToScene(point), 10) for point in overlay.handle_points()] == list(range(8))
+    assert [canvas._handle_hit(overlay, QPointF(point)) for point in canvas._handle_centers(overlay)] == list(range(8))
+
+
+@pytest.mark.parametrize("handle,anchor", [(0,(1,1)), (1,(0.5,1)), (2,(0,1)), (3,(0,0.5)), (4,(0,0)), (5,(0.5,0)), (6,(1,0)), (7,(1,0.5))])
+def test_canvas_resize_handles_keep_the_opposite_anchor(handle, anchor, qtbot):
+    component = _component((ShapeNode(id="shape", name="Shape", type="rectangle", x_mm=20, y_mm=20,
+                                     width_mm=20, height_mm=30),), width=100, height=100)
+    canvas = ComponentCanvas()
+    qtbot.addWidget(canvas)
+    canvas.resize(600, 500)
+    canvas.show()
+    canvas.set_document(QImage(1000, 1000, QImage.Format.Format_ARGB32), component, selected=("shape",))
+    overlay = canvas._overlays["shape"]
+    requested = []
+    canvas.resizeRequested.connect(lambda *args: requested.append(args))
+    point = canvas._handle_centers(overlay)[handle].toPoint()
+    qtbot.mouseClick(canvas.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    assert requested[-1][0] == "shape"
+    assert requested[-1][3:] == pytest.approx(anchor)
+
+
+def test_resize_target_extends_ten_pixels_around_cube_and_uses_screen_space(qtbot):
+    node = ShapeNode(id="shape", name="Shape", type="rectangle", x_mm=20, y_mm=20, width_mm=20, height_mm=30,
+                     transform={"m11":0, "m12":-1, "m21":1, "m22":0})
+    canvas = ComponentCanvas()
+    qtbot.addWidget(canvas)
+    canvas.resize(600, 500)
+    canvas.show()
+    canvas.set_document(QImage(1000, 1000, QImage.Format.Format_ARGB32), _component((node,), width=100, height=100), selected=("shape",))
+    overlay = canvas._overlays["shape"]
+    center = canvas._handle_centers(overlay)[3].toPoint()
+    assert canvas._handle_hit(overlay, QPointF(center.x() + 13, center.y())) == 3
+    assert canvas._handle_hit(overlay, QPointF(center.x() + 15, center.y())) is None
+    middle = canvas.mapFromScene(overlay.mapToScene(overlay.rect().center()))
+    assert canvas._handle_hit(overlay, QPointF(middle)) is None
+
+
+def test_short_object_handle_cubes_remain_separately_clickable(qtbot):
+    canvas = ComponentCanvas()
+    qtbot.addWidget(canvas)
+    canvas.resize(600, 500)
+    overlay = NodeOverlay("short", False, False, QRectF(0, 0, 0.1, 0.1), 1)
+    canvas.scene().addItem(overlay)
+    overlay.setSelected(True)
+    centers = canvas._handle_centers(overlay)
+    assert all((a - b).manhattanLength() >= 8 for i, a in enumerate(centers) for b in centers[i + 1:])
+    assert [canvas._handle_hit(overlay, QPointF(center)) for center in centers] == list(range(8))
+
+
+def test_dragging_right_side_resizes_around_the_stationary_left_side(qtbot):
+    component = _component((ShapeNode(id="shape", name="Shape", type="rectangle", x_mm=20, y_mm=20,
+                                     width_mm=20, height_mm=30),), width=100, height=100)
+    canvas = ComponentCanvas()
+    qtbot.addWidget(canvas)
+    canvas.resize(600, 500)
+    canvas.show()
+    canvas.set_document(QImage(1000, 1000, QImage.Format.Format_ARGB32), component, selected=("shape",))
+    overlay = canvas._overlays["shape"]
+    requests = []
+    moves = []
+    canvas.resizeRequested.connect(lambda *args: requests.append(args))
+    canvas.moveRequested.connect(lambda *args: moves.append(args))
+    start = canvas._handle_centers(overlay)[3].toPoint()
+    end = start + QPoint(-12, 0)
+    qtbot.mousePress(canvas.viewport(), Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseMove(canvas.viewport(), pos=end)
+    qtbot.mouseRelease(canvas.viewport(), Qt.MouseButton.LeftButton, pos=end)
+    assert requests
+    assert requests[-1][3:] == pytest.approx((0.0, 0.5))
+    assert requests[-1][1] < 20
+    assert requests[-1][2] == pytest.approx(30)
+    assert not moves
+
+
+@pytest.mark.parametrize("color,expected", [("#0B78D0", "#FFFFFF"), ("#FFFFFF", "#0B78D0")])
+def test_resize_marker_contrasts_only_with_matching_preview(color, expected, qtbot):
+    canvas = ComponentCanvas()
+    qtbot.addWidget(canvas)
+    canvas.resize(600, 500)
+    canvas.show()
+    image = QImage(1000, 1000, QImage.Format.Format_ARGB32)
+    image.fill(QColor(color))
+    component = _component((ShapeNode(id="shape", name="Shape", type="rectangle", x_mm=20, y_mm=20,
+                                     width_mm=20, height_mm=30),), width=100, height=100)
+    canvas.set_document(image, component, selected=("shape",))
+    center = canvas._handle_centers(canvas._overlays["shape"])[0]
+    rendered = QImage(canvas.viewport().size(), QImage.Format.Format_ARGB32)
+    rendered.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(rendered)
+    canvas.drawForeground(painter, QRectF())
+    painter.end()
+    assert rendered.pixelColor(round(center.x()), round(center.y())) == QColor(expected)
+
+
+def test_resize_marker_whitens_only_its_overlap_with_matching_preview(qtbot):
+    image = QImage(1000, 1000, QImage.Format.Format_ARGB32)
+    image.fill(QColor("#FFFFFF"))
+    painter = QPainter(image)
+    painter.fillRect(200, 200, 800, 800, QColor("#0B78D0"))
+    painter.end()
+    component = _component((ShapeNode(id="shape", name="Shape", type="rectangle", x_mm=20, y_mm=20,
+                                     width_mm=20, height_mm=30),), width=100, height=100)
+    canvas = ComponentCanvas()
+    qtbot.addWidget(canvas)
+    canvas.resize(600, 500)
+    canvas.show()
+    canvas.set_document(image, component, selected=("shape",))
+    center = canvas._handle_centers(canvas._overlays["shape"])[0]
+    rendered = QImage(canvas.viewport().size(), QImage.Format.Format_ARGB32)
+    rendered.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(rendered)
+    canvas.drawForeground(painter, QRectF())
+    painter.end()
+    pixels = [rendered.pixelColor(round(center.x() - 4 + x), round(center.y() - 4 + y)) for y in range(8) for x in range(8)]
+    assert QColor("#FFFFFF") in pixels
+    assert QColor("#0B78D0") in pixels
 
 
 def test_excel_area_ignores_formatting_and_stops_at_first_empty_header_and_row(tmp_path):

@@ -101,7 +101,6 @@ class MainWindow(QMainWindow):
         self._active_build_job: str | None = None
         self._last_build_result: BuildResult | None = None
         self._build_progress: QProgressDialog | None = None
-        self._right_dock_handle = None
         self._close_after_build = False
         self._preview_pool = QThreadPool(self)
         self._preview_pool.setMaxThreadCount(1)
@@ -134,7 +133,6 @@ class MainWindow(QMainWindow):
         self._build_actions()
         self._build_ui()
         self.ui_state.restore(self)
-        self._limit_right_dock()
         self._suppress_docks()
         self._connect_signals()
         self._update_actions()
@@ -227,7 +225,6 @@ class MainWindow(QMainWindow):
         self.toolbox_dock.setObjectName("toolboxDock")
         self.right_dock = QDockWidget(tr("panel.workspace"), self)
         self.right_dock.setObjectName("rightDock")
-        self.right_dock.setMaximumWidth(max(1, self.screen().geometry().width() // 2))
         self.right_dock.setWidget(self.right_panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.right_dock)
         self.left_panel = self._left_panel()
@@ -243,6 +240,7 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.preview_dock)
         self.splitDockWidget(self.events_dock, self.preview_dock, Qt.Orientation.Horizontal)
         self.docks = (self.toolbox_dock, self.right_dock, self.events_dock, self.preview_dock)
+        self.resizeDocks([self.right_dock], [300], Qt.Orientation.Horizontal)
         self._saved_dock_visibility = {dock.objectName(): True for dock in self.docks}
         self._project_ui_visible = False
         for dock, area in zip(self.docks, (
@@ -535,8 +533,7 @@ class MainWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setWidget(panel)
-        scroll.setMinimumWidth(220)
-        scroll.setMaximumWidth(360)
+        scroll.setMinimumWidth(180)
         return scroll
 
     def _update_project_visibility(self) -> None:
@@ -725,54 +722,9 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._limit_right_dock()
         self._rescale_preview_frame()
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        handle = self.windowHandle()
-        if handle is not None and getattr(self, "_screen_handle", None) is not handle:
-            old_handle = getattr(self, "_screen_handle", None)
-            if old_handle is not None:
-                try:
-                    old_handle.screenChanged.disconnect(self._screen_changed)
-                except RuntimeError:
-                    pass
-            self._screen_handle = handle
-            handle.screenChanged.connect(self._screen_changed)
-        self._bind_right_dock_screen()
-        self._limit_right_dock()
-
-    def _screen_changed(self, _screen) -> None:
-        self._limit_right_dock()
-
-    def _right_dock_top_level_changed(self, _floating: bool) -> None:
-        QTimer.singleShot(0, self._bind_right_dock_screen)
-        self._limit_right_dock()
-
-    def _bind_right_dock_screen(self) -> None:
-        handle = self.right_dock.windowHandle() if self.right_dock.isFloating() else None
-        if handle is self._right_dock_handle:
-            return
-        if self._right_dock_handle is not None:
-            try:
-                self._right_dock_handle.screenChanged.disconnect(self._right_dock_screen_changed)
-            except RuntimeError:
-                pass
-        self._right_dock_handle = handle
-        if handle is not None:
-            handle.screenChanged.connect(self._right_dock_screen_changed)
-
-    def _right_dock_screen_changed(self, _screen) -> None:
-        self._limit_right_dock()
-
-    def _limit_right_dock(self) -> None:
-        screen = self.right_dock.screen() if self.right_dock.isFloating() else self.screen()
-        if screen is not None:
-            self.right_dock.setMaximumWidth(max(1, screen.geometry().width() // 2))
-
     def _connect_signals(self) -> None:
-        self.right_dock.topLevelChanged.connect(self._right_dock_top_level_changed)
         self.new_action.triggered.connect(self.new_project_dialog)
         self.open_action.triggered.connect(self.open_project_dialog)
         self.save_action.triggered.connect(self.save_active)
