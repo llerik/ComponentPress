@@ -295,7 +295,7 @@ class HtmlAddDialog(QDialog):
         self.font_size = QDoubleSpinBox()
         self.font_size.setRange(0.1, 1000)
         self.font_size.setDecimals(1)
-        self.font_size.setSingleStep(0.1)
+        self.font_size.setSingleStep(1.0)
         self.font_size.setValue(10)
         self.font_size.setObjectName("newHtmlFontSize")
         self.color = QLineEdit("#111111")

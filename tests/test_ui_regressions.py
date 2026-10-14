@@ -22,6 +22,7 @@ from componentpress.domain.values import CellValue, DataRow, DataSheetSnapshot
 from componentpress.editor.dialogs import HtmlAddDialog
 from componentpress.editor.main_window import MainWindow
 from componentpress.editor.canvas import ComponentCanvas
+from componentpress.editor.canvas import ComponentPreview
 from componentpress.editor.properties import ElementProperties
 from componentpress.editor.ui_state import UiState
 from componentpress.project_io.repository import FileProjectRepository
@@ -95,7 +96,61 @@ def test_image_overlay_uses_exact_millimetre_geometry_at_preview_dpi(tmp_path, d
     assert canvas._pixmap_item.sceneBoundingRect().getRect() == pytest.approx((0, 0, 30 * factor, 20 * factor))
 
 
-def test_pending_preview_hides_stale_raster_and_keeps_current_selection_interactive(make_editor, qtbot):
+def test_actual_size_uses_96_logical_dpi_and_preview_zoom_is_independent(tmp_path, qtbot):
+    ensure_gui_application()
+    value = snapshot(tmp_path, [])
+    component = value.documents["card"].model
+    image = QImage(227, 151, QImage.Format.Format_ARGB32)
+    image.fill(QColor("white"))
+    canvas = ComponentCanvas()
+    preview = ComponentPreview()
+    qtbot.addWidget(canvas)
+    qtbot.addWidget(preview)
+    canvas.set_document(image, component)
+    preview.set_frame(image, component)
+    canvas.actual_size()
+    preview.actual_size()
+    expected = 30 * 96 / 25.4
+    assert canvas.transform().m11() == pytest.approx(1.0)
+    assert preview.transform().m11() == pytest.approx(1.0)
+    assert canvas._pixmap_item.sceneBoundingRect().width() == pytest.approx(expected)
+    assert preview._pixmap_item.sceneBoundingRect().width() == pytest.approx(expected)
+    canvas.zoom_by(2)
+    assert canvas.transform().m11() == pytest.approx(2.0)
+    assert preview.transform().m11() == pytest.approx(1.0)
+    preview.zoom_by(1.5)
+    replacement = QImage(454, 302, QImage.Format.Format_ARGB32)
+    replacement.fill(QColor("red"))
+    preview.set_frame(replacement, component)
+    assert canvas.transform().m11() == pytest.approx(2.0)
+    assert preview.transform().m11() == pytest.approx(1.5)
+
+
+def test_canvas_hover_cursor_matches_resize_handle_and_move(make_editor, qtbot):
+    window, _root, errors = make_editor()
+    assert window.add_html("<p>Move</p>", 2, 2, node_id="cursor-node")
+    tab = window.active_tab
+    canvas = tab.canvas
+    canvas.show()
+    qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
+    canvas.select_ids(("cursor-node",))
+    overlay = canvas._overlays["cursor-node"]
+    expected = (
+        Qt.CursorShape.SizeFDiagCursor, Qt.CursorShape.SizeVerCursor,
+        Qt.CursorShape.SizeBDiagCursor, Qt.CursorShape.SizeHorCursor,
+        Qt.CursorShape.SizeFDiagCursor, Qt.CursorShape.SizeVerCursor,
+        Qt.CursorShape.SizeBDiagCursor, Qt.CursorShape.SizeHorCursor,
+    )
+    for index, center in enumerate(canvas._handle_centers(overlay)):
+        canvas._update_hover_cursor(center)
+        assert canvas.viewport().cursor().shape() == expected[index]
+    inside = canvas.mapFromScene(overlay.mapToScene(overlay.rect().center()))
+    canvas._update_hover_cursor(QPoint(inside))
+    assert canvas.viewport().cursor().shape() == Qt.CursorShape.SizeAllCursor
+    assert not errors
+
+
+def test_pending_preview_keeps_stale_raster_and_current_selection_interactive(make_editor, qtbot):
     window, _root, errors = make_editor()
     assert window.add_html("<p>Move</p>", 2, 2, node_id="move-me")
     tab = window.active_tab
@@ -107,12 +162,14 @@ def test_pending_preview_hides_stale_raster_and_keeps_current_selection_interact
         update={"elements": (moved,)}
     )
     generation = tab.queue_preview(window.session, component=component, selected=(node.id,))
-    assert not tab.canvas._pixmap_item.isVisible()
+    previous_item = tab.canvas._pixmap_item
+    assert previous_item.isVisible()
     assert tab.canvas.selected_ids == (node.id,)
     expected_x = moved.x_mm * 96 / 25.4
     assert tab.canvas._overlays[node.id].sceneBoundingRect().left() == pytest.approx(expected_x)
     assert tab.canvas._page_contains(tab.canvas._overlays[node.id].sceneBoundingRect().center())
     qtbot.waitUntil(lambda: tab.displayed_generation == generation, timeout=15000)
+    assert tab.canvas._pixmap_item is previous_item
     assert tab.canvas._pixmap_item.isVisible()
     assert not errors
 
@@ -155,14 +212,15 @@ def test_active_static_validation_ignores_missing_project_excel_and_checks_resou
 
 
 @pytest.mark.parametrize("changes", [{"height_mm": 0.1}, {"width_mm": 0.1}])
-def test_html_overflow_still_blocks_export_without_publishing(tmp_path, changes):
+def test_html_overflow_wraps_and_clips_without_aborting_render(tmp_path, changes):
     ensure_gui_application()
     value = snapshot(tmp_path, [text_node(**changes)])
     output = tmp_path / "overflow.png"
-    with pytest.raises(ProjectError) as caught:
-        render_component(value, "card", output, dpi=192)
-    assert caught.value.diagnostic.code == "TEXT_OVERFLOW"
-    assert not output.exists()
+    render_component(value, "card", output, dpi=192)
+    image = QImage(str(output))
+    assert not image.isNull()
+    assert image.width() == round(30 * 192 / 25.4)
+    assert image.height() == round(20 * 192 / 25.4)
 
 
 @pytest.mark.parametrize("nesting", ["root", "group", "conditional"])
@@ -288,7 +346,7 @@ def test_selecting_html_keeps_malformed_font_diagnostic_visible(make_editor, qtb
     assert not errors
 
 
-def test_html_creation_uses_font_list_and_palette_and_tenth_point_precision(make_editor, qtbot, monkeypatch):
+def test_html_creation_uses_font_list_and_palette_and_whole_point_step(make_editor, qtbot, monkeypatch):
     window, _root, errors = make_editor()
     chosen = QColor("#2468AC")
     monkeypatch.setattr(QColorDialog, "getColor", staticmethod(lambda *a, **kw: chosen))
@@ -299,7 +357,7 @@ def test_html_creation_uses_font_list_and_palette_and_tenth_point_precision(make
         assert font is not None and not font.isEditable() and font.count() > 0
         captured["font"] = font.currentText()
         assert dialog.font_size.decimals() == 1
-        assert dialog.font_size.singleStep() == pytest.approx(0.1)
+        assert dialog.font_size.singleStep() == pytest.approx(1.0)
         dialog.font_size.setValue(10.26)
         assert dialog.font_size.value() == pytest.approx(10.3)
         dialog.findChild(QPushButton, "newHtmlColorPicker").click()
@@ -353,7 +411,7 @@ def test_font_picker_registers_unused_project_font_and_releases_registration(tmp
     assert len(added) == 2 and removed == added
 
 
-def test_font_properties_use_tenth_points_without_editing_existing_document_on_selection(make_editor):
+def test_font_properties_use_whole_point_step_without_editing_existing_document_on_selection(make_editor):
     window, _root, errors = make_editor()
     assert window.add_html("<p>Text</p>", 2, 2, font_size_pt=10.26)
     before = window.session.documents["regression"].model
@@ -362,7 +420,7 @@ def test_font_properties_use_tenth_points_without_editing_existing_document_on_s
     assert window.session.documents["regression"].model == before
     assert window.active_tab.undo_stack.count() == count
     spin = window.element_properties.font_spin
-    assert spin.decimals() == 1 and spin.singleStep() == pytest.approx(0.1)
+    assert spin.decimals() == 1 and spin.singleStep() == pytest.approx(1.0)
     spin.setValue(11.26)
     spin.editingFinished.emit()
     assert selected_node(window).font_size_pt == pytest.approx(11.3)
@@ -389,13 +447,17 @@ def test_component_sheet_selection_updates_yaml_preview_and_undo(make_editor, qt
     assert not errors
 
 
-def test_column_html_cannot_be_edited_after_selection_or_lock_state_refresh(qtbot):
+def test_html_properties_switch_between_manual_and_excel_column_controls(qtbot):
     properties = ElementProperties()
     qtbot.addWidget(properties)
     properties.show()
     node = text_node(content_mode="column", content_column="Text")
     properties.show_node(node, columns=("Text",))
     properties.set_edit_locked(False)
+    column_label = properties.form.labelForField(properties.content_column)
+    assert column_label.isVisible() and properties.content_column.isVisible()
+    assert not properties.html_edit.isVisible()
+    assert not properties.apply_html.isVisible() and not properties.insert_image.isVisible()
     original = properties.html_edit.toPlainText()
     assert properties.html_edit.isReadOnly() or not properties.html_edit.isEnabled()
     assert not properties.apply_html.isEnabled()
@@ -403,6 +465,9 @@ def test_column_html_cannot_be_edited_after_selection_or_lock_state_refresh(qtbo
     qtbot.keyClicks(properties.html_edit, "must not be inserted")
     assert properties.html_edit.toPlainText() == original
     properties.content_mode.setCurrentIndex(properties.content_mode.findData("manual"))
+    assert not column_label.isVisible() and not properties.content_column.isVisible()
+    assert properties.html_edit.isVisible()
+    assert properties.apply_html.isVisible() and properties.insert_image.isVisible()
     assert properties.html_edit.isEnabled() and not properties.html_edit.isReadOnly()
     assert properties.apply_html.isEnabled() and properties.insert_image.isEnabled()
     properties.set_edit_locked(True)

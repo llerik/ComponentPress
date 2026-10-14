@@ -404,5 +404,7 @@
   "ui.default_html": "Text",
   "ui.select_html_column": "Select one HTML element and a column",
   "ui.column_binding_html": "Column bindings can be inserted into HTML elements",
-  "ui.operation_failed": "Could not complete the operation ({error})."
+  "ui.operation_failed": "Could not complete the operation ({error}).",
+  "ui.zoom_actual": "100% zoom (96 logical DPI)",
+  "ui.component_preview": "Component preview"
 }

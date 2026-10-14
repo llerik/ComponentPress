@@ -2,14 +2,40 @@
 
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QKeyEvent, QMouseEvent, QPainter, QPen, QPixmap, QTransform, QWheelEvent
+from PySide6.QtGui import QColor, QCursor, QImage, QKeyEvent, QMouseEvent, QPainter, QPen, QPixmap, QTransform, QWheelEvent
 from PySide6.QtWidgets import QFrame, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsScene, QGraphicsView, QGraphicsLineItem
 
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.nodes import GroupNode, LineNode, Node
 from componentpress.domain.geometry import Affine, local_bounds
 from componentpress.domain.tree import effectively_locked_ids, locations
+
+
+def _component_rect(width_mm: float, height_mm: float) -> QRectF:
+    return QRectF(0, 0, width_mm * 96.0 / 25.4, height_mm * 96.0 / 25.4)
+
+
+def _set_pixmap_component_geometry(item: QGraphicsPixmapItem, image: QImage, width_mm: float, height_mm: float) -> QRectF:
+    item.setPixmap(QPixmap.fromImage(image))
+    bounds = item.boundingRect()
+    target = _component_rect(width_mm, height_mm)
+    item.setTransform(QTransform.fromScale(target.width() / bounds.width(), target.height() / bounds.height()))
+    return target
+
+
+def _set_fit_scrollbars(view: QGraphicsView, fitting: bool) -> None:
+    policy = Qt.ScrollBarPolicy.ScrollBarAlwaysOff if fitting else Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    view.setHorizontalScrollBarPolicy(policy)
+    view.setVerticalScrollBarPolicy(policy)
+
+
+def _scale_view(view: QGraphicsView, factor: float) -> None:
+    current = view.transform().m11()
+    target = min(8.0, max(0.1, current * factor))
+    view.scale(target / current, target / current)
 
 
 class NodeOverlay(QGraphicsRectItem):
@@ -48,6 +74,7 @@ class NodeOverlay(QGraphicsRectItem):
 
 class ComponentCanvas(QGraphicsView):
     zoomChanged = Signal(int)
+    visualGestureFinished = Signal()
     selectionChanged = Signal(object)
     moveRequested = Signal(object, float, float)
     resizeRequested = Signal(str, float, float, float, float)
@@ -65,10 +92,14 @@ class ComponentCanvas(QGraphicsView):
         self.setBackgroundBrush(Qt.GlobalColor.lightGray)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
-        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        self.viewport().setMouseTracking(True)
+        self._fit_mode = True
+        self._fitting = False
+        self._deferred_model: tuple[ComponentDefinition, tuple[str, ...]] | None = None
         self._has_image = False
         self._pixmap_item: QGraphicsPixmapItem | None = None
         self._preview_pixels: QImage | None = None
@@ -107,7 +138,7 @@ class ComponentCanvas(QGraphicsView):
 
     def set_tool(self, tool: str | None) -> None:
         self._tool = tool
-        self.viewport().setCursor(Qt.CursorShape.CrossCursor if tool else Qt.CursorShape.ArrowCursor)
+        self._update_hover_cursor()
         if tool:
             self.clear_selection()
 
@@ -118,7 +149,9 @@ class ComponentCanvas(QGraphicsView):
             if self._draw_preview is not None and self._draw_preview.scene() is self.scene():
                 self.scene().removeItem(self._draw_preview)
             self._draw_preview = None
-            self.viewport().setCursor(Qt.CursorShape.ArrowCursor)
+            self._update_hover_cursor()
+            self._flush_deferred_model()
+            self.visualGestureFinished.emit()
             self.toolCancelled.emit()
 
     def set_document(
@@ -131,34 +164,35 @@ class ComponentCanvas(QGraphicsView):
     ) -> None:
         self._component = component
         self._syncing_selection = True
+        for overlay in tuple(self._overlays.values()):
+            self.scene().removeItem(overlay)
         self._overlays.clear()
-        self.scene().clear()
-        self._pixmap_item = self.scene().addPixmap(QPixmap.fromImage(image))
+        if self._pixmap_item is None:
+            self._pixmap_item = self.scene().addPixmap(QPixmap())
+            self._pixmap_item.setZValue(0)
         self._preview_pixels = image
-        self._pixmap_item.setTransform(QTransform.fromScale(
-            component.size_mm.width * 96.0 / 25.4 / self._pixmap_item.boundingRect().width(),
-            component.size_mm.height * 96.0 / 25.4 / self._pixmap_item.boundingRect().height(),
-        ))
-        self._pixmap_item.setZValue(0)
+        _set_pixmap_component_geometry(self._pixmap_item, image, component.size_mm.width, component.size_mm.height)
         self._sync_model_overlays(component, selected)
         scene = self.scene()
         scene.setSceneRect(self._pixmap_item.sceneBoundingRect().adjusted(-24, -24, 24, 24))
         first = not self._has_image
         self._has_image = True
-        if first or fit:
+        if first or fit or self._fit_mode:
             self.fit_page()
         else:
             self.zoomChanged.emit(self.zoom_percent)
 
     def set_component_model(self, component: ComponentDefinition, selected: tuple[str, ...] = ()) -> None:
         """Refresh hit targets and lock indicators even if preview rendering failed."""
+        if self._gesture_active:
+            self._deferred_model = (component, selected)
+            return
         self._component = component
         self._sync_model_overlays(component, selected)
         self.viewport().update()
 
     def set_preview_pending(self, pending: bool) -> None:
         if self._pixmap_item is not None:
-            self._pixmap_item.setVisible(not pending)
             self.viewport().update()
 
     def _sync_model_overlays(self, component: ComponentDefinition, selected: tuple[str, ...]) -> None:
@@ -264,6 +298,7 @@ class ComponentCanvas(QGraphicsView):
     def _scene_selection_changed(self) -> None:
         if not self._syncing_selection:
             self.viewport().update()
+            self._update_hover_cursor()
             self.selectionChanged.emit(self.selected_ids)
 
     def _handle_centers(self, overlay: NodeOverlay) -> tuple[QPointF, ...]:
@@ -276,12 +311,89 @@ class ComponentCanvas(QGraphicsView):
     def _handle_hit(self, overlay: NodeOverlay, viewport_point: QPointF) -> int | None:
         if overlay.locked or not overlay.isSelected():
             return None
+        if overlay.is_group and self._component is not None:
+            index = locations(self._component)
+            locked = effectively_locked_ids(self._component)
+            if any(
+                node_id in locked and self._is_descendant(index, node_id, overlay.node_id)
+                for node_id in index
+            ):
+                return None
         candidates = [
             (index, (center.x() - viewport_point.x()) ** 2 + (center.y() - viewport_point.y()) ** 2)
             for index, center in enumerate(self._handle_centers(overlay))
             if abs(center.x() - viewport_point.x()) <= 14 and abs(center.y() - viewport_point.y()) <= 14
         ]
         return min(candidates, key=lambda value: value[1])[0] if candidates else None
+
+    @staticmethod
+    def _is_descendant(index, node_id: str, ancestor_id: str) -> bool:
+        parent_id = index[node_id].parent_id
+        while parent_id is not None:
+            if parent_id == ancestor_id:
+                return True
+            parent_id = index[parent_id].parent_id
+        return False
+
+    @property
+    def _gesture_active(self) -> bool:
+        return self._drag_start is not None or self._draw_start is not None or self._nudge_key is not None
+
+    def _flush_deferred_model(self) -> None:
+        if self._deferred_model is None or self._gesture_active:
+            return
+        component, selected = self._deferred_model
+        self._deferred_model = None
+        still_present = tuple(node_id for node_id in self.selected_ids if node_id in locations(component))
+        self.set_component_model(component, still_present or selected)
+
+    def _cursor_for_handle(self, overlay: NodeOverlay, handle: int) -> Qt.CursorShape:
+        dx, dy = ((-1, -1), (0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0))[handle]
+        origin = overlay.mapToScene(QPointF())
+        transform = self.viewportTransform()
+        center = transform.map(origin)
+        x_axis = transform.map(overlay.mapToScene(QPointF(dx, 0))) - center if dx else QPointF()
+        y_axis = transform.map(overlay.mapToScene(QPointF(0, dy))) - center if dy else QPointF()
+        if x_axis.isNull():
+            direction = y_axis
+        elif y_axis.isNull():
+            direction = x_axis
+        else:
+            x_axis /= math.hypot(x_axis.x(), x_axis.y())
+            y_axis /= math.hypot(y_axis.x(), y_axis.y())
+            direction = x_axis + y_axis
+        angle = math.degrees(math.atan2(direction.y(), direction.x())) % 180
+        cursors = (
+            (0, Qt.CursorShape.SizeHorCursor),
+            (45, Qt.CursorShape.SizeFDiagCursor),
+            (90, Qt.CursorShape.SizeVerCursor),
+            (135, Qt.CursorShape.SizeBDiagCursor),
+        )
+        return min(cursors, key=lambda item: min(abs(angle - item[0]), 180 - abs(angle - item[0])))[1]
+
+    def _update_hover_cursor(self, point: QPointF | None = None) -> None:
+        if self._tool is not None:
+            self.viewport().setCursor(Qt.CursorShape.CrossCursor)
+            return
+        viewport_point = QPointF(point) if point is not None else QPointF(self.viewport().mapFromGlobal(QCursor.pos()))
+        cursor = Qt.CursorShape.ArrowCursor
+        best = (float("inf"), float("inf"))
+        for overlay in self._overlays.values():
+            handle = self._handle_hit(overlay, viewport_point)
+            if handle is None:
+                continue
+            center = self._handle_centers(overlay)[handle]
+            candidate = ((center - viewport_point).manhattanLength(), -overlay.zValue())
+            if candidate < best:
+                best = candidate
+                cursor = self._cursor_for_handle(overlay, handle)
+        if cursor == Qt.CursorShape.ArrowCursor:
+            item = self._overlay_at(self.mapToScene(viewport_point.toPoint()))
+            if item is not None and not item.locked:
+                selected = [overlay for overlay in self._overlays.values() if overlay.isSelected()]
+                if not item.isSelected() or not any(overlay.locked for overlay in selected):
+                    cursor = Qt.CursorShape.SizeAllCursor
+        self.viewport().setCursor(cursor)
 
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
         super().drawForeground(painter, rect)
@@ -421,6 +533,7 @@ class ComponentCanvas(QGraphicsView):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if (self._drag_start is None and self._draw_start is None) or not (event.buttons() & Qt.MouseButton.LeftButton):
+            self._update_hover_cursor(event.position())
             super().mouseMoveEvent(event)
             return
         point = self.mapToScene(event.position().toPoint())
@@ -464,6 +577,9 @@ class ComponentCanvas(QGraphicsView):
             self._draw_start = None
             if tool and (abs(end.x() - start.x()) > 0.01 or abs(end.y() - start.y()) > 0.01):
                 self.drawRequested.emit(tool, start.x() / sx, start.y() / sy, end.x() / sx, end.y() / sy)
+            self._flush_deferred_model()
+            self._update_hover_cursor(event.position())
+            self.visualGestureFinished.emit()
             event.accept()
             return
         if self._drag_start is None or self._component is None or self._pixmap_item is None:
@@ -508,6 +624,9 @@ class ComponentCanvas(QGraphicsView):
         self._resize_rect = None
         self._resize_handle = None
         self._resize_local_start = None
+        self._flush_deferred_model()
+        self._update_hover_cursor(event.position())
+        self.visualGestureFinished.emit()
         event.accept()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -579,6 +698,8 @@ class ComponentCanvas(QGraphicsView):
                 for node_id, start in starts.items():
                     if node_id in self._overlays:
                         self._overlays[node_id].setPos(start)
+        self._flush_deferred_model()
+        self.visualGestureFinished.emit()
 
     def focusOutEvent(self, event) -> None:
         self._finish_nudge()
@@ -587,22 +708,37 @@ class ComponentCanvas(QGraphicsView):
     def fit_page(self) -> None:
         if not self._has_image or self._pixmap_item is None:
             return
-        self.fitInView(self._pixmap_item.sceneBoundingRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self._fit_mode = True
+        _set_fit_scrollbars(self, True)
+        self._fitting = True
+        try:
+            self.fitInView(self._pixmap_item.sceneBoundingRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        finally:
+            self._fitting = False
         self.zoomChanged.emit(self.zoom_percent)
 
     def actual_size(self) -> None:
         if self._component is None:
             return
+        self._fit_mode = False
+        _set_fit_scrollbars(self, False)
         self.resetTransform()
+        if self._pixmap_item is not None:
+            self.centerOn(self._pixmap_item.sceneBoundingRect().center())
         self.zoomChanged.emit(100)
 
     def zoom_by(self, factor: float) -> None:
         if self._component is None:
             return
-        current = self.transform().m11()
-        target = min(8.0, max(0.1, current * factor))
-        self.scale(target / current, target / current)
+        self._fit_mode = False
+        _set_fit_scrollbars(self, False)
+        _scale_view(self, factor)
         self.zoomChanged.emit(self.zoom_percent)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._fit_mode and self._has_image and not self._fitting:
+            self.fit_page()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "componentpress"
-version = "0.16.2"
+dynamic = ["version"]
 description = "Редактор печатных компонентов настольных игр"
 requires-python = ">=3.14"
 dependencies = [
@@ -21,6 +21,9 @@ package = ["PyInstaller>=6.22,<7"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "componentpress.version.APPLICATION_VERSION"}
 
 [tool.setuptools.package-data]
 "componentpress.app_assets" = ["*.png"]

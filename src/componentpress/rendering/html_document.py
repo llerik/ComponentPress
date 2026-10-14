@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from PySide6.QtCore import QRectF, QSizeF, QUrl
-from PySide6.QtGui import QAbstractTextDocumentLayout, QColor, QFont, QImage, QPainter, QTextDocument
+from PySide6.QtGui import QAbstractTextDocumentLayout, QColor, QFont, QImage, QPainter, QTextDocument, QTextOption
 from PySide6.QtCore import Qt
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
@@ -55,6 +55,9 @@ def prepare_html(node: HtmlNode, html: str, loader: ProjectResourceLoader, owner
     font = QFont(node.font_family)
     font.setPointSizeF(node.font_size_pt)
     document.setDefaultFont(font)
+    option = document.defaultTextOption()
+    option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+    document.setDefaultTextOption(option)
     color = QColor(node.color)
     if not color.isValid():
         raise ProjectError(Diagnostic("COLOR_INVALID", "ожидается цвет #RRGGBB или #AARRGGBB", owner, f"elements.{node.id}.color"))
@@ -79,9 +82,4 @@ def prepare_html(node: HtmlNode, html: str, loader: ProjectResourceLoader, owner
     document.setHtml(html)
     document.setDocumentMargin(0)
     document.setPageSize(QSizeF(width_px, -1))
-    layout = document.documentLayout()
-    size = layout.documentSize()
-    # A small tolerance absorbs sub-pixel font metric rounding, not actual content.
-    if size.height() > height_px + 0.5 or document.idealWidth() > width_px + 0.5:
-        raise ProjectError(Diagnostic("TEXT_OVERFLOW", f"содержимое HTML ({size.width():.1f}×{size.height():.1f} px) не помещается в блок ({width_px:.1f}×{height_px:.1f} px)", owner, field))
     return PreparedHtml(document, metrics, width_px, height_px)

@@ -9,7 +9,7 @@ import hashlib
 
 from pydantic import ValidationError
 from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QSignalBlocker, QSize, QThreadPool, QTimer, Qt
-from PySide6.QtGui import QAction, QColor, QCloseEvent, QKeySequence, QUndoGroup, QPixmap
+from PySide6.QtGui import QAction, QColor, QCloseEvent, QKeySequence, QUndoGroup
 from PySide6.QtWidgets import (
     QApplication,
     QColorDialog,
@@ -88,6 +88,7 @@ from .component_dialog import ComponentDialog
 from .ui_state import UiState
 from .project_settings_dialog import ProjectSettingsDialog
 from .copy_mode_switch import CopyModeSwitch
+from .canvas import ComponentPreview
 from componentpress.i18n import language, set_language, tr
 from componentpress.diagnostics import logging as technical_log
 import zipfile
@@ -109,8 +110,7 @@ class MainWindow(QMainWindow):
         self._preview_signals.finished.connect(self._preview_task_finished, Qt.ConnectionType.QueuedConnection)
         self._preview_active: tuple[DocumentTab, PreviewRequest, ProjectFonts | None] | None = None
         self._preview_pending: DocumentTab | None = None
-        self._preview_frames: dict[tuple[str, int, int | None], object] = {}
-        self._preview_zoom = 1.0
+        self._preview_render_key: tuple[Path, str, int | None] | None = None
         self._build_retry_scheduled = False
         self._version_pool = QThreadPool(self)
         self._version_pool.setMaxThreadCount(1)
@@ -176,6 +176,7 @@ class MainWindow(QMainWindow):
         self.zoom_in_action = self._action(tr("action.zoom_in"), QKeySequence.StandardKey.ZoomIn)
         self.zoom_out_action = self._action(tr("action.zoom_out"), QKeySequence.StandardKey.ZoomOut)
         self.fit_action = self._action(tr("action.fit"), "Ctrl+0")
+        self.actual_size_action = self._action(tr("ui.zoom_actual"), "Ctrl+1")
         self.build_all_action = self._action(tr("action.build_all"), "Ctrl+B")
         self.build_active_action = self._action(tr("action.build_active"), "Ctrl+Shift+B")
         self.cancel_build_action = self._action(tr("action.cancel_build"))
@@ -412,11 +413,11 @@ class MainWindow(QMainWindow):
     def _preview_panel(self) -> QWidget:
         panel = QWidget()
         layout = QVBoxLayout(panel)
-        self.preview_image = QLabel(tr("ui.preview_initial"))
-        self.preview_image.setObjectName("previewImage")
-        self.preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_image = ComponentPreview()
+        self.preview_image.setAccessibleName(tr("ui.component_preview"))
         self.preview_image.setMinimumHeight(120)
         self.preview_image.setStyleSheet("background: palette(base); border: 1px solid palette(mid);")
+        self.preview_image.setText(tr("ui.preview_initial"))
         layout.addWidget(self.preview_image, 1)
         controls = QHBoxLayout()
         self.preview_previous = QPushButton()
@@ -428,6 +429,7 @@ class MainWindow(QMainWindow):
         self.preview_zoom_out = QPushButton()
         self.preview_zoom_in = QPushButton()
         self.preview_fit = QPushButton()
+        self.preview_actual = QPushButton()
         preview_icons = (
             (self.preview_first, "begin.png", tr("ui.preview_first")),
             (self.preview_previous, "left.png", tr("ui.preview_previous")),
@@ -435,7 +437,8 @@ class MainWindow(QMainWindow):
             (self.preview_last, "end.png", tr("ui.preview_last")),
             (self.preview_zoom_in, "zoom_in.png", tr("ui.preview_zoom_in")),
             (self.preview_zoom_out, "zoom_out.png", tr("ui.preview_zoom_out")),
-            (self.preview_fit, "real_size.png", tr("ui.fit")),
+            (self.preview_fit, "by_screen.png", tr("ui.fit")),
+            (self.preview_actual, "real_size.png", tr("ui.zoom_actual")),
         )
         for button, icon, label in preview_icons:
             button.setIcon(load_icon(icon))
@@ -458,6 +461,7 @@ class MainWindow(QMainWindow):
             self.save_action: "save.png", self.undo_action: "undo.png", self.redo_action: "redo.png",
             self.delete_action: "remove.png", self.group_action: "group.png", self.ungroup_action: "ungroup.png",
             self.zoom_in_action: "zoom_in.png", self.zoom_out_action: "zoom_out.png", self.fit_action: "by_screen.png",
+            self.actual_size_action: "real_size.png",
             self.validate_active_action: "validate.png", self.validate_all_action: "validate_all.png",
             self.build_active_action: "build.png", self.build_all_action: "build_all.png",
         }
@@ -723,9 +727,9 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._rescale_preview_frame()
 
     def _connect_signals(self) -> None:
+        self.preview_dock.visibilityChanged.connect(lambda _visible: self._request_visible_preview_resolution())
         self.new_action.triggered.connect(self.new_project_dialog)
         self.open_action.triggered.connect(self.open_project_dialog)
         self.save_action.triggered.connect(self.save_active)
@@ -755,6 +759,7 @@ class MainWindow(QMainWindow):
         self.zoom_in_action.triggered.connect(lambda: self._zoom_active(1.2))
         self.zoom_out_action.triggered.connect(lambda: self._zoom_active(1 / 1.2))
         self.fit_action.triggered.connect(lambda: self.active_tab and self.active_tab.canvas.fit_page())
+        self.actual_size_action.triggered.connect(lambda: self.active_tab and self.active_tab.canvas.actual_size())
         self.component_tree.doubleClicked.connect(self._open_component_index)
         self.component_tree.clicked.connect(self._open_component_index)
         self.tabs.currentChanged.connect(self._active_tab_changed)
@@ -802,7 +807,9 @@ class MainWindow(QMainWindow):
         self.preview_last.clicked.connect(lambda: self._step_preview(1, endpoint="last"))
         self.preview_zoom_in.clicked.connect(lambda: self._scale_preview(1.2))
         self.preview_zoom_out.clicked.connect(lambda: self._scale_preview(1 / 1.2))
-        self.preview_fit.clicked.connect(lambda: self._scale_preview(1.0, fit=True))
+        self.preview_fit.clicked.connect(self.preview_image.fit_page)
+        self.preview_actual.clicked.connect(self.preview_image.actual_size)
+        self.preview_image.zoomChanged.connect(self._preview_zoom_changed)
 
     def load_session(self, session: ProjectSession) -> None:
         """Install an already opened session; useful to bootstrap and to test the UI."""
@@ -1381,6 +1388,7 @@ class MainWindow(QMainWindow):
             return existing
         tab = DocumentTab(component_id)
         tab.zoomChanged.connect(self._zoom_changed)
+        tab.previewResolutionRequested.connect(self._request_visible_preview_resolution)
         tab.previewRequested.connect(lambda item=tab: self._preview_requested(item))
         tab.previewError.connect(lambda message: (self.statusBar().showMessage(message, 7000), self._add_events((Diagnostic("PREVIEW_ERROR", message),))))
         tab.modeRequested.connect(lambda mode, item=tab: self._request_mode(item, mode))
@@ -1418,9 +1426,8 @@ class MainWindow(QMainWindow):
             self.component_properties_group.show()
             self.element_properties_group.hide()
             self.status_zoom.setText("")
-            self._preview_source = None
-            self.preview_image.setPixmap(QPixmap())
-            self.preview_image.setText(tr("ui.preview_select_component"))
+            self._preview_render_key = None
+            self.preview_image.clear_frame(tr("ui.preview_select_component"))
             self.preview_next.setEnabled(False)
             self.preview_previous.setEnabled(False)
         else:
@@ -1503,14 +1510,12 @@ class MainWindow(QMainWindow):
             if data is None and is_excel:
                 self.active_tab.preview_row_number = None
                 self.active_tab.canvas.clear_document()
-                self.preview_image.setPixmap(QPixmap())
-                self.preview_image.setText(tr("ui.preview_no_data"))
+                self.preview_image.clear_frame(tr("ui.preview_no_data"))
                 self.statusBar().showMessage(tr("ui.mode_requires_validation"), 5000)
             elif is_excel and data is not None and not any(copies_for_mode(row, self.data_mode.mode) > 0 for row in data.rows):
                 self.active_tab.preview_row_number = None
                 self.active_tab.canvas.clear_document()
-                self.preview_image.setPixmap(QPixmap())
-                self.preview_image.setText(tr("ui.preview_no_instances"))
+                self.preview_image.clear_frame(tr("ui.preview_no_instances"))
                 self.preview_first.setEnabled(False)
                 self.preview_last.setEnabled(False)
                 self.preview_next.setEnabled(False)
@@ -1648,8 +1653,7 @@ class MainWindow(QMainWindow):
             cached = self.controller.preview.cached_data(self.session.snapshot, tab.component_id, component=document.model)
             if cached is None:
                 tab.canvas.clear_document()
-                self.preview_image.setPixmap(QPixmap())
-                self.preview_image.setText(tr("ui.preview_no_data"))
+                self.preview_image.clear_frame(tr("ui.preview_no_data"))
                 self.preview_first.setEnabled(False)
                 self.preview_last.setEnabled(False)
                 self.preview_next.setEnabled(False)
@@ -1659,8 +1663,7 @@ class MainWindow(QMainWindow):
             if not eligible:
                 tab.preview_row_number = None
                 tab.canvas.clear_document()
-                self.preview_image.setPixmap(QPixmap())
-                self.preview_image.setText(tr("ui.preview_no_instances"))
+                self.preview_image.clear_frame(tr("ui.preview_no_instances"))
                 self.preview_first.setEnabled(False)
                 self.preview_last.setEnabled(False)
                 self.preview_next.setEnabled(False)
@@ -1684,10 +1687,8 @@ class MainWindow(QMainWindow):
             tab.resolved_component = resolved.component
             active_component = resolved.component
             bindings_resolved = True
-        dpi = tab._preview_dpi(
-            active_component, tab.canvas.zoom_percent / 100,
-            tab.canvas.viewport().devicePixelRatioF(),
-        )
+        self._set_preview_request_identity(self.session.snapshot.root, tab.component_id, tab.preview_row_number)
+        dpi = self._preview_dpi_for_visible_views(tab, active_component)
         tab.queue_preview(
             self.session, component=active_component, dpi=dpi, fit=fit,
             selected=selected, bindings_resolved=bindings_resolved,
@@ -1718,40 +1719,56 @@ class MainWindow(QMainWindow):
 
     def _scale_preview(self, factor: float, *, fit: bool = False) -> None:
         if fit:
-            self._preview_zoom = 1.0
+            self.preview_image.fit_page()
         else:
-            self._preview_zoom = min(8.0, max(0.1, self._preview_zoom * factor))
-        self._rescale_preview_frame()
+            self.preview_image.zoom_by(factor)
+
+    def _preview_dpi_for_visible_views(self, tab: DocumentTab, component: ComponentDefinition) -> int:
+        demands = []
+        if tab.mode == "layout":
+            demands.append(tab.canvas.transform().m11() * tab.canvas.viewport().devicePixelRatioF())
+        if self.preview_dock.isVisible() and self.active_tab is tab:
+            demands.append(self.preview_image.transform().m11() * self.preview_image.viewport().devicePixelRatioF())
+        return tab._preview_dpi(component, max(demands, default=1.0), 1.0)
+
+    def _request_visible_preview_resolution(self) -> None:
+        tab = self.active_tab
+        if tab is None or tab._preview_arguments is None or self.session is None:
+            return
+        snapshot, component, dpi, _fit, selected, bindings_resolved = tab._preview_arguments
+        target_dpi = self._preview_dpi_for_visible_views(tab, component)
+        if target_dpi == dpi:
+            return
+        tab.preview_generation += 1
+        tab._preview_arguments = (snapshot, component, target_dpi, False, selected, bindings_resolved)
+        tab.preview_timer.start()
+
+    def _preview_zoom_changed(self, _percent: int) -> None:
+        self._request_visible_preview_resolution()
+
+    def _set_preview_request_identity(self, root: Path, component_id: str, row_number: int | None) -> None:
+        identity = (root, component_id, row_number)
+        if self._preview_render_key is None or self._preview_render_key[:2] != identity[:2]:
+            self.preview_image.clear_frame(tr("ui.preview_preparing"))
+        self._preview_render_key = identity
 
     def _invalidate_preview_cache(self) -> None:
         if self.controller.preview is not None and self.session is not None:
             self.controller.preview.invalidate(self.session.snapshot.root)
-        self._preview_source = None
-        self.preview_image.setPixmap(QPixmap())
+        self._preview_render_key = None
+        self.preview_image.clear_frame(tr("ui.preview_preparing"))
         self._validate_all()
 
     def _display_preview_frame(self, component_id: str, image, row_number: int | None) -> None:
         tab = self.active_tab
         if tab is None or tab.component_id != component_id:
             return
-        self._preview_source = image
-        self._preview_row_display = row_number
-        self._rescale_preview_frame()
-        self._update_preview_navigation()
-
-    def _rescale_preview_frame(self) -> None:
-        image = getattr(self, "_preview_source", None)
-        if image is None:
+        if self.session is None:
             return
-        pixmap = QPixmap.fromImage(image)
-        width = max(1, self.preview_image.width() - 12)
-        height = max(1, self.preview_image.height() - 12)
-        pixmap = pixmap.scaled(
-            max(1, int(width * self._preview_zoom)), max(1, int(height * self._preview_zoom)),
-            Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation,
-        )
-        self.preview_image.setPixmap(pixmap)
-        self.preview_image.setText("")
+        self._preview_render_key = (self.session.snapshot.root, component_id, row_number)
+        if tab.resolved_component is not None:
+            self.preview_image.set_frame(image, tab.resolved_component)
+        self._update_preview_navigation()
 
     def _update_preview_navigation(self) -> None:
         tab = self.active_tab
@@ -1848,7 +1865,6 @@ class MainWindow(QMainWindow):
                                 6000,
                             )
             elif error is not None and self.active_tab is tab and tab.fail_preview(str(error.diagnostic) if isinstance(error, ProjectError) else str(error), generation=request.generation):
-                self.preview_image.setPixmap(QPixmap())
                 self.preview_image.setText(tr("ui.preview_failed"))
                 self.event_list.setCurrentRow(self.event_list.count() - 1)
                 self.event_list.setFocus()
@@ -2984,7 +3000,7 @@ class MainWindow(QMainWindow):
             and self.session.documents[self.active_tab.component_id].dirty
         )
         self.close_tab_action.setEnabled(has_tab)
-        for action in (self.zoom_in_action, self.zoom_out_action, self.fit_action):
+        for action in (self.zoom_in_action, self.zoom_out_action, self.fit_action, self.actual_size_action):
             action.setEnabled(visual)
         for button in self.drawing_tools.values():
             button.setEnabled(visual)

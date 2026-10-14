@@ -162,7 +162,6 @@ def test_html_table_rowspan_colspan_and_inline_images_render_at_two_dpi(tmp_path
 @pytest.mark.parametrize(
     ("mutation", "code"),
     [
-        (lambda text: text.replace("height_mm: 25", "height_mm: 1"), "TEXT_OVERFLOW"),
         (lambda text: text.replace("assets/images/animals/enemy/leaf.png", "assets/images/missing.png"), "RESOURCE_MISSING"),
         (lambda text: text.replace("font_family: Arial", "font_family: Definitely Missing Font 123"), "FONT_MISSING"),
         (lambda text: text.replace("<table border=", "<video></video><table border="), "HTML_UNSUPPORTED"),

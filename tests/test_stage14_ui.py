@@ -502,15 +502,17 @@ def test_moving_and_undoing_element_keeps_excel_preview_visible(tmp_path: Path, 
     data = service.cached_data(snapshot, "forest-card")
     assert data is not None and tab.canvas._pixmap_item is not None
 
+    previous_item = tab.canvas._pixmap_item
     window._move_selected(("leaf-art",), 2.0, 0.0)
-    assert not tab.canvas._pixmap_item.isVisible()
+    assert tab.canvas._pixmap_item.isVisible()
     qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation)
     assert tab.canvas._pixmap_item.isVisible()
     assert service.cached_data(snapshot, "forest-card") is data
     assert tab.canvas._pixmap_item is not None
+    assert tab.canvas._pixmap_item is previous_item
 
     tab.undo_stack.undo()
-    assert not tab.canvas._pixmap_item.isVisible()
+    assert tab.canvas._pixmap_item.isVisible()
     qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation)
     assert tab.canvas._pixmap_item.isVisible()
     assert service.cached_data(snapshot, "forest-card") is data
@@ -655,7 +657,8 @@ def test_command_and_preview_buttons_use_the_assigned_png_icons(tmp_path: Path, 
         (window.preview_last, "end.png", "Последний экземпляр"),
         (window.preview_zoom_in, "zoom_in.png", "Увеличить"),
         (window.preview_zoom_out, "zoom_out.png", "Уменьшить"),
-        (window.preview_fit, "real_size.png", "По размеру"),
+        (window.preview_fit, "by_screen.png", "По размеру"),
+        (window.preview_actual, "real_size.png", "Масштаб 100% (96 логических DPI)"),
     )
     for button, filename, label in preview_icons:
         assert matches_asset(button.icon(), filename)

@@ -180,7 +180,7 @@ class ElementProperties(QWidget):
         self.font_combo.setObjectName("htmlFont")
         self.font_spin = self._number("htmlFontSize", 0.1, 1000.0)
         self.font_spin.setDecimals(1)
-        self.font_spin.setSingleStep(0.1)
+        self.font_spin.setSingleStep(1.0)
         self.color_edit = QLineEdit()
         self.color_edit.setObjectName("htmlColor")
         self.color_edit.setMaxLength(9)
@@ -482,7 +482,6 @@ class ElementProperties(QWidget):
         self.form.setRowVisible(self.source_edit, image)
         self.form.setRowVisible(self.fit_combo, image)
         self.form.setRowVisible(self.content_mode, image or html)
-        self.form.setRowVisible(self.content_column, image or html)
         if image:
             self.source_edit.setText(node.source)
             self.fit_combo.setCurrentText(node.fit)
@@ -491,6 +490,7 @@ class ElementProperties(QWidget):
             mode, column = node.content_mode, node.content_column
         else:
             mode, column = "manual", None
+        self.form.setRowVisible(self.content_column, (image or html) and mode == "column")
         self.content_mode.setCurrentIndex(max(0, self.content_mode.findData(mode)))
         self.content_column.clear()
         self.content_column.addItems(list(columns))
@@ -509,7 +509,7 @@ class ElementProperties(QWidget):
             button.setVisible(html)
         self.form.setRowVisible(self.alignment_widget, html)
         for widget in (self.html_edit, self.insert_image, self.apply_html):
-            widget.setVisible(html)
+            widget.setVisible(html and mode == "manual")
         if html:
             self.font_combo.clear()
             self.html_edit.setReadOnly(mode != "manual")
@@ -533,6 +533,7 @@ class ElementProperties(QWidget):
         else:
             self.form.setRowVisible(self.group_bounds, False)
         del blockers
+        self._sync_content_mode_visibility()
 
     def set_edit_locked(self, locked: bool) -> None:
         for widget in (
@@ -551,6 +552,7 @@ class ElementProperties(QWidget):
             self.html_edit.setReadOnly(not manual)
             self.apply_html.setEnabled(manual)
             self.insert_image.setEnabled(manual)
+        self._sync_content_mode_visibility()
 
     def show_image_quality(self, quality) -> None:
         items = tuple(quality)
@@ -582,7 +584,17 @@ class ElementProperties(QWidget):
             self.html_edit.setReadOnly(mode != "manual")
             self.apply_html.setEnabled(mode == "manual")
             self.insert_image.setEnabled(mode == "manual")
+        self._sync_content_mode_visibility()
         self.nodeChanged.emit(changes)
+
+    def _sync_content_mode_visibility(self) -> None:
+        node_type = getattr(self, "_node_type", "")
+        html = node_type == "html"
+        image = node_type == "image"
+        manual = self.content_mode.currentData() == "manual"
+        self.form.setRowVisible(self.content_column, (html or image) and not manual)
+        for widget in (self.html_edit, self.insert_image, self.apply_html):
+            widget.setVisible(html and manual)
 
     def _content_column_changed(self) -> None:
         field = "source_column" if getattr(self, "_node_type", "") == "image" else "content_column"

@@ -56,6 +56,7 @@ class DocumentTab(QWidget):
     modeRequested = Signal(str)
     draftChanged = Signal(str)
     previewRequested = Signal()
+    previewResolutionRequested = Signal()
 
     def __init__(self, component_id: str, parent=None):
         super().__init__(parent)
@@ -91,14 +92,35 @@ class DocumentTab(QWidget):
             controls.addWidget(button)
         self.layout_mode.setChecked(True)
         controls.addStretch()
-        minus = QPushButton("−")
+        minus = QPushButton()
         minus.setObjectName("zoomOut")
-        plus = QPushButton("+")
+        minus.setIcon(load_icon("zoom_out.png"))
+        minus.setIconSize(QSize(22, 22))
+        minus.setToolTip(tr("ui.preview_zoom_out"))
+        minus.setAccessibleName(minus.toolTip())
+        minus.setFixedSize(34, 34)
+        plus = QPushButton()
         plus.setObjectName("zoomIn")
+        plus.setIcon(load_icon("zoom_in.png"))
+        plus.setIconSize(QSize(22, 22))
+        plus.setToolTip(tr("ui.preview_zoom_in"))
+        plus.setAccessibleName(plus.toolTip())
+        plus.setFixedSize(34, 34)
         fit = QPushButton(tr("ui.fit"))
         fit.setObjectName("zoomFit")
-        actual = QPushButton("100%")
+        fit.setIcon(load_icon("by_screen.png"))
+        fit.setIconSize(QSize(22, 22))
+        fit.setText("")
+        fit.setToolTip(tr("ui.fit"))
+        fit.setAccessibleName(fit.toolTip())
+        fit.setFixedSize(34, 34)
+        actual = QPushButton()
         actual.setObjectName("zoomActual")
+        actual.setIcon(load_icon("real_size.png"))
+        actual.setIconSize(QSize(22, 22))
+        actual.setToolTip(tr("ui.zoom_actual"))
+        actual.setAccessibleName(actual.toolTip())
+        actual.setFixedSize(34, 34)
         self.zoom_label = QLabel("100%")
         self.zoom_label.setObjectName("zoomLabel")
         for widget in (minus, plus, fit, actual, self.zoom_label):
@@ -135,6 +157,7 @@ class DocumentTab(QWidget):
         fit.clicked.connect(self.canvas.fit_page)
         actual.clicked.connect(self.canvas.actual_size)
         self.canvas.zoomChanged.connect(self._zoom_changed)
+        self.canvas.visualGestureFinished.connect(self._apply_deferred_preview)
         self.layout_mode.clicked.connect(lambda: self.modeRequested.emit("layout"))
         self.text_mode.clicked.connect(lambda: self.modeRequested.emit("text"))
         self.text_editor.textChanged.connect(lambda: self.draftChanged.emit(self.text_editor.toPlainText()))
@@ -166,11 +189,7 @@ class DocumentTab(QWidget):
         self.zoom_label.setText(f"{percent}%")
         self.zoomChanged.emit(percent)
         if not self._applying_image and self._preview_arguments is not None:
-            snapshot, component, _dpi, fit, selected, bindings_resolved = self._preview_arguments
-            dpi = self._preview_dpi(component, self.canvas.zoom_percent / 100, self.canvas.viewport().devicePixelRatioF())
-            self.preview_generation += 1
-            self._preview_arguments = (snapshot, component, dpi, False, selected, bindings_resolved)
-            self.preview_timer.start()
+            self.previewResolutionRequested.emit()
 
     @staticmethod
     def _preview_dpi(component: ComponentDefinition, zoom: float, device_ratio: float) -> int:
@@ -217,14 +236,32 @@ class DocumentTab(QWidget):
         if self._preview_arguments is None or generation != self.preview_generation:
             return False
         _snapshot, active_component, _dpi, requested_fit, selected, _bindings_resolved = self._preview_arguments
+        if self.canvas._gesture_active:
+            self._deferred_preview = (image, quality, generation, fit or requested_fit)
+            return True
+        self._present_preview(image, active_component, selected, quality, generation, fit or requested_fit)
+        return True
+
+    def _present_preview(self, image, component, selected, quality, generation: int, fit: bool) -> None:
+        selected = tuple(node_id for node_id in self.canvas.selected_ids if node_id in self.canvas._overlays) or selected
         self._applying_image = True
         try:
-            self.canvas.set_document(image, active_component, fit=fit or requested_fit, selected=selected)
+            self.canvas.set_document(image, component, fit=fit, selected=selected)
         finally:
             self._applying_image = False
         self.displayed_generation = generation
         self.image_quality = tuple(quality)
-        return True
+
+    def _apply_deferred_preview(self) -> None:
+        deferred = getattr(self, "_deferred_preview", None)
+        if deferred is None:
+            return
+        self._deferred_preview = None
+        image, quality, generation, fit = deferred
+        if self._preview_arguments is None or generation != self.preview_generation:
+            return
+        _snapshot, component, _dpi, _fit, selected, _resolved = self._preview_arguments
+        self._present_preview(image, component, selected, quality, generation, fit)
 
     def fail_preview(self, message: str, *, generation: int) -> bool:
         if self._preview_arguments is None or generation != self.preview_generation:

@@ -404,5 +404,7 @@
   "ui.default_html": "Текст",
   "ui.select_html_column": "Выберите один HTML-элемент и столбец",
   "ui.column_binding_html": "Привязка столбца вставляется в HTML-элемент",
-  "ui.operation_failed": "Не удалось выполнить операцию ({error})."
+  "ui.operation_failed": "Не удалось выполнить операцию ({error}).",
+  "ui.zoom_actual": "Масштаб 100% (96 логических DPI)",
+  "ui.component_preview": "Превью компонента"
 }
