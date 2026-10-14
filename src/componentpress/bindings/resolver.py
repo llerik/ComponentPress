@@ -18,7 +18,7 @@ from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, Node
 from componentpress.domain.project import ProjectDefinition
 from componentpress.domain.render_plan import ResolvedComponent
-from componentpress.domain.values import CellValue, DataRow, DataSheetSnapshot, FormulaState, value_to_text
+from componentpress.domain.values import CellValue, DataRow, DataSheetSnapshot, FormulaState, cell_is_empty, value_to_text
 from componentpress.bindings.html_policy import validate_html
 from componentpress.project_io.paths import validate_relative_path
 from componentpress.rendering.resources import ProjectResourceLoader
@@ -217,9 +217,19 @@ class BindingResolver:
                 if isinstance(node, ImageNode):
                     location = BindingLocation(owner, f"elements.{node.id}.source", node.id, source, sheet)
                     path_template = node.source
+                    empty_source = False
+                    if node.optional and node.source_mode == "manual" and not node.source:
+                        empty_source = True
+                        resolved_path = ""
                     if node.source_mode == "column":
                         cell = self._column_cell(node.source_column or "", row, location)
-                        path_template = self._cell_text(cell, location, node.source_column or "")
+                        if node.optional and cell_is_empty(cell):
+                            self._cell_text(cell, location, node.source_column or "")
+                            empty_source = True
+                            resolved_path = ""
+                        else:
+                            path_template = self._cell_text(cell, location, node.source_column or "")
+                    if not empty_source and node.source_mode == "column":
                         try:
                             validate_relative_path(path_template)
                             if self.validate_resources:
@@ -227,7 +237,7 @@ class BindingResolver:
                         except ProjectError as exc:
                             raise self._resource_error(exc, location, cell) from exc
                         resolved_path = path_template
-                    else:
+                    elif not empty_source:
                         resolved_path = self.resolve_path(path_template, row, location)
                     resolved.append(node.model_copy(update={
                         "source": resolved_path,
@@ -273,7 +283,13 @@ class BindingResolver:
                         location = BindingLocation(owner, f"elements.{node.id}.condition_column", node.id, source, sheet)
                         cell = self._column_cell(node.condition_column, row, location)
                         value = self._cell_text(cell, location, node.condition_column)
-                        condition_matches = value == node.condition_value
+                        empty = cell_is_empty(cell)
+                        condition_matches = {
+                            "equals": value == node.condition_value,
+                            "not_equals": value != node.condition_value,
+                            "is_empty": empty,
+                            "is_not_empty": not empty,
+                        }[node.condition_operator]
                     resolved.append(node.model_copy(update={
                         "condition_matches": condition_matches,
                         "children": visit(node.children),
@@ -328,7 +344,7 @@ class BindingResolver:
 
         def visit(nodes_: tuple[Node, ...]) -> None:
             for node in nodes_:
-                if isinstance(node, ImageNode) and node.source_mode == "manual":
+                if isinstance(node, ImageNode) and node.source_mode == "manual" and not (node.optional and not node.source):
                     self.resolve_path(node.source, None, BindingLocation(owner, f"elements.{node.id}.source", node.id, source, sheet))
                 elif isinstance(node, HtmlNode) and node.content_mode == "manual":
                     self.resolve_html(node.html, None, BindingLocation(owner, f"elements.{node.id}.html", node.id, source, sheet))

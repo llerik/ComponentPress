@@ -127,7 +127,8 @@ def _resource_paths(component: ComponentDefinition) -> set[str]:
     def visit(nodes: tuple[Node, ...]) -> None:
         for node in nodes:
             if isinstance(node, ImageNode):
-                paths.add(node.source)
+                if node.source:
+                    paths.add(node.source)
             elif isinstance(node, HtmlNode):
                 paths.update(html_image_sources(node.html))
             elif isinstance(node, GroupNode):

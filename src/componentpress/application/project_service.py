@@ -134,6 +134,16 @@ class ProjectService:
         with self.write_lock(snapshot.root):
             return self.resources.import_image(snapshot.root, source, folder)
 
+    @_logged("replace_image")
+    def replace_image(self, root: Path, relative: str, source: Path, expected_hash: str) -> None:
+        with self.write_lock(root.resolve()):
+            self.resources.replace_image(root.resolve(), relative, source, expected_hash)
+
+    @_logged("import_image_folder")
+    def import_image_folder(self, root: Path, source: Path, folder: str = "", *, cancellation=None, on_progress=None) -> tuple[str, ...]:
+        with self.write_lock(root.resolve()):
+            return self.resources.import_image_folder(root.resolve(), source, folder, cancellation=cancellation, on_progress=on_progress)
+
     @_logged("import_data")
     def import_data(self, session: ProjectSession, source: Path) -> str:
         """Import the project's single XLSX source."""

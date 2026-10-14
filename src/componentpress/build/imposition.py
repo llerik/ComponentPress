@@ -24,7 +24,6 @@ class Placement:
 @dataclass(frozen=True)
 class ImpositionPage:
     index: int
-    component_id: str
     placements: tuple[Placement, ...]
 
 
@@ -43,46 +42,36 @@ def paper_size_mm(settings: PrintSettings) -> tuple[float, float]:
 def calculate_imposition(instances: tuple[BuildInstance, ...], settings: PrintSettings) -> ImpositionPlan:
     paper_width, paper_height = paper_size_mm(settings)
     pages: list[ImpositionPage] = []
-    current_component: str | None = None
-    current: list[Placement] = []
-    current_capacity = 0
-    columns = 0
-
-    def finish_page() -> None:
-        nonlocal current
-        if current:
-            pages.append(ImpositionPage(len(pages), current[0].component_id, tuple(current)))
-            current = []
-
+    groups: dict[tuple[float, float], list[BuildInstance]] = {}
     for instance in instances:
-        width = instance.component.size_mm.width
-        height = instance.component.size_mm.height
+        size = (instance.component.size_mm.width, instance.component.size_mm.height)
+        groups.setdefault(size, []).append(instance)
+
+    for (width, height), group in groups.items():
         cols = math.floor((paper_width - 2 * settings.margin_mm + settings.gap_mm) / (width + settings.gap_mm))
         rows = math.floor((paper_height - 2 * settings.margin_mm + settings.gap_mm) / (height + settings.gap_mm))
         if cols < 1 or rows < 1:
+            instance = group[0]
             raise ProjectError(Diagnostic(
                 "COMPONENT_DOES_NOT_FIT",
                 f"компонент {instance.component_id!r} размером {width:g}×{height:g} мм не помещается на странице",
                 instance.document_path,
             ))
-        if instance.component_id != current_component:
-            finish_page()
-            current_component = instance.component_id
-            current_capacity = cols * rows
-            columns = cols
-        for copy_index in range(instance.copies):
-            if len(current) >= current_capacity:
-                finish_page()
-            slot = len(current)
-            row, column = divmod(slot, columns)
-            current.append(Placement(
-                instance.index,
-                copy_index,
-                instance.component_id,
-                settings.margin_mm + column * (width + settings.gap_mm),
-                settings.margin_mm + row * (height + settings.gap_mm),
-                width,
-                height,
-            ))
-    finish_page()
+        capacity = cols * rows
+        placements: list[Placement] = []
+        for instance in group:
+            for copy_index in range(instance.copies):
+                if len(placements) == capacity:
+                    pages.append(ImpositionPage(len(pages), tuple(placements)))
+                    placements = []
+                slot = len(placements)
+                row, column = divmod(slot, cols)
+                placements.append(Placement(
+                    instance.index, copy_index, instance.component_id,
+                    settings.margin_mm + column * (width + settings.gap_mm),
+                    settings.margin_mm + row * (height + settings.gap_mm),
+                    width, height,
+                ))
+        if placements:
+            pages.append(ImpositionPage(len(pages), tuple(placements)))
     return ImpositionPlan(paper_width, paper_height, tuple(pages))

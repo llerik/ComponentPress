@@ -68,6 +68,7 @@ from componentpress.domain.tree import (
     reorder_nodes,
     reparent_nodes,
     resize_node,
+    rotate_node,
     resize_line_endpoint,
     ungroup_node,
     update_node,
@@ -75,7 +76,7 @@ from componentpress.domain.tree import (
 
 from .controllers import ProjectController
 from .commands import ReplaceComponentCommand
-from .dialogs import HtmlAddDialog, ImageAddDialog, ResourcePickerDialog, format_error
+from .dialogs import HtmlAddDialog, ImageAddDialog, ImageManagerDialog, ResourcePickerDialog, format_error
 from .build_dialog import BuildOptionsDialog
 from .document_tab import DocumentTab
 from .properties import ComponentProperties, ElementProperties
@@ -165,6 +166,7 @@ class MainWindow(QMainWindow):
         self.export_png_zip_action = self._action(tr("action.export_png"))
         self.add_component_action = self._action(tr("action.add_component"), "Ctrl+Shift+N")
         self.project_settings_action = self._action(tr("action.project_settings"))
+        self.image_manager_action = self._action("Изображения проекта…")
         self.about_action = self._action(tr("menu.about"))
         self.undo_action = self._action(tr("action.undo"), QKeySequence.StandardKey.Undo)
         self.redo_action = self._action(tr("action.redo"), QKeySequence.StandardKey.Redo)
@@ -190,7 +192,7 @@ class MainWindow(QMainWindow):
         self.export_menu = self.file_menu.addMenu(tr("menu.export"))
         self.export_menu.addActions([self.export_png_zip_action, self.export_project_archive_action])
         self.file_menu.addSeparator()
-        self.file_menu.addActions([self.project_settings_action, self.add_component_action])
+        self.file_menu.addActions([self.project_settings_action, self.image_manager_action, self.add_component_action])
         self.windows_menu = self.file_menu.addMenu(tr("menu.windows"))
         self.file_menu.addSeparator()
         self.file_menu.addActions([self.save_action, self.save_all_action, self.close_tab_action])
@@ -782,6 +784,7 @@ class MainWindow(QMainWindow):
         self.export_png_zip_action.triggered.connect(self._export_png_archive)
         self.add_component_action.triggered.connect(self.add_component_dialog)
         self.project_settings_action.triggered.connect(self.project_settings_dialog)
+        self.image_manager_action.triggered.connect(self.open_image_manager)
         self.about_action.triggered.connect(self._show_about)
         self.validate_active_action.triggered.connect(self._validate_active)
         self.validate_all_action.triggered.connect(self._validate_all)
@@ -824,6 +827,7 @@ class MainWindow(QMainWindow):
         self.element_tree.layerDropRequested.connect(self._layer_drop)
         self.element_tree.lockToggleRequested.connect(self._toggle_element_lock)
         self.element_properties.nodeChanged.connect(self._edit_selected_node)
+        self.element_properties.rotationRequested.connect(self._rotate_selected)
         self.element_properties.insertImageRequested.connect(self.insert_html_image)
         self.element_properties.colorRequested.connect(self._pick_node_color)
         self.data_import.clicked.connect(self._import_xlsx)
@@ -981,6 +985,8 @@ class MainWindow(QMainWindow):
         self._version_progress.setLabelText(phase)
         self._version_progress.setRange(0, max(1, total))
         self._version_progress.setValue(min(completed, max(1, total)))
+        if self._version_task_kind == "image_import" and getattr(self, "_image_manager_dialog", None) is not None:
+            self._image_manager_dialog.set_import_progress(completed, total, phase)
 
     def _version_task_finished(self, result, error) -> None:
         kind, payload = self._version_task_kind, self._version_task_payload
@@ -993,6 +999,11 @@ class MainWindow(QMainWindow):
         self._version_cancellation = None
         self._update_actions()
         if isinstance(error, ProjectError):
+            if kind == "image_import":
+                dialog = getattr(self, "_image_manager_dialog", None)
+                if dialog is not None:
+                    dialog.finish_import(None, error)
+                return
             if kind == "export" and error.diagnostic.code in {"ARCHIVE_EXISTS", "ARCHIVE_VERSION_EXISTS"}:
                 _snapshot, target, _replace = payload
                 replace_target = error.diagnostic.path or target
@@ -1019,7 +1030,18 @@ class MainWindow(QMainWindow):
                 self._show_error(error)
             return
         if error is not None:
+            if kind == "image_import":
+                dialog = getattr(self, "_image_manager_dialog", None)
+                if dialog is not None:
+                    dialog.finish_import(None, error)
+                return
             self._show_error(error)
+            return
+        if kind == "image_import":
+            dialog = getattr(self, "_image_manager_dialog", None)
+            if dialog is not None:
+                dialog.finish_import(tuple(result), None)
+            self._resource_images_changed()
             return
         if kind == "import":
             try:
@@ -1082,6 +1104,48 @@ class MainWindow(QMainWindow):
         except (ProjectError, ValidationError, ValueError, OSError) as exc:
             self._show_error(exc)
             return
+
+    def open_image_manager(self) -> None:
+        if self.session is None:
+            return
+        root = self.session.snapshot.root
+        dialog = ImageManagerDialog(
+            root,
+            lambda source, folder: self._import_single_image(root, source, folder),
+            lambda relative, source, expected_hash: self._replace_project_image(root, relative, source, expected_hash),
+            self,
+        )
+        self._image_manager_dialog = dialog
+        dialog.folderImportRequested.connect(lambda source, folder: self._start_image_folder_import(dialog, root, source, folder))
+        dialog.finished.connect(lambda _result: setattr(self, "_image_manager_dialog", None))
+        dialog.open()
+
+    def _import_single_image(self, root: Path, source: Path, folder: str) -> str:
+        relative = self.controller.service.import_image(root, source, folder)
+        self._resource_images_changed()
+        return relative
+
+    def _replace_project_image(self, root: Path, relative: str, source: Path, expected_hash: str) -> None:
+        self.controller.service.replace_image(root, relative, source, expected_hash)
+        self._resource_images_changed()
+
+    def _resource_images_changed(self) -> None:
+        if self.session is None:
+            return
+        self.controller.preview.invalidate(self.session.snapshot.root)
+        for tab in self._tabs.values():
+            self._refresh_preview(tab)
+
+    def _start_image_folder_import(self, dialog: ImageManagerDialog, root: Path, source: Path, folder: str) -> None:
+        if self._version_task is not None or self._active_build_job is not None:
+            return
+        dialog.folder_button.setEnabled(False)
+        self._start_version_task(
+            "image_import", (root, source, folder),
+            lambda cancellation, progress: self.controller.service.import_image_folder(
+                root, source, folder, cancellation=cancellation, on_progress=progress
+            ),
+        )
 
     def add_component_dialog(self) -> None:
         if self.session is None:
@@ -1560,7 +1624,7 @@ class MainWindow(QMainWindow):
         if data is None:
             self._add_events((Diagnostic("VALIDATION_OK", f"Компонент {component.name} и его ресурсы проверены", snapshot.documents[component_id].path, source="main", severity="info"),))
         else:
-            self._add_events((Diagnostic("VALIDATION_OK", f"Лист {data.sheet} проверен; строк: {len(data.rows)}", data.path, source="main", sheet=data.sheet, severity="info"),))
+            self._add_events((Diagnostic("VALIDATION_OK", f"Лист {data.sheet}, область {data.area} проверена; строк: {len(data.rows)}", data.path, source="main", sheet=data.sheet, severity="info"),))
         self._populate_data_panel()
         self._refresh_preview(self.active_tab)
 
@@ -2455,8 +2519,13 @@ class MainWindow(QMainWindow):
         selected = tuple(ids)
         self._apply_tree("Переместить элементы", move_nodes, selected, dx_mm, dy_mm, selected=selected)
 
-    def _resize_selected(self, node_id: str, width_mm: float, height_mm: float) -> None:
-        self._apply_tree("Изменить размер элемента", resize_node, node_id, width_mm, height_mm, selected=(node_id,))
+    def _resize_selected(self, node_id: str, width_mm: float, height_mm: float, anchor_x: float = 0.0, anchor_y: float = 0.0) -> None:
+        self._apply_tree("Изменить размер элемента", resize_node, node_id, width_mm, height_mm, (anchor_x, anchor_y), selected=(node_id,))
+
+    def _rotate_selected(self, degrees: float) -> None:
+        ids = self._selected_ids()
+        if len(ids) == 1:
+            self._apply_tree("Повернуть элемент", rotate_node, ids[0], degrees, selected=ids)
 
     def _resize_line_selected(self, node_id: str, dx_mm: float, dy_mm: float) -> None:
         self._apply_tree("Изменить линию", resize_line_endpoint, node_id, dx_mm, dy_mm, selected=(node_id,))
@@ -2469,7 +2538,18 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Некорректное значение", "Выберите допустимый цвет из палитры")
             self._show_selection(ids)
             return
-        self._apply_tree("Изменить элемент", update_node, ids[0], selected=ids, **changes)
+        self._apply_tree("Изменить элемент", self._apply_node_changes, ids[0], changes, selected=ids)
+
+    @staticmethod
+    def _apply_node_changes(component: ComponentDefinition, node_id: str, changes: dict) -> ComponentDefinition:
+        values = dict(changes)
+        result = component
+        node = locations(component)[node_id].node
+        if isinstance(node, GroupNode) and "width_mm" in values and "height_mm" in values:
+            result = resize_node(result, node_id, values.pop("width_mm"), values.pop("height_mm"))
+        if values:
+            result = update_node(result, node_id, **values)
+        return result
 
     def delete_selected(self) -> bool:
         ids = self._selected_ids()
@@ -2496,7 +2576,7 @@ class MainWindow(QMainWindow):
 
     def group_selected(self, group_id: str | None = None, name: str | None = None) -> bool:
         ids = self._selected_ids()
-        if len(ids) < 2 or self.session is None or self.active_tab is None:
+        if not ids or self.session is None or self.active_tab is None:
             return False
         component = self.session.documents[self.active_tab.component_id].model
         if name is None:
@@ -2928,6 +3008,7 @@ class MainWindow(QMainWindow):
         self.redo_action.setEnabled(bool(text_redo or project_redo or document_redo))
         self.add_component_action.setEnabled(has_project)
         self.project_settings_action.setEnabled(has_project)
+        self.image_manager_action.setEnabled(has_project and self._active_build_job is None and self._version_task is None)
         idle = self._active_build_job is None and self._version_task is None
         self.delete_component_action.setEnabled(has_project and has_tab and len(self.session.documents) > 1 and idle)
         self.build_all_action.setEnabled(has_project and idle)
@@ -2972,8 +3053,8 @@ class MainWindow(QMainWindow):
         self.properties.setEnabled(bool(visual))
         self.element_properties.setEnabled(bool(visual and has_selection))
         self.delete_action.setEnabled(visual and has_selection and not locked_selection)
-        self.group_action.setEnabled(visual and len(selected) >= 2 and not locked_selection)
-        self.group_button.setEnabled(visual and len(selected) >= 2 and not locked_selection)
+        self.group_action.setEnabled(visual and has_selection and not locked_selection)
+        self.group_button.setEnabled(visual and has_selection and not locked_selection)
         can_ungroup = False
         if has_tab and len(selected) == 1 and self.session is not None:
             node = locations(self.session.documents[self.active_tab.component_id].model).get(selected[0])

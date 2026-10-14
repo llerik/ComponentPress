@@ -19,6 +19,9 @@ def _membership_journal(root: Path) -> Path:
 
 
 def recover(root: Path) -> None:
+    from .resource_transactions import recover_resource_imports
+
+    recover_resource_imports(root)
     if _membership_journal(root).exists():
         recover_component_membership(root)
     journal = _journal(root)

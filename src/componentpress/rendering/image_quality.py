@@ -10,6 +10,7 @@ from urllib.parse import unquote, urlsplit
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
+from componentpress.domain.geometry import Affine
 from componentpress.domain.project import ProjectDefinition
 from componentpress.project_io.paths import validate_relative_path
 from componentpress.project_io.yaml_codec import html_image_sources
@@ -101,9 +102,12 @@ def measure_component_images(
 ) -> tuple[ImageQuality, ...]:
     results: list[ImageQuality] = []
 
-    def visit(nodes: tuple[Node, ...]) -> None:
+    def visit(nodes: tuple[Node, ...], parent: Affine) -> None:
         for node in nodes:
+            world = parent.then(Affine.node(node))
             if isinstance(node, ImageNode):
+                if node.optional and not node.source:
+                    continue
                 loaded = loader.image(node.source, owner=owner, field=f"elements.{node.id}.source")
                 tx, ty, tw, th, sx, sy, sw, sh = image_fit_geometry(
                     loaded.image.width(), loaded.image.height(), 0, 0,
@@ -112,7 +116,8 @@ def measure_component_images(
                 del tx, ty, sx, sy
                 results.append(ImageQuality(
                     node.id, node.source, loaded.image.width(), loaded.image.height(), tw, th,
-                    sw * MM_PER_INCH / tw, sh * MM_PER_INCH / th,
+                    sw * MM_PER_INCH / (tw * (world.a * world.a + world.c * world.c) ** 0.5),
+                    sh * MM_PER_INCH / (th * (world.b * world.b + world.d * world.d) ** 0.5),
                 ))
             elif isinstance(node, HtmlNode):
                 html = node.html
@@ -140,11 +145,11 @@ def measure_component_images(
                         pixel_width, pixel_height = loaded.image.width(), loaded.image.height()
                     results.append(ImageQuality(
                         node.id, relative, pixel_width, pixel_height, width_mm, height_mm,
-                        pixel_width * MM_PER_INCH / width_mm,
-                        pixel_height * MM_PER_INCH / height_mm,
+                        pixel_width * MM_PER_INCH / (width_mm * (world.a * world.a + world.c * world.c) ** 0.5),
+                        pixel_height * MM_PER_INCH / (height_mm * (world.b * world.b + world.d * world.d) ** 0.5),
                     ))
             elif isinstance(node, GroupNode):
-                visit(node.children)
+                visit(node.children, world)
 
-    visit(component.elements)
+    visit(component.elements, Affine())
     return tuple(results)

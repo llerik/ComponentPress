@@ -680,7 +680,7 @@ def test_component_creation_and_deletion_round_trip_preserves_draft_and_tab(tmp_
     assert window.add_component("third", "Третий компонент")
     tab = window.active_tab
     document = window.session.documents["third"]
-    window._draft_changed(tab, "schema_version: 5\nid: third\nname: [неверный черновик]\n")
+    window._draft_changed(tab, "schema_version: 6\nid: third\nname: [неверный черновик]\n")
     window._undo()
     assert "third" not in window.session.documents
     assert not (root / "components" / "third.yaml").exists()
@@ -688,7 +688,7 @@ def test_component_creation_and_deletion_round_trip_preserves_draft_and_tab(tmp_
     assert window.session.documents["third"] is document
     assert window.active_tab is tab
     assert document.has_invalid_draft
-    assert document.draft_text.startswith("schema_version: 5")
+    assert document.draft_text.startswith("schema_version: 6")
     assert service.projects.open(root).documents["third"].model.name == "Третий компонент"
     assert not errors, errors
 

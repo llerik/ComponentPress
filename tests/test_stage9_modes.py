@@ -43,7 +43,7 @@ def test_test_build_selects_test_rows_reports_mode_and_zip_manifest(tmp_path: Pa
     assert result.mode == "test"
     report = json.loads(result.report_path.read_text(encoding="utf-8"))
     assert report["mode"] == "test"
-    assert report["report_version"] == 2
+    assert report["report_version"] == 3
     assert report["counts"]["png"] == 2
     assert [(item["row_number"], item["copies"]) for item in report["instances"]] == [(2, 1), (3, 3)]
     assert report["counts"]["copies"] == 4

@@ -44,7 +44,7 @@ def test_rotates_and_reports_without_exception_or_project_text(monkeypatch, tmp_
     with zipfile.ZipFile(report) as archive:
         payload = json.loads(archive.read("report.json"))
         contents = b"\n".join(archive.read(name) for name in archive.namelist() if name.endswith(".log"))
-    assert payload["runtime"]["version"] == "0.15"
+    assert payload["runtime"]["version"] == "0.16"
     assert payload["incident"]["incident_id"] == incident_id
     assert b"SECRET_FROM_EXCEPTION" not in contents
     assert b"SECRET_PROJECT_PATH" not in contents

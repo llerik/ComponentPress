@@ -109,7 +109,7 @@ def test_invalid_path_in_archive_manifest_is_rejected_before_destination_write(t
         "format_version": 1,
         "project_id": "game",
         "project_version": "0.1.0",
-        "schema_version": 5,
+        "schema_version": 6,
         "files": {"project.yaml": {"size": 0, "sha256": hashlib.sha256(b"").hexdigest()}, "../outside": {"size": 0, "sha256": hashlib.sha256(b"").hexdigest()}},
         "directories": [],
     }

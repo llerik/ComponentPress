@@ -75,7 +75,7 @@ def test_build_is_deterministic_for_one_two_and_four_workers(tmp_path: Path) -> 
     assert hashes[0] == hashes[1] == hashes[2]
     for result, report in results:
         assert report["complete"] is True
-        assert report["counts"] == {"instances": 3, "copies": 4, "png": 3, "pages": 2}
+        assert report["counts"] == {"instances": 3, "copies": 4, "png": 3, "pages": 1}
         assert [item["component_id"] for item in report["instances"]] == [
             "forest-card", "event-card", "event-card"
         ]
@@ -83,7 +83,7 @@ def test_build_is_deterministic_for_one_two_and_four_workers(tmp_path: Path) -> 
         assert first.size() == QSize(744, 1039)
         pdf = QPdfDocument()
         assert pdf.load(str(result.pdf_path)) == QPdfDocument.Error.None_
-        assert pdf.pageCount() == 2
+        assert pdf.pageCount() == 1
         points = pdf.pagePointSize(0)
         assert points.width() == pytest.approx(210 / 25.4 * 72, abs=0.51)
         assert points.height() == pytest.approx(297 / 25.4 * 72, abs=0.51)

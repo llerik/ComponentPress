@@ -85,7 +85,10 @@ class FileProjectRepository:
                 root / "project.yaml",
                 "schema_version",
             ))
-        if (root / ".componentpress" / "transactions" / "add-component.json").exists():
+        resource_journals = root / ".componentpress" / "transactions" / "resource-imports"
+        if ((root / ".componentpress" / "transactions" / "add-component.json").exists()
+                or (root / ".componentpress" / "transactions" / "component-membership.json").exists()
+                or (resource_journals.exists() and any(resource_journals.glob("*.json")))):
             with ProjectWriteLock(root):
                 recover(root)
         if (root / ".componentpress" / "transactions" / "component-membership.json").exists():

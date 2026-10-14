@@ -8,10 +8,12 @@ models and making the result suitable for undo snapshots.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Iterable
 
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, LineNode, Node, ShapeNode
+from componentpress.domain.geometry import Affine, group_frame, local_bounds
 
 
 class TreeOperationError(ValueError):
@@ -25,20 +27,36 @@ class NodeLocation:
     index: int
     global_x: float
     global_y: float
+    world: Affine
 
 
 def locations(component: ComponentDefinition) -> dict[str, NodeLocation]:
     result: dict[str, NodeLocation] = {}
 
-    def visit(nodes: tuple[Node, ...], parent_id: str | None, ox: float, oy: float) -> None:
+    def visit(nodes: tuple[Node, ...], parent_id: str | None, parent_world: Affine) -> None:
         for index, node in enumerate(nodes):
-            gx, gy = ox + node.x_mm, oy + node.y_mm
-            result[node.id] = NodeLocation(node, parent_id, index, gx, gy)
+            world = parent_world.then(Affine.node(node))
+            result[node.id] = NodeLocation(node, parent_id, index, world.x, world.y, world)
             if isinstance(node, GroupNode):
-                visit(node.children, node.id, gx, gy)
+                visit(node.children, node.id, world)
 
-    visit(component.elements, None, 0.0, 0.0)
+    visit(component.elements, None, Affine())
     return result
+
+
+def _refresh_frames(component: ComponentDefinition) -> ComponentDefinition:
+    def visit(nodes: tuple[Node, ...]) -> tuple[Node, ...]:
+        refreshed = []
+        for node in nodes:
+            if isinstance(node, GroupNode):
+                children = visit(node.children)
+                frame = group_frame(children) if children else node.frame
+                refreshed.append(node.model_copy(update={"children": children, "frame": frame}))
+            else:
+                refreshed.append(node)
+        return tuple(refreshed)
+
+    return ComponentDefinition.model_validate(component.model_copy(update={"elements": visit(component.elements)}).model_dump(mode="python"))
 
 
 def parent_nodes(component: ComponentDefinition, parent_id: str | None) -> tuple[Node, ...]:
@@ -90,9 +108,7 @@ def update_node(component: ComponentDefinition, node_id: str, **changes: object)
                 result.append(node)
         return tuple(result)
 
-    return ComponentDefinition.model_validate(
-        component.model_copy(update={"elements": replace(component.elements)}).model_dump(mode="python")
-    )
+    return _refresh_frames(component.model_copy(update={"elements": replace(component.elements)}))
 
 
 def add_node(component: ComponentDefinition, node: Node, parent_id: str | None = None) -> ComponentDefinition:
@@ -101,9 +117,7 @@ def add_node(component: ComponentDefinition, node: Node, parent_id: str | None =
     if parent_id is not None and _is_effectively_locked(component, parent_id):
         raise TreeOperationError("нельзя добавлять элементы в заблокированную группу")
     children = (*parent_nodes(component, parent_id), node)
-    return ComponentDefinition.model_validate(
-        _replace_children(component, parent_id, children).model_dump(mode="python")
-    )
+    return _refresh_frames(_replace_children(component, parent_id, children))
 
 
 def _selection(component: ComponentDefinition, node_ids: Iterable[str], *, same_parent: bool = True) -> tuple[list[NodeLocation], str | None]:
@@ -134,18 +148,97 @@ def move_nodes(component: ComponentDefinition, node_ids: Iterable[str], dx_mm: f
     _ensure_unprotected_subtrees(component, (item.node.id for item in selected), "переместить")
     result = component
     for item in selected:
-        result = update_node(result, item.node.id, x_mm=item.node.x_mm + dx_mm, y_mm=item.node.y_mm + dy_mm)
+        parent = locations(result).get(item.node.id)
+        if parent is None:
+            continue
+        parent_world = Affine() if item.parent_id is None else locations(result)[item.parent_id].world
+        local_dx = parent_world.inverse().a * dx_mm + parent_world.inverse().b * dy_mm
+        local_dy = parent_world.inverse().c * dx_mm + parent_world.inverse().d * dy_mm
+        result = update_node(result, item.node.id, x_mm=parent.node.x_mm + local_dx, y_mm=parent.node.y_mm + local_dy)
     return result
 
 
-def resize_node(component: ComponentDefinition, node_id: str, width_mm: float, height_mm: float) -> ComponentDefinition:
+def resize_node(
+    component: ComponentDefinition, node_id: str, width_mm: float, height_mm: float,
+    anchor: tuple[float, float] = (0.0, 0.0),
+) -> ComponentDefinition:
     item = locations(component).get(node_id)
     if item is None:
         raise TreeOperationError(f"элемент {node_id!r} не найден")
-    if isinstance(item.node, GroupNode):
-        raise TreeOperationError("размер группы вычисляется по её содержимому")
     _ensure_unlocked_selection(component, (node_id,), "изменить размер")
-    return update_node(component, node_id, width_mm=width_mm, height_mm=height_mm)
+    if isinstance(item.node, GroupNode):
+        _ensure_unprotected_subtrees(component, (node_id,), "изменить размер")
+        old = item.node
+        fx, fy, old_width, old_height = old.frame.x_mm, old.frame.y_mm, old.frame.width_mm, old.frame.height_mm
+        scale_x = width_mm / (old_width * math.hypot(old.transform.m11, old.transform.m21))
+        scale_y = height_mm / (old_height * math.hypot(old.transform.m12, old.transform.m22))
+        ax, ay = fx + old_width * anchor[0], fy + old_height * anchor[1]
+        transform = old.transform
+        shift_x = transform.m11 * ax + transform.m12 * ay - transform.m11 * scale_x * ax - transform.m12 * scale_y * ay
+        shift_y = transform.m21 * ax + transform.m22 * ay - transform.m21 * scale_x * ax - transform.m22 * scale_y * ay
+        changes = {
+            "x_mm": old.x_mm + shift_x, "y_mm": old.y_mm + shift_y,
+            "transform": {
+                "m11": transform.m11 * scale_x, "m12": transform.m12 * scale_y,
+                "m21": transform.m21 * scale_x, "m22": transform.m22 * scale_y,
+            },
+        }
+        return update_node(component, node_id, **changes)
+    if isinstance(item.node, LineNode):
+        old = item.node
+        left, top, old_width, old_height = local_bounds(old)
+        scale_x = math.hypot(old.transform.m11, old.transform.m21)
+        scale_y = math.hypot(old.transform.m12, old.transform.m22)
+        new_width = width_mm / scale_x if old_width > 0 else 0.0
+        new_height = height_mm / scale_y if old_height > 0 else 0.0
+        if old_width == 0 and width_mm > 0:
+            new_width = width_mm / scale_x
+        if old_height == 0 and height_mm > 0:
+            new_height = height_mm / scale_y
+        if math.hypot(new_width, new_height) <= 0.001:
+            new_width = 0.001
+        ax, ay = anchor
+        anchor_x, anchor_y = left + old_width * ax, top + old_height * ay
+        new_left, new_top = anchor_x - new_width * ax, anchor_y - new_height * ay
+        new_dx = math.copysign(new_width, old.dx_mm if old.dx_mm else 1.0)
+        new_dy = math.copysign(new_height, old.dy_mm if old.dy_mm else 1.0)
+        origin_x = new_left if new_dx >= 0 else new_left + new_width
+        origin_y = new_top if new_dy >= 0 else new_top + new_height
+        transform = old.transform
+        return update_node(
+            component, node_id,
+            x_mm=old.x_mm + transform.m11 * origin_x + transform.m12 * origin_y,
+            y_mm=old.y_mm + transform.m21 * origin_x + transform.m22 * origin_y,
+            dx_mm=new_dx, dy_mm=new_dy,
+        )
+    old_width, old_height = item.node.width_mm, item.node.height_mm
+    transform = item.node.transform
+    width = width_mm / math.hypot(transform.m11, transform.m21)
+    height = height_mm / math.hypot(transform.m12, transform.m22)
+    ax, ay = old_width * anchor[0], old_height * anchor[1]
+    x_mm = item.node.x_mm + transform.m11 * (ax - width * anchor[0]) + transform.m12 * (ay - height * anchor[1])
+    y_mm = item.node.y_mm + transform.m21 * (ax - width * anchor[0]) + transform.m22 * (ay - height * anchor[1])
+    return update_node(component, node_id, x_mm=x_mm, y_mm=y_mm, width_mm=width, height_mm=height)
+
+
+def rotate_node(component: ComponentDefinition, node_id: str, degrees: float) -> ComponentDefinition:
+    item = locations(component).get(node_id)
+    if item is None:
+        raise TreeOperationError(f"элемент {node_id!r} не найден")
+    _ensure_unlocked_selection(component, (node_id,), "повернуть")
+    if isinstance(item.node, GroupNode):
+        _ensure_unprotected_subtrees(component, (node_id,), "повернуть")
+    left, top, width, height = local_bounds(item.node)
+    current = Affine.node(item.node)
+    center_x, center_y = left + width / 2, top + height / 2
+    world_center = current.point(center_x, center_y)
+    delta = math.radians(degrees - math.degrees(math.atan2(current.c, current.a)))
+    cosine, sine = math.cos(delta), math.sin(delta)
+    rotated = Affine(cosine, -sine, sine, cosine).then(current)
+    rotated = Affine(rotated.a, rotated.b, rotated.c, rotated.d,
+                     world_center[0] - rotated.a * center_x - rotated.b * center_y,
+                     world_center[1] - rotated.c * center_x - rotated.d * center_y)
+    return update_node(component, node_id, x_mm=rotated.x, y_mm=rotated.y, transform=rotated.transform_model())
 
 
 def resize_line_endpoint(component: ComponentDefinition, node_id: str, dx_mm: float, dy_mm: float) -> ComponentDefinition:
@@ -209,15 +302,17 @@ def group_nodes(component: ComponentDefinition, node_ids: Iterable[str], group_i
     selected, parent_id = _selection(component, node_ids)
     _ensure_unlocked_selection(component, (item.node.id for item in selected), "сгруппировать")
     _ensure_unprotected_subtrees(component, (item.node.id for item in selected), "сгруппировать")
-    if len(selected) < 2:
-        raise TreeOperationError("для группы нужно выбрать не менее двух элементов")
     nodes = list(parent_nodes(component, parent_id))
     ids = {item.node.id for item in selected}
     ordered = [node for node in nodes if node.id in ids]
-    group_x = min(node.x_mm for node in ordered)
-    group_y = min(node.y_mm for node in ordered)
+    group_x, group_y = ordered[0].x_mm, ordered[0].y_mm
+    offset = Affine(1, 0, 0, 1, -group_x, -group_y)
     children = tuple(
-        node.model_copy(update={"x_mm": node.x_mm - group_x, "y_mm": node.y_mm - group_y})
+        node.model_copy(update={
+            "x_mm": offset.then(Affine.node(node)).x,
+            "y_mm": offset.then(Affine.node(node)).y,
+            "transform": offset.then(Affine.node(node)).transform_model(),
+        })
         for node in ordered
     )
     group = GroupNode(id=group_id, type="group", name=name, x_mm=group_x, y_mm=group_y, children=children)
@@ -225,9 +320,7 @@ def group_nodes(component: ComponentDefinition, node_ids: Iterable[str], group_i
     remaining = [node for node in nodes if node.id not in ids]
     insertion = sum(1 for index, node in enumerate(nodes) if index <= top_index and node.id not in ids)
     remaining.insert(insertion, group)
-    return ComponentDefinition.model_validate(
-        _replace_children(component, parent_id, tuple(remaining)).model_dump(mode="python")
-    )
+    return _refresh_frames(_replace_children(component, parent_id, tuple(remaining)))
 
 
 def ungroup_node(component: ComponentDefinition, group_id: str) -> ComponentDefinition:
@@ -238,13 +331,15 @@ def ungroup_node(component: ComponentDefinition, group_id: str) -> ComponentDefi
     _ensure_unprotected_subtrees(component, (group_id,), "разгруппировать")
     siblings = list(parent_nodes(component, item.parent_id))
     children = tuple(
-        child.model_copy(update={"x_mm": child.x_mm + item.node.x_mm, "y_mm": child.y_mm + item.node.y_mm})
+        child.model_copy(update={
+            "x_mm": item.node.transform.m11 * child.x_mm + item.node.transform.m12 * child.y_mm + item.node.x_mm,
+            "y_mm": item.node.transform.m21 * child.x_mm + item.node.transform.m22 * child.y_mm + item.node.y_mm,
+            "transform": Affine.node(item.node).then(Affine.node(child)).transform_model(),
+        })
         for child in item.node.children
     )
     siblings[item.index:item.index + 1] = children
-    return ComponentDefinition.model_validate(
-        _replace_children(component, item.parent_id, tuple(siblings)).model_dump(mode="python")
-    )
+    return _refresh_frames(_replace_children(component, item.parent_id, tuple(siblings)))
 
 
 def reparent_nodes(component: ComponentDefinition, node_ids: Iterable[str], new_parent_id: str | None) -> ComponentDefinition:
@@ -271,13 +366,12 @@ def reparent_nodes(component: ComponentDefinition, node_ids: Iterable[str], new_
     old_children = tuple(node for node in parent_nodes(component, old_parent_id) if node.id not in {item.node.id for item in selected})
     result = _replace_children(component, old_parent_id, old_children)
     refreshed = locations(result)
-    target_x = refreshed[new_parent_id].global_x if new_parent_id is not None else 0.0
-    target_y = refreshed[new_parent_id].global_y if new_parent_id is not None else 0.0
-    moved = tuple(
-        item.node.model_copy(update={"x_mm": item.global_x - target_x, "y_mm": item.global_y - target_y})
-        for item in sorted(selected, key=lambda candidate: candidate.index)
-    )
-    return _replace_children(result, new_parent_id, (*parent_nodes(result, new_parent_id), *moved))
+    parent_world = refreshed[new_parent_id].world if new_parent_id is not None else Affine()
+    moved = []
+    for item in sorted(selected, key=lambda candidate: candidate.index):
+        local = parent_world.inverse().then(item.world)
+        moved.append(item.node.model_copy(update={"x_mm": local.x, "y_mm": local.y, "transform": local.transform_model()}))
+    return _refresh_frames(_replace_children(result, new_parent_id, (*parent_nodes(result, new_parent_id), *moved)))
 
 
 def _is_effectively_locked(component: ComponentDefinition, node_id: str) -> bool:
@@ -362,18 +456,8 @@ def node_bounds(component: ComponentDefinition, node_id: str) -> tuple[float, fl
     index = locations(component)
     item = index[node_id]
     node = item.node
-    if isinstance(node, LineNode):
-        left, top = min(0.0, node.dx_mm), min(0.0, node.dy_mm)
-        return item.global_x + left, item.global_y + top, abs(node.dx_mm), abs(node.dy_mm)
-    if isinstance(node, ShapeNode):
-        return item.global_x, item.global_y, node.width_mm, node.height_mm
-    if not isinstance(node, GroupNode):
-        return item.global_x, item.global_y, node.width_mm, node.height_mm
-    if not node.children:
-        return item.global_x, item.global_y, 0.0, 0.0
-    child_bounds = [node_bounds(component, child.id) for child in node.children]
-    left = min(bound[0] for bound in child_bounds)
-    top = min(bound[1] for bound in child_bounds)
-    right = max(bound[0] + bound[2] for bound in child_bounds)
-    bottom = max(bound[1] + bound[3] for bound in child_bounds)
-    return left, top, right - left, bottom - top
+    left, top, width, height = local_bounds(node)
+    points = (item.world.point(left, top), item.world.point(left + width, top),
+              item.world.point(left, top + height), item.world.point(left + width, top + height))
+    xs, ys = [point[0] for point in points], [point[1] for point in points]
+    return min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)

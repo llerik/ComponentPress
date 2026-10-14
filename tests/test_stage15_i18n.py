@@ -17,7 +17,7 @@ def test_catalogs_have_matching_keys_and_placeholders() -> None:
     set_language("en")
     assert tr("about.schema", version=SCHEMA_VERSION).startswith("Supported")
     assert str(Diagnostic("YAML_SYNTAX", "Синтаксис YAML нарушен")).endswith("The operation needs attention (YAML_SYNTAX).")
-    assert str(APPLICATION_VERSION) == "0.15"
+    assert str(APPLICATION_VERSION) == "0.16"
     set_language("ru")
 
 
@@ -32,7 +32,7 @@ def test_about_saves_language_for_restart(monkeypatch, tmp_path: Path, qtbot) ->
         assert selector is not None
         labels = [label.text() for label in dialog.findChildren(QLabel)]
         assert any("GNU GPL" in label for label in labels)
-        assert any("0.15" in label for label in labels)
+        assert any("0.16" in label for label in labels)
         assert any(str(SCHEMA_VERSION) in label for label in labels)
         selector.setCurrentIndex(1)
         dialog.accept()

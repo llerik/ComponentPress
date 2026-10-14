@@ -106,7 +106,7 @@ class JobStore:
         report_path = path / "build-report.json"
         try:
             report = json.loads(report_path.read_text(encoding="utf-8"))
-            if report.get("job_id") != job_id or report.get("complete") is not True or report.get("report_version", 1) not in {1, 2}:
+            if report.get("job_id") != job_id or report.get("complete") is not True or report.get("report_version", 1) not in {1, 2, 3}:
                 return False
             for relative, expected in report.get("output_hashes", {}).items():
                 relative_path = Path(relative)

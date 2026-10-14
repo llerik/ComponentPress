@@ -16,7 +16,7 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
-from componentpress.domain.values import CellValue, DataRow, DataSheetSnapshot, FormulaState, value_to_text
+from componentpress.domain.values import CellValue, DataRow, DataSheetSnapshot, FormulaState, cell_is_empty, value_to_text
 
 
 _NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main", "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"}
@@ -112,16 +112,20 @@ class XlsxReader:
                 raise ProjectError(Diagnostic("SHEET_UNKNOWN", f"лист {sheet!r} не найден", path, source=source, sheet=sheet))
             formula_sheet = formula_book[sheet]
             value_sheet = value_book[sheet]
-            if any(item.max_row >= 2 for item in formula_sheet.merged_cells.ranges):
-                merged = next(item for item in formula_sheet.merged_cells.ranges if item.max_row >= 2)
-                raise ProjectError(Diagnostic("MERGED_CELLS_UNSUPPORTED", f"объединённые ячейки данных не поддерживаются: {merged}", path, source=source, sheet=sheet))
-            max_column = formula_sheet.max_column
+            # Worksheet dimensions include formatted blank cells. Bound scans to
+            # cells carrying a value/formula so formatting cannot turn a small
+            # table into a million-row walk.
+            populated = tuple(cell for cell in formula_sheet._cells.values() if cell.value is not None)
+            max_column = max((cell.column for cell in populated if cell.row == 1), default=1)
             headers: list[str] = []
             seen: dict[str, str] = {}
             for column in range(1, max_column + 1):
                 coordinate = f"{get_column_letter(column)}1"
-                raw = formula_sheet.cell(1, column).value
-                if not isinstance(raw, str) or not raw.strip():
+                header_cell = formula_sheet.cell(1, column)
+                raw = header_cell.value
+                if raw is None or (isinstance(raw, str) and not raw.strip()):
+                    break
+                if header_cell.data_type == "f" or not isinstance(raw, str):
                     raise ProjectError(Diagnostic("HEADER_INVALID", "заголовок должен быть непустым текстом", path, source=source, sheet=sheet, cell=coordinate))
                 header = raw.strip()
                 if "{" in header or "}" in header:
@@ -131,6 +135,28 @@ class XlsxReader:
                     raise ProjectError(Diagnostic("HEADER_DUPLICATE", f"повторный заголовок {header!r}", path, source=source, sheet=sheet, cell=coordinate))
                 seen[normalized] = header
                 headers.append(header)
+            if not headers:
+                raise ProjectError(Diagnostic("HEADER_INVALID", "A1 должен содержать непустой текстовый заголовок", path, source=source, sheet=sheet, cell="A1"))
+            last_data_row = 1
+            max_data_row = max((cell.row for cell in populated if cell.column <= len(headers)), default=1)
+            for row_number in range(2, max_data_row + 1):
+                occupied = False
+                for column in range(1, len(headers) + 1):
+                    coordinate = f"{get_column_letter(column)}{row_number}"
+                    formula_cell = formula_sheet.cell(row_number, column)
+                    state, _formula = formulas.get(coordinate, (FormulaState.NONE, None))
+                    if state is FormulaState.NONE and formula_cell.data_type == "e":
+                        state = FormulaState.ERROR
+                    raw_value = value_sheet.cell(row_number, column).value if state is not FormulaState.NONE else formula_cell.value
+                    if not cell_is_empty(CellValue(raw_value, coordinate, state)):
+                        occupied = True
+                if not occupied:
+                    break
+                last_data_row = row_number
+            area = f"A1:{get_column_letter(len(headers))}{max(1, last_data_row)}"
+            for merged in formula_sheet.merged_cells.ranges:
+                if merged.min_row <= last_data_row and merged.max_row >= 1 and merged.min_col <= len(headers) and merged.max_col >= 1:
+                    raise ProjectError(Diagnostic("MERGED_CELLS_UNSUPPORTED", f"объединённые ячейки пересекают таблицу {area}: {merged}", path, source=source, sheet=sheet))
             configured_copies = copies_columns or (copies_column or "", copies_column or "")
             required = (*((id_column,) if id_column is not None else ()), *(name for name in configured_copies if name))
             for configured in required:
@@ -139,7 +165,7 @@ class XlsxReader:
                     raise ProjectError(Diagnostic("COLUMN_UNKNOWN", f"нет столбца {configured!r}", path, field, source=source, sheet=sheet))
             rows: list[DataRow] = []
             ids: set[str] = set()
-            for row_number in range(2, formula_sheet.max_row + 1):
+            for row_number in range(2, last_data_row + 1):
                 cells: dict[str, CellValue] = {}
                 occupied = False
                 for column, header in enumerate(headers, 1):
@@ -150,7 +176,7 @@ class XlsxReader:
                     if state is FormulaState.NONE and formula_sheet.cell(row_number, column).data_type == "e":
                         state = FormulaState.ERROR
                     value = cached_value if state is not FormulaState.NONE else formula_raw
-                    if formula_raw is not None or state is not FormulaState.NONE:
+                    if not cell_is_empty(CellValue(value, coordinate, state)):
                         occupied = True
                     cells[header] = CellValue(value, coordinate, state, formula)
                 if not occupied:
@@ -182,7 +208,7 @@ class XlsxReader:
                         raise ProjectError(Diagnostic("COPIES_INVALID", "тираж должен быть целым числом от 0", path, "copies_columns", source=source, sheet=sheet, cell=copy_cell.coordinate))
                     counts.append(int(raw))
                 rows.append(DataRow(row_number, instance_id, counts[0], cells, counts[1]))
-            return DataSheetSnapshot(source, path, sheet, digest, version, tuple(headers), tuple(rows), request_id)
+            return DataSheetSnapshot(source, path, sheet, digest, version, tuple(headers), tuple(rows), request_id, area)
         except ProjectError:
             raise
         except (BadZipFile, OSError, ValueError, KeyError) as exc:

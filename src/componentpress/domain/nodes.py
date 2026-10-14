@@ -6,12 +6,43 @@ from pydantic import Field, field_validator, model_validator
 from .project import PositiveMM, StrictModel, _finite
 
 
+class Transform(StrictModel):
+    m11: float = 1.0
+    m12: float = 0.0
+    m21: float = 0.0
+    m22: float = 1.0
+
+    @field_validator("m11", "m12", "m21", "m22", mode="before")
+    @classmethod
+    def finite_coefficient(cls, value: object) -> float:
+        return _finite(value)
+
+    @model_validator(mode="after")
+    def positive_determinant(self):
+        if self.m11 * self.m22 - self.m12 * self.m21 <= 0:
+            raise ValueError("преобразование должно иметь положительный ненулевой определитель")
+        return self
+
+
+class GroupFrame(StrictModel):
+    x_mm: float = 0.0
+    y_mm: float = 0.0
+    width_mm: PositiveMM = 10.0
+    height_mm: PositiveMM = 10.0
+
+    @field_validator("x_mm", "y_mm", "width_mm", "height_mm", mode="before")
+    @classmethod
+    def finite_dimension(cls, value: object) -> float:
+        return _finite(value)
+
+
 class PositionedNode(StrictModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     x_mm: float
     y_mm: float
     locked: bool = False
+    transform: Transform = Field(default_factory=Transform)
 
     @field_validator("x_mm", "y_mm", mode="before")
     @classmethod
@@ -31,6 +62,7 @@ class ImageNode(PositionedNode):
     width_mm: PositiveMM
     height_mm: PositiveMM
     source: str
+    optional: bool = False
     source_mode: Literal["manual", "column"] = "manual"
     source_column: str | None = None
     fit: Literal["contain", "cover", "stretch"] = "contain"
@@ -44,7 +76,7 @@ class ImageNode(PositionedNode):
     def valid_content_source(self):
         if self.source_mode == "column" and not self.source_column:
             raise ValueError("для режима column требуется source_column")
-        if self.source_mode == "manual" and not self.source:
+        if self.source_mode == "manual" and not self.source and not self.optional:
             raise ValueError("для ручного режима требуется путь изображения")
         return self
 
@@ -83,18 +115,37 @@ class HtmlNode(PositionedNode):
 class GroupNode(PositionedNode):
     type: Literal["group"]
     children: tuple["Node", ...] = ()
+    frame: GroupFrame = Field(default_factory=GroupFrame)
 
     @field_validator("children", mode="before")
     @classmethod
     def child_list(cls, value: object) -> object:
         return tuple(value) if isinstance(value, list) else value
 
+    @model_validator(mode="after")
+    def initialize_frame(self):
+        if "frame" not in self.model_fields_set:
+            from .geometry import group_frame
+
+            object.__setattr__(self, "frame", group_frame(self.children))
+        return self
+
 
 class ConditionalGroupNode(GroupNode):
     type: Literal["conditional_group"]
     condition_column: str = Field(min_length=1)
-    condition_value: str
+    condition_operator: Literal["equals", "not_equals", "is_empty", "is_not_empty"] = "equals"
+    condition_value: str | None = None
     condition_matches: bool | None = Field(default=None, exclude=True)
+
+    @model_validator(mode="after")
+    def valid_condition(self):
+        if self.condition_operator in {"equals", "not_equals"} and self.condition_value is None:
+            raise ValueError("для equals/not_equals требуется condition_value")
+        if self.condition_operator in {"is_empty", "is_not_empty"} and self.condition_value is not None:
+            raise ValueError("condition_value запрещён для операторов пустоты")
+        return self
+
 
 
 class ShapeNode(PositionedNode):

@@ -77,7 +77,7 @@ def _patch_formula_cells(path: Path) -> None:
 
 def _project(*, variables: dict[str, str] | None = None) -> ProjectDefinition:
     return ProjectDefinition(
-        schema_version=5,
+        schema_version=6,
         id="test",
         name="Тест",
         version="0.0.1",
@@ -88,7 +88,7 @@ def _project(*, variables: dict[str, str] | None = None) -> ProjectDefinition:
 
 def _html_component(html: str) -> ComponentDefinition:
     return ComponentDefinition(
-        schema_version=5,
+        schema_version=6,
         id="card",
         name="Карта",
         size_mm=SizeMM(width=40.0, height=30.0),
@@ -130,13 +130,10 @@ def test_reader_trims_headers_keeps_hidden_rows_skips_blank_rows_and_converts_ty
     snapshot = XlsxReader().read(path, "Лист", id_column="ID", copies_column="Количество")
 
     assert snapshot.headers == ("ID", "Текст", "Количество", "Дата", "Флаг", "Дробь")
-    assert [(row.row_number, row.instance_id, row.copies) for row in snapshot.rows] == [
-        (2, "hidden", 0), (4, "shown", 3),
-    ]
+    assert [(row.row_number, row.instance_id, row.copies) for row in snapshot.rows] == [(2, "hidden", 0)]
     assert value_to_text(snapshot.rows[0].values["Дата"].value) == "2026-10-03"
     assert value_to_text(snapshot.rows[0].values["Флаг"].value) == "true"
     assert value_to_text(snapshot.rows[0].values["Дробь"].value) == "2.5"
-    assert value_to_text(snapshot.rows[1].values["Дробь"].value) == "4"
 
     # The source must be writable/reopenable immediately after the adapter returns.
     reopened = load_workbook(path)
@@ -246,7 +243,7 @@ def test_spreadsheet_text_is_not_reinterpreted_as_template_during_render(tmp_pat
 def test_missing_dynamic_image_reports_originating_excel_cell_and_node(tmp_path: Path) -> None:
     project = _project()
     component = ComponentDefinition(
-        schema_version=5,
+        schema_version=6,
         id="card",
         name="Карта",
         size_mm=SizeMM(width=40.0, height=30.0),
@@ -405,7 +402,7 @@ def test_dynamic_resource_errors_keep_excel_context_for_all_render_contexts(
     project = _project()
     if kind == "image":
         component = ComponentDefinition(
-            schema_version=5, id="card", name="Карта", size_mm=SizeMM(width=40.0, height=30.0),
+            schema_version=6, id="card", name="Карта", size_mm=SizeMM(width=40.0, height=30.0),
             data=DataBinding(source="main", sheet="Лист"),
             elements=(ImageNode(
                 id="subject", name="Ресурс", type="image", x_mm=0.0, y_mm=0.0,
@@ -464,7 +461,7 @@ def test_preview_cache_uses_project_source_and_component_sheet(tmp_path: Path) -
     (root / "data/a.xlsx").write_bytes(b"a")
     (root / "data/b.xlsx").write_bytes(b"b")
     component = ComponentDefinition(
-        schema_version=5, id="card", name="Карта", size_mm=SizeMM(width=40, height=30),
+        schema_version=6, id="card", name="Карта", size_mm=SizeMM(width=40, height=30),
         data=DataBinding(sheet="Лист"),
         elements=(HtmlNode(id="text", name="Текст", type="html", x_mm=0, y_mm=0,
             width_mm=40, height_mm=30, font_family="Arial", font_size_pt=8,
@@ -592,7 +589,7 @@ def test_path_invalid_from_excel_keeps_full_origin(
     expected_node: str,
 ) -> None:
     component = ComponentDefinition(
-        schema_version=5, id="card", name="Карта", size_mm=SizeMM(width=40.0, height=30.0),
+        schema_version=6, id="card", name="Карта", size_mm=SizeMM(width=40.0, height=30.0),
         data=DataBinding(source="main", sheet="Лист"), elements=(node,),
     )
     data, row = _data_row(Путь="../outside.png")

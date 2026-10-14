@@ -1,9 +1,12 @@
 """Component properties shown for an active document."""
 
+import math
+
 from PySide6.QtCore import QSignalBlocker, QSize, Qt, Signal
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -110,6 +113,7 @@ class ElementProperties(QWidget):
     """Exact geometry and type-specific values for one selected node."""
 
     nodeChanged = Signal(dict)
+    rotationRequested = Signal(float)
     insertImageRequested = Signal()
     colorRequested = Signal(str)
 
@@ -127,6 +131,10 @@ class ElementProperties(QWidget):
         self.y_spin = self._number("elementY", -10000.0, 10000.0)
         self.width_spin = self._number("elementWidth", 0.001, 10000.0)
         self.height_spin = self._number("elementHeight", 0.001, 10000.0)
+        self.rotation_spin = self._number("elementRotation", -360000.0, 360000.0)
+        self.rotation_spin.setSuffix("°")
+        self.optional_image = QCheckBox("Изображение может отсутствовать")
+        self.optional_image.setObjectName("optionalImage")
         self.source_edit = QLineEdit()
         self.source_edit.setObjectName("imageSource")
         self.fit_combo = QComboBox()
@@ -140,6 +148,10 @@ class ElementProperties(QWidget):
         self.content_column.setObjectName("contentColumn")
         self.condition_column = QComboBox()
         self.condition_column.setObjectName("conditionColumn")
+        self.condition_operator = QComboBox()
+        self.condition_operator.setObjectName("conditionOperator")
+        for operator, label in (("equals", "Равно"), ("not_equals", "Не равно"), ("is_empty", "Пусто"), ("is_not_empty", "Не пусто")):
+            self.condition_operator.addItem(label, operator)
         self.condition_value = QLineEdit()
         self.condition_value.setObjectName("conditionValue")
         self.condition_state = QLabel()
@@ -217,10 +229,13 @@ class ElementProperties(QWidget):
         form.addRow("Y, мм", self.y_spin)
         form.addRow("Ширина, мм", self.width_spin)
         form.addRow("Высота, мм", self.height_spin)
+        form.addRow("Поворот", self.rotation_spin)
+        form.addRow("Необязательное изображение", self.optional_image)
         form.addRow("Изображение", self.source_edit)
         form.addRow("Источник содержимого", self.content_mode)
         form.addRow("Столбец Excel", self.content_column)
         form.addRow("Столбец условия", self.condition_column)
+        form.addRow("Оператор условия", self.condition_operator)
         form.addRow("Значение условия", self.condition_value)
         form.addRow("Состояние", self.condition_state)
         form.addRow("Заливка", fill_row)
@@ -250,12 +265,15 @@ class ElementProperties(QWidget):
         outer.addLayout(buttons)
         for spin in (self.x_spin, self.y_spin, self.width_spin, self.height_spin, self.stroke_width, self.line_dx, self.line_dy):
             spin.editingFinished.connect(self._geometry_changed)
+        self.rotation_spin.editingFinished.connect(lambda: self.rotationRequested.emit(self.rotation_spin.value()))
+        self.optional_image.toggled.connect(lambda value: self.nodeChanged.emit({"optional": value}))
         self.name_edit.editingFinished.connect(lambda: self.nodeChanged.emit({"name": self.name_edit.text()}))
         self.source_edit.editingFinished.connect(lambda: self.nodeChanged.emit({"source": self.source_edit.text()}))
         self.content_mode.currentIndexChanged.connect(self._content_mode_changed)
         self.content_column.activated.connect(lambda _index: self._content_column_changed())
         self.condition_column.activated.connect(lambda _index: self.nodeChanged.emit({"condition_column": self.condition_column.currentText()}))
         self.condition_value.editingFinished.connect(lambda: self.nodeChanged.emit({"condition_value": self.condition_value.text()}))
+        self.condition_operator.currentIndexChanged.connect(self._condition_operator_changed)
         self.stroke_color.editingFinished.connect(lambda: self.nodeChanged.emit({"stroke": self.stroke_color.text()}))
         self.fill_color.editingFinished.connect(lambda: self.nodeChanged.emit({"fill": self.fill_color.text() or None}))
         self.stroke_width.editingFinished.connect(lambda: self.nodeChanged.emit({"stroke_width_mm": self.stroke_width.value()}))
@@ -302,15 +320,26 @@ class ElementProperties(QWidget):
             changes["stroke_width_mm"] = self.stroke_width.value()
         self.nodeChanged.emit(changes)
 
+    def _condition_operator_changed(self, _index: int) -> None:
+        operator = self.condition_operator.currentData()
+        changes = {"condition_operator": operator}
+        if operator in {"is_empty", "is_not_empty"}:
+            changes["condition_value"] = None
+            self.form.setRowVisible(self.condition_value, False)
+        else:
+            changes["condition_value"] = self.condition_value.text()
+            self.form.setRowVisible(self.condition_value, True)
+        self.nodeChanged.emit(changes)
+
     def show_node(self, node: Node | None, columns: tuple[str, ...] = (), component: ComponentDefinition | None = None, condition_matches: bool | None = None, font_families: tuple[str, ...] = ()) -> None:
         self.setEnabled(node is not None)
         if node is None:
             return
         widgets = (
-            self.x_spin, self.y_spin, self.width_spin, self.height_spin, self.name_edit,
+            self.x_spin, self.y_spin, self.width_spin, self.height_spin, self.rotation_spin, self.name_edit,
             self.source_edit, self.fit_combo, self.font_combo, self.font_spin, self.color_edit,
             self.html_edit, self.content_mode, self.content_column, self.font_combo,
-            self.lock_button, self.condition_column, self.condition_value, self.stroke_color,
+            self.lock_button, self.condition_column, self.condition_operator, self.condition_value, self.optional_image, self.stroke_color,
             self.fill_color, self.stroke_width, self.stroke_style, self.line_dx, self.line_dy,
             *self.alignment_buttons.values(),
         )
@@ -336,9 +365,11 @@ class ElementProperties(QWidget):
         self.form.setRowVisible(self.lock_button, True)
         self.x_spin.setValue(node.x_mm)
         self.y_spin.setValue(node.y_mm)
-        sized = isinstance(node, (ImageNode, HtmlNode))
+        sized = isinstance(node, (ImageNode, HtmlNode, GroupNode))
         self.form.setRowVisible(self.width_spin, sized)
         self.form.setRowVisible(self.height_spin, sized)
+        self.rotation_spin.setValue(math.degrees(math.atan2(node.transform.m21, node.transform.m11)) % 360)
+        self.form.setRowVisible(self.rotation_spin, True)
         line = isinstance(node, LineNode)
         shape = isinstance(node, ShapeNode)
         self.form.setRowVisible(self.line_dx, line)
@@ -362,6 +393,7 @@ class ElementProperties(QWidget):
         self.form.setRowVisible(self.group_bounds, is_group)
         conditional = isinstance(node, ConditionalGroupNode)
         self.form.setRowVisible(self.condition_column, conditional)
+        self.form.setRowVisible(self.condition_operator, conditional)
         self.form.setRowVisible(self.condition_value, conditional)
         self.form.setRowVisible(self.condition_state, conditional)
         if conditional:
@@ -370,7 +402,10 @@ class ElementProperties(QWidget):
             if self.condition_column.findText(node.condition_column) < 0:
                 self.condition_column.addItem(node.condition_column)
             self.condition_column.setCurrentText(node.condition_column)
-            self.condition_value.setText(node.condition_value)
+            self.condition_value.setText(node.condition_value or "")
+            self.condition_operator.setCurrentIndex(max(0, self.condition_operator.findData(node.condition_operator)))
+            self.condition_value.setEnabled(node.condition_operator in {"equals", "not_equals"})
+            self.form.setRowVisible(self.condition_value, node.condition_operator in {"equals", "not_equals"})
             self.condition_state.setText("Показывается" if condition_matches is True else "Скрыта" if condition_matches is False else "Нет строки")
         if is_group and component is not None:
             from componentpress.domain.tree import node_bounds
@@ -378,9 +413,17 @@ class ElementProperties(QWidget):
             _, _, bounds_width, bounds_height = node_bounds(component, node.id)
             self.group_bounds.setText(f"{bounds_width:.3f} × {bounds_height:.3f}")
         if sized:
-            self.width_spin.setValue(node.width_mm)
-            self.height_spin.setValue(node.height_mm)
+            scale_x = math.hypot(node.transform.m11, node.transform.m21)
+            scale_y = math.hypot(node.transform.m12, node.transform.m22)
+            if isinstance(node, GroupNode):
+                self.width_spin.setValue(node.frame.width_mm * scale_x)
+                self.height_spin.setValue(node.frame.height_mm * scale_y)
+            else:
+                self.width_spin.setValue(node.width_mm * scale_x)
+                self.height_spin.setValue(node.height_mm * scale_y)
         image = isinstance(node, ImageNode)
+        self.optional_image.setChecked(image and node.optional)
+        self.form.setRowVisible(self.optional_image, image)
         html = isinstance(node, HtmlNode)
         self.form.setRowVisible(self.name_edit, True)
         self.name_edit.setText(node.name)
@@ -436,8 +479,8 @@ class ElementProperties(QWidget):
 
     def set_edit_locked(self, locked: bool) -> None:
         for widget in (
-            self.name_edit, self.x_spin, self.y_spin, self.width_spin, self.height_spin,
-            self.condition_column, self.condition_value, self.stroke_button, self.fill_button, self.no_fill_button,
+            self.name_edit, self.x_spin, self.y_spin, self.width_spin, self.height_spin, self.rotation_spin,
+            self.condition_column, self.condition_operator, self.condition_value, self.optional_image, self.stroke_button, self.fill_button, self.no_fill_button,
             self.stroke_width, self.stroke_style, self.line_dx, self.line_dy,
             self.source_edit, self.fit_combo, self.content_mode, self.content_column,
             self.font_combo, self.font_spin, self.color_edit, self.color_button,

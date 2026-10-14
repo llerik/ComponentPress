@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath
 from collections.abc import Callable
 
-from PySide6.QtCore import QDir
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QDir, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QColorDialog,
@@ -19,6 +19,9 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QLabel,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -26,6 +29,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from componentpress.project_io.files import file_hash
+from componentpress.project_io.paths import resolve_project_path
+from componentpress.resources.repository import ResourceRepository
 from componentpress.rendering.fonts import available_font_families
 
 
@@ -64,6 +70,111 @@ class ResourcePickerDialog(QDialog):
         buttons.accepted.connect(self._accept_selection)
         buttons.rejected.connect(self.reject)
         self.tree.doubleClicked.connect(lambda _index: self._accept_selection())
+
+
+class ImageManagerDialog(QDialog):
+    folderImportRequested = Signal(object, str)
+
+    def __init__(self, root: Path, importer: Callable, replacer: Callable, parent=None):
+        super().__init__(parent)
+        self.root = root
+        self.importer = importer
+        self.replacer = replacer
+        self.setWindowTitle("Изображения проекта")
+        self.resize(720, 520)
+        layout = QVBoxLayout(self)
+        self.images = QListWidget()
+        self.images.setObjectName("projectImages")
+        self.images.setIconSize(QSize(64, 64))
+        layout.addWidget(self.images)
+        actions = QHBoxLayout()
+        self.add_button = QPushButton("Добавить изображение…")
+        self.replace_button = QPushButton("Заменить выбранное…")
+        self.folder_button = QPushButton("Импортировать папку…")
+        self.refresh_button = QPushButton("Обновить")
+        for button in (self.add_button, self.replace_button, self.folder_button, self.refresh_button):
+            actions.addWidget(button)
+        layout.addLayout(actions)
+        self.import_progress = QLabel()
+        self.import_progress.setObjectName("imageImportProgress")
+        layout.addWidget(self.import_progress)
+        self.add_button.clicked.connect(self._add_image)
+        self.replace_button.clicked.connect(self._replace_image)
+        self.folder_button.clicked.connect(self._import_folder)
+        self.refresh_button.clicked.connect(self.refresh)
+        self.refresh()
+
+    def refresh(self) -> None:
+        self.images.clear()
+        try:
+            paths = ResourceRepository.list_images(self.root)
+            for path in paths:
+                relative = path.relative_to(self.root).as_posix()
+                image = QPixmap(str(path))
+                size = f"{image.width()}×{image.height()} px" if not image.isNull() else "Не удалось прочитать изображение"
+                item = QListWidgetItem(f"{path.name} — {relative} — {size}")
+                item.setData(Qt.ItemDataRole.UserRole, relative)
+                if not image.isNull():
+                    item.setIcon(QIcon(QPixmap(image.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))))
+                self.images.addItem(item)
+        except Exception as exc:
+            QMessageBox.warning(self, "Изображения проекта", format_error(exc))
+        self.replace_button.setEnabled(self.images.count() > 0)
+
+    def _destination_folder(self) -> str | None:
+        folder, accepted = QInputDialog.getText(self, "Папка назначения", "Подпапка внутри assets/images (можно пустую):")
+        return folder.replace("\\", "/").strip("/") if accepted else None
+
+    def _add_image(self) -> None:
+        source, _ = QFileDialog.getOpenFileName(self, "Добавить изображение", "", "Изображения (*.png *.jpg *.jpeg)")
+        if not source:
+            return
+        folder = self._destination_folder()
+        if folder is None:
+            return
+        try:
+            self.importer(Path(source), folder)
+            self.refresh()
+        except Exception as exc:
+            QMessageBox.warning(self, "Не удалось добавить изображение", format_error(exc))
+
+    def _replace_image(self) -> None:
+        item = self.images.currentItem()
+        if item is None:
+            return
+        source, _ = QFileDialog.getOpenFileName(self, "Выбрать замену", "", "Изображения (*.png *.jpg *.jpeg)")
+        if not source:
+            return
+        relative = item.data(Qt.ItemDataRole.UserRole)
+        if QMessageBox.question(self, "Заменить изображение", f"Заменить ресурс «{relative}» без изменения ссылок?") != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            target = resolve_project_path(self.root, relative)
+            self.replacer(relative, Path(source), file_hash(target))
+            self.refresh()
+        except Exception as exc:
+            QMessageBox.warning(self, "Не удалось заменить изображение", format_error(exc))
+
+    def _import_folder(self) -> None:
+        source = QFileDialog.getExistingDirectory(self, "Выбрать папку изображений")
+        if not source:
+            return
+        folder = self._destination_folder()
+        if folder is not None:
+            self.folderImportRequested.emit(Path(source), folder)
+
+    def set_import_progress(self, completed: int, total: int, message: str = "") -> None:
+        self.import_progress.setText(message or f"Импорт: {completed} из {total}")
+
+    def finish_import(self, paths: tuple[str, ...] | None, error: Exception | None) -> None:
+        self.folder_button.setEnabled(True)
+        if error is not None:
+            self.set_import_progress(0, 0, "")
+            QMessageBox.warning(self, "Импорт папки", format_error(error))
+            self.refresh()
+            return
+        self.refresh()
+        self.set_import_progress(len(paths or ()), len(paths or ()), f"Импортировано файлов: {len(paths or ())}")
 
     def _relative(self, path: Path) -> str:
         return PurePosixPath(path.relative_to(self.root)).as_posix()

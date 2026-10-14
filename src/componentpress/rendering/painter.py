@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QBrush
+from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QTransform
 
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
@@ -49,15 +49,19 @@ def paint_component(
     def visit(nodes: tuple[Node, ...], offset_x: float, offset_y: float) -> None:
         for node in nodes:
             x, y = offset_x + node.x_mm, offset_y + node.y_mm
+            painter.save()
+            painter.translate(x, y)
+            transform = node.transform
+            painter.setTransform(QTransform(transform.m11, transform.m21, transform.m12, transform.m22, 0, 0), True)
             if isinstance(node, ImageNode):
                 source = resolve(node.source, html=False, field=f"elements.{node.id}.source")
-                _draw_image(painter, node, loader, owner, x, y, source)
+                if source:
+                    _draw_image(painter, node, loader, owner, 0, 0, source)
             elif isinstance(node, HtmlNode):
                 html = resolve(node.html, html=True, field=f"elements.{node.id}.html")
                 prepared = prepare_html(node, html, loader, owner)
                 painter.save()
-                painter.setClipRect(QRectF(x, y, node.width_mm, node.height_mm), Qt.ClipOperation.IntersectClip)
-                painter.translate(x, y)
+                painter.setClipRect(QRectF(0, 0, node.width_mm, node.height_mm), Qt.ClipOperation.IntersectClip)
                 painter.scale(MM_PER_INCH / HTML_DPI, MM_PER_INCH / HTML_DPI)
                 prepared.draw(painter)
                 painter.restore()
@@ -68,7 +72,7 @@ def paint_component(
                 pen.setWidthF(node.stroke_width_mm)
                 painter.setPen(pen)
                 painter.setBrush(QBrush(QColor(node.fill)) if node.fill is not None else Qt.BrushStyle.NoBrush)
-                rect = QRectF(x, y, node.width_mm, node.height_mm)
+                rect = QRectF(0, 0, node.width_mm, node.height_mm)
                 if node.type == "rectangle":
                     painter.drawRect(rect)
                 else:
@@ -80,15 +84,15 @@ def paint_component(
                 pen = QPen(QColor(node.stroke), 0, style)
                 pen.setWidthF(node.stroke_width_mm)
                 painter.setPen(pen)
-                painter.drawLine(x, y, x + node.dx_mm, y + node.dy_mm)
-                painter.restore()
+                painter.drawLine(0, 0, node.dx_mm, node.dy_mm)
             elif isinstance(node, ConditionalGroupNode):
                 if node.condition_matches is True:
-                    visit(node.children, x, y)
+                    visit(node.children, 0, 0)
             elif isinstance(node, GroupNode):
-                visit(node.children, x, y)
+                visit(node.children, 0, 0)
             else:
                 raise ProjectError(Diagnostic("NODE_UNSUPPORTED", f"тип узла {type(node).__name__} не поддерживается", owner))
+            painter.restore()
 
     try:
         visit(component.elements, 0, 0)

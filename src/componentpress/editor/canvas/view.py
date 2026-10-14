@@ -8,7 +8,8 @@ from PySide6.QtWidgets import QFrame, QGraphicsPixmapItem, QGraphicsRectItem, QG
 
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.nodes import GroupNode, LineNode, Node
-from componentpress.domain.tree import effectively_locked_ids, locations, node_bounds
+from componentpress.domain.geometry import Affine, local_bounds
+from componentpress.domain.tree import effectively_locked_ids, locations
 
 
 class NodeOverlay(QGraphicsRectItem):
@@ -38,21 +39,35 @@ class NodeOverlay(QGraphicsRectItem):
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         super().paint(painter, option, widget)
-        if self.isSelected() and self.line_endpoint is not None:
-            size = 8.0 / max(0.1, painter.transform().m11())
-            point = self.line_endpoint
-            painter.fillRect(QRectF(point.x() - size / 2, point.y() - size / 2, size, size), QColor("#0B78D0"))
-        elif self.isSelected() and not self.is_group:
-            size = 7.0 / max(0.1, painter.transform().m11())
-            corner = self.rect().bottomRight()
-            painter.fillRect(QRectF(corner.x() - size, corner.y() - size, size, size), QColor("#0B78D0"))
+        if self.isSelected():
+            transform = painter.transform()
+            scale = max(0.1, ((transform.m11() ** 2 + transform.m12() ** 2) ** 0.5))
+            size = 8.0 / scale
+            for point in self.handle_points():
+                painter.fillRect(QRectF(point.x() - size / 2, point.y() - size / 2, size, size), QColor("#0B78D0"))
+
+    def handle_points(self) -> tuple[QPointF, ...]:
+        rect = self.rect()
+        x1, y1, x2, y2 = rect.left(), rect.top(), rect.right(), rect.bottom()
+        xm, ym = (x1 + x2) / 2, (y1 + y2) / 2
+        return tuple(QPointF(x, y) for x, y in ((x1,y1),(xm,y1),(x2,y1),(x2,ym),(x2,y2),(xm,y2),(x1,y2),(x1,ym)))
+
+    def handle_at(self, scene_point: QPointF, tolerance: float) -> int | None:
+        point = self.mapFromScene(scene_point)
+        local_tolerance = tolerance / max(0.05, min(abs(self.transform().m11()), abs(self.transform().m22())))
+        candidates = [
+            (index, (point.x() - handle.x()) ** 2 + (point.y() - handle.y()) ** 2)
+            for index, handle in enumerate(self.handle_points())
+            if abs(point.x() - handle.x()) <= local_tolerance and abs(point.y() - handle.y()) <= local_tolerance
+        ]
+        return min(candidates, key=lambda item: item[1])[0] if candidates else None
 
 
 class ComponentCanvas(QGraphicsView):
     zoomChanged = Signal(int)
     selectionChanged = Signal(object)
     moveRequested = Signal(object, float, float)
-    resizeRequested = Signal(str, float, float)
+    resizeRequested = Signal(str, float, float, float, float)
     lineResizeRequested = Signal(str, float, float)
     placementRequested = Signal(str, float, float)
     drawRequested = Signal(str, float, float, float, float)
@@ -82,6 +97,8 @@ class ComponentCanvas(QGraphicsView):
         self._drag_positions: dict[str, QPointF] = {}
         self._resize_id: str | None = None
         self._resize_rect: QRectF | None = None
+        self._resize_handle: int | None = None
+        self._resize_local_start: QPointF | None = None
         self._line_resize_id: str | None = None
         self._syncing_selection = False
         self._nudge_key: int | None = None
@@ -178,18 +195,20 @@ class ComponentCanvas(QGraphicsView):
             nonlocal order
             for node in nodes:
                 order += 1
-                x, y, width, height = node_bounds(component, node.id)
                 node_location = locations(component)[node.id]
                 node_data = node_location.node
-                endpoint = QPointF((node_location.global_x + node_data.dx_mm) * sx, (node_location.global_y + node_data.dy_mm) * sy) if isinstance(node_data, LineNode) else None
+                left, top, width, height = local_bounds(node_data)
                 if isinstance(node_data, LineNode):
-                    bounds = QRectF(x * sx, y * sy, width * sx, height * sy)
-                    if bounds.width() < 8:
-                        bounds.adjust(-4, 0, 4, 0)
-                    if bounds.height() < 8:
-                        bounds.adjust(0, -4, 0, 4)
-                else:
-                    bounds = QRectF(x * sx, y * sy, width * sx, height * sy)
+                    if width * sx < 8:
+                        left -= (8 / sx - width) / 2
+                        width = 8 / sx
+                    if height * sy < 8:
+                        top -= (8 / sy - height) / 2
+                        height = 8 / sy
+                bounds = QRectF(left * sx, top * sy, width * sx, height * sy)
+                world = node_location.world
+                matrix = QTransform(world.a, world.c * sy / sx, world.b * sx / sy, world.d, 0, 0)
+                endpoint = QPointF((node_data.dx_mm - left) * sx, (node_data.dy_mm - top) * sy) if isinstance(node_data, LineNode) else None
                 overlay = NodeOverlay(
                     node.id,
                     isinstance(node, GroupNode),
@@ -198,6 +217,8 @@ class ComponentCanvas(QGraphicsView):
                     float(order),
                     endpoint,
                 )
+                overlay.setPos(world.x * sx, world.y * sy)
+                overlay.setTransform(matrix)
                 scene.addItem(overlay)
                 self._overlays[node.id] = overlay
                 if isinstance(node, GroupNode):
@@ -331,7 +352,8 @@ class ComponentCanvas(QGraphicsView):
         self._syncing_selection = False
         self.selectionChanged.emit(self.selected_ids)
         selected = [overlay for overlay in self._overlays.values() if overlay.isSelected()]
-        if item.locked or any(overlay.locked for overlay in selected):
+        self._resize_handle = item.handle_at(point, 10.0 / max(0.1, self.transform().m11())) if item.isSelected() else None
+        if item.locked or (self._resize_handle is None and any(overlay.locked for overlay in selected)):
             self._drag_start = None
             self._drag_positions = {}
             event.accept()
@@ -341,17 +363,11 @@ class ComponentCanvas(QGraphicsView):
         self._resize_id = None
         self._resize_rect = None
         self._line_resize_id = None
-        if len(selected) == 1 and selected[0].line_endpoint is not None:
-            tolerance = 10.0 / max(0.1, self.transform().m11())
-            end = selected[0].line_endpoint
-            if abs(point.x() - end.x()) <= tolerance and abs(point.y() - end.y()) <= tolerance:
-                self._line_resize_id = selected[0].node_id
-        if len(selected) == 1 and not selected[0].is_group:
-            tolerance = 10.0 / max(0.1, self.transform().m11())
-            corner = selected[0].sceneBoundingRect().bottomRight()
-            if abs(point.x() - corner.x()) <= tolerance and abs(point.y() - corner.y()) <= tolerance:
-                self._resize_id = selected[0].node_id
-                self._resize_rect = QRectF(selected[0].rect())
+        self._resize_local_start = None
+        if self._resize_handle is not None:
+            self._resize_id = item.node_id
+            self._resize_rect = QRectF(item.rect())
+            self._resize_local_start = item.mapFromScene(point)
         event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
@@ -367,17 +383,18 @@ class ComponentCanvas(QGraphicsView):
                 self._draw_preview.setRect(QRectF(start, point).normalized())
             event.accept()
             return
-        if self._line_resize_id is not None:
-            self._overlays[self._line_resize_id].line_endpoint = point
-            self.viewport().update()
-            event.accept()
-            return
         delta = point - self._drag_start
         if self._resize_id is not None and self._resize_rect is not None:
             overlay = self._overlays[self._resize_id]
             rect = QRectF(self._resize_rect)
-            rect.setWidth(max(1.0, rect.width() + delta.x()))
-            rect.setHeight(max(1.0, rect.height() + delta.y()))
+            local = overlay.mapFromScene(point)
+            dx = local.x() - self._resize_local_start.x()
+            dy = local.y() - self._resize_local_start.y()
+            handle = self._resize_handle
+            if handle in (0, 6, 7): rect.setLeft(min(rect.right() - 1, rect.left() + dx))
+            if handle in (2, 3, 4): rect.setRight(max(rect.left() + 1, rect.right() + dx))
+            if handle in (0, 1, 2): rect.setTop(min(rect.bottom() - 1, rect.top() + dy))
+            if handle in (4, 5, 6): rect.setBottom(max(rect.top() + 1, rect.bottom() + dy))
             overlay.setRect(rect)
         else:
             for node_id, start in self._drag_positions.items():
@@ -398,19 +415,6 @@ class ComponentCanvas(QGraphicsView):
                 self.drawRequested.emit(tool, start.x() / sx, start.y() / sy, end.x() / sx, end.y() / sy)
             event.accept()
             return
-        if self._line_resize_id is not None and self._component is not None:
-            point = self.mapToScene(event.position().toPoint())
-            node_id = self._line_resize_id
-            item = locations(self._component)[node_id]
-            component_before = self._component
-            self.lineResizeRequested.emit(node_id, point.x() / self._world_per_mm_x - item.global_x, point.y() / self._world_per_mm_y - item.global_y)
-            if self._component is component_before and node_id in self._overlays:
-                line = item.node
-                if isinstance(line, LineNode):
-                    self._overlays[node_id].line_endpoint = QPointF((item.global_x + line.dx_mm) * self._world_per_mm_x, (item.global_y + line.dy_mm) * self._world_per_mm_y)
-            self._line_resize_id = None
-            event.accept()
-            return
         if self._drag_start is None or self._component is None or self._pixmap_item is None:
             super().mouseReleaseEvent(event)
             return
@@ -422,7 +426,21 @@ class ComponentCanvas(QGraphicsView):
             rect = self._overlays[self._resize_id].rect()
             component_before = self._component
             node_id = self._resize_id
-            self.resizeRequested.emit(self._resize_id, rect.width() * sx, rect.height() * sy)
+            handle = self._resize_handle
+            anchor_x = 1.0 if handle in (0, 1, 2) else 0.0 if handle in (4, 5, 6) else 0.5
+            anchor_y = 1.0 if handle in (0, 6, 7) else 0.0 if handle in (2, 3, 4) else 0.5
+            width_mm, height_mm = rect.width() * sx, rect.height() * sy
+            node = locations(self._component)[node_id].node
+            if isinstance(node, LineNode):
+                width_mm = abs(node.dx_mm) + (rect.width() - self._resize_rect.width()) * sx
+                height_mm = abs(node.dy_mm) + (rect.height() - self._resize_rect.height()) * sy
+                if width_mm <= 0.001 and height_mm <= 0.001:
+                    width_mm = 0.001
+            width_mm *= (node.transform.m11 ** 2 + node.transform.m21 ** 2) ** 0.5
+            height_mm *= (node.transform.m12 ** 2 + node.transform.m22 ** 2) ** 0.5
+            if not isinstance(node, LineNode):
+                width_mm, height_mm = max(0.001, width_mm), max(0.001, height_mm)
+            self.resizeRequested.emit(node_id, width_mm, height_mm, anchor_x, anchor_y)
             if self._component is component_before and node_id in self._overlays:
                 self._overlays[node_id].setRect(self._resize_rect)
         elif abs(delta.x()) > 0.01 or abs(delta.y()) > 0.01:
@@ -437,6 +455,8 @@ class ComponentCanvas(QGraphicsView):
         self._drag_positions = {}
         self._resize_id = None
         self._resize_rect = None
+        self._resize_handle = None
+        self._resize_local_start = None
         event.accept()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:

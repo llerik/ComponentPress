@@ -31,7 +31,7 @@ def write_report(
 ) -> Path:
     target = snapshot.staging_directory / "build-report.json"
     payload = {
-        "report_version": 2,
+        "report_version": 3,
         "job_id": snapshot.job_id,
         "project_id": snapshot.project.id,
         "game_version": snapshot.project.version,
@@ -56,6 +56,20 @@ def write_report(
                 "png": f"images/{item.png_name}",
             }
             for item in snapshot.instances
+        ],
+        "placements": [
+            {
+                "page_index": page.index,
+                "instance_index": placement.instance_index,
+                "copy_index": placement.copy_index,
+                "component_id": placement.component_id,
+                "x_mm": placement.x_mm,
+                "y_mm": placement.y_mm,
+                "width_mm": placement.width_mm,
+                "height_mm": placement.height_mm,
+            }
+            for page in plan.pages
+            for placement in page.placements
         ],
         "counts": {
             "instances": len(snapshot.instances),

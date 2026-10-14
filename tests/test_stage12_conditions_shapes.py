@@ -31,11 +31,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _models(elements=()):
     project = ProjectDefinition.model_validate({
-        "schema_version": 5, "id": "test", "name": "Test", "version": "0.1.0",
+        "schema_version": 6, "id": "test", "name": "Test", "version": "0.1.0",
         "data_source": {"path": "data.xlsx"},
     })
     component = ComponentDefinition.model_validate({
-        "schema_version": 5, "id": "card", "name": "Card", "size_mm": {"width": 30, "height": 20},
+        "schema_version": 6, "id": "card", "name": "Card", "size_mm": {"width": 30, "height": 20},
         "data": {"sheet": "Sheet1"}, "elements": list(elements),
     })
     return project, component
@@ -62,7 +62,7 @@ def _condition(children=()):
 
 
 def test_yaml_round_trip_accepts_schema_five_and_nested_stage12_nodes(tmp_path: Path) -> None:
-    text = '''schema_version: 5
+    text = '''schema_version: 6
 id: card
 name: Card
 size_mm: {width: 30, height: 20}
@@ -93,7 +93,7 @@ elements:
         dy_mm: 3
 '''
     model, _tree = parse_component(text, tmp_path / "card.yaml")
-    assert model.schema_version == SCHEMA_VERSION == 5
+    assert model.schema_version == SCHEMA_VERSION == 6
     assert isinstance(model.elements[0], ConditionalGroupNode)
     assert isinstance(model.elements[0].children[0], ShapeNode)
     assert isinstance(model.elements[0].children[1], LineNode)
@@ -177,7 +177,7 @@ def test_schema_preflight_rejects_old_referenced_and_journal_documents_without_w
     root = tmp_path / "game"
     shutil.copytree(ROOT / "examples" / "demo-game", root)
     component = root / "components" / "forest-card.yaml"
-    component.write_text(component.read_text(encoding="utf-8").replace("schema_version: 5", "schema_version: 4", 1), encoding="utf-8")
+    component.write_text(component.read_text(encoding="utf-8").replace("schema_version: 6", "schema_version: 4", 1), encoding="utf-8")
     journal_dir = root / ".componentpress" / "transactions"
     journal_dir.mkdir(parents=True)
     journal = journal_dir / "add-component.json"
@@ -195,7 +195,7 @@ def test_schema_rejects_previous_project_version_before_migrate_can_create_lock(
     root = tmp_path / "game"
     shutil.copytree(ROOT / "examples" / "demo-game", root)
     project = root / "project.yaml"
-    project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 5", "schema_version: 4", 1), encoding="utf-8")
+    project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 6", "schema_version: 4", 1), encoding="utf-8")
     original = {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
     with pytest.raises(ProjectError) as caught:
         FileProjectRepository().migrate(root)

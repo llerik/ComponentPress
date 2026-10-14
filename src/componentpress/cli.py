@@ -76,6 +76,20 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "validate":
             snapshot = service.open(args.folder)
             print(tr("cli.validate_ok", name=snapshot.model.name, count=len(snapshot.documents)))
+            from componentpress.data_sources import XlsxReader
+            from componentpress.project_io.paths import resolve_project_path
+            source = snapshot.model.data_source
+            if source:
+                reader = XlsxReader()
+                xlsx_path = resolve_project_path(snapshot.root, source.path)
+                for component_id, document in snapshot.documents.items():
+                    if document.model.data is not None:
+                        binding = document.model.data
+                        data = reader.read(
+                            xlsx_path, binding.sheet,
+                            copies_columns=(snapshot.model.copies_columns.prod, snapshot.model.copies_columns.test),
+                        )
+                        print(f"Excel {data.sheet}: {data.area}")
         elif args.command == "migrate":
             snapshot = service.migrate(args.folder)
             print(tr("cli.migrate_ok", version=snapshot.model.schema_version, path=snapshot.root))

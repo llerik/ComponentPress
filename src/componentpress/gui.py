@@ -40,7 +40,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
 
     validate_catalogs()
     set_language("en")
-    english_ok = tr("menu.file") == "File" and tr("about.schema", version=5).startswith("Supported")
+    english_ok = tr("menu.file") == "File" and tr("about.schema", version=6).startswith("Supported")
     set_language("ru")
     expected_log_root = os.environ.get("COMPONENTPRESS_LOG_DIR")
     log_path = technical_log.session_log()
@@ -51,7 +51,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
         technical_log.create_report(report_path, status="failed", phase="rendering", mode="test")
         with zipfile.ZipFile(report_path) as report:
             support = json.loads(report.read("report.json"))
-            if support["runtime"]["version"] != "0.15" or (expected_log_root and "session.log" not in report.namelist()):
+            if support["runtime"]["version"] != "0.16" or (expected_log_root and "session.log" not in report.namelist()):
                 return _smoke_failure(root, inspect.currentframe().f_lineno)
             if "session.log" in report.namelist() and str(root).encode("utf-8") in report.read("session.log"):
                 return _smoke_failure(root, inspect.currentframe().f_lineno)
@@ -66,7 +66,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
             about_checks.append(False)
             return
         labels = [label.text() for label in dialog.findChildren(QLabel)]
-        about_checks.append(any("GNU GPL" in label for label in labels) and any("0.15" in label for label in labels))
+        about_checks.append(any("GNU GPL" in label for label in labels) and any("0.16" in label for label in labels))
         dialog.reject()
 
     QTimer.singleShot(0, inspect_about)
@@ -275,7 +275,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     if saved.model.background != "#DDEEFF" or "# Проверка текстового режима" not in saved.committed.text:
         return _smoke_failure(root, inspect.currentframe().f_lineno)
-    if saved.model.schema_version != 5 or not {node.type for node in saved.model.elements}.issuperset({"rectangle", "ellipse", "line"}):
+    if saved.model.schema_version != 6 or not {node.type for node in saved.model.elements}.issuperset({"rectangle", "ellipse", "line"}):
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     if not any(node.id == "smoke-group" for node in saved.model.elements):
         return _smoke_failure(root, inspect.currentframe().f_lineno)

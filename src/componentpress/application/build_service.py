@@ -18,6 +18,7 @@ from componentpress.execution.cancellation import CancellationToken
 from componentpress.execution.cleanup import cleanup_job_directory
 from componentpress.execution.job_store import JobStore
 from componentpress.execution.thread_runner import ThreadBuildRunner
+from componentpress.platforms.services import ProjectWriteLock
 from .project_service import ProjectService
 
 
@@ -37,7 +38,8 @@ class _PreparationTask(QRunnable):
 
     def run(self) -> None:
         try:
-            snapshot = self.builder.create(self.source, cancellation=self.token, **self.kwargs)
+            with ProjectWriteLock(self.source.root):
+                snapshot = self.builder.create(self.source, cancellation=self.token, **self.kwargs)
         except Exception as exc:
             self.signals.finished.emit((self.job_id, None, exc))
         else:

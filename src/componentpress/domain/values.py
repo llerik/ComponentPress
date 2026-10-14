@@ -52,10 +52,17 @@ class DataSheetSnapshot:
     headers: tuple[str, ...]
     rows: tuple[DataRow, ...]
     request_id: int = 0
+    area: str = ""
     metadata: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+
+
+def cell_is_empty(cell: CellValue) -> bool:
+    if cell.formula_state is FormulaState.EMPTY:
+        return True
+    return cell.value is None or (isinstance(cell.value, str) and cell.value == "")
 
 
 def value_to_text(value: ScalarValue) -> str:

@@ -16,7 +16,7 @@ from ruamel.yaml.tokens import AliasToken, AnchorToken, TagToken
 from componentpress.bindings.grammar import GrammarError, parse_references
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
-from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, Node
+from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, Node, PositionedNode
 from componentpress.domain.project import ProjectDefinition
 from componentpress.domain.schema import SCHEMA_VERSION
 from .paths import validate_relative_path
@@ -237,7 +237,8 @@ def parse_component(text: str, path: Path, variables: dict[str, str] | None = No
                 location = (*base, "source")
                 field = ".".join(map(str, location))
                 if node.source_mode == "manual":
-                    _template_path(node.source, path, field)
+                    if not (node.optional and not node.source):
+                        _template_path(node.source, path, field)
                 elif model.data is None:
                     raise ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", "столбец изображения без привязки к листу", path, field))
             elif isinstance(node, HtmlNode):
@@ -336,7 +337,12 @@ def update_tree(
             html = raw.pop("html", "")
             raw["content"] = {"mode": mode, **({"html": html} if mode == "manual" else {"column": column})}
         elif isinstance(model, GroupNode):
+            raw["frame"] = model.frame.model_dump(mode="python")
             raw["children"] = [schema_data(node) for node in model.children]
+        if isinstance(model, PositionedNode):
+            raw["transform"] = model.transform.model_dump(mode="python")
+        if isinstance(model, ConditionalGroupNode) and model.condition_operator in {"is_empty", "is_not_empty"}:
+            raw.pop("condition_value", None)
         return raw
 
     if isinstance(value, BaseModel):

@@ -114,7 +114,7 @@ class PreviewService:
                 elif isinstance(node, HtmlNode):
                     result.append(("html", node.content_mode, node.html if node.content_mode == "manual" else node.content_column))
                 elif isinstance(node, ConditionalGroupNode):
-                    result.append(("conditional", node.condition_column, node.condition_value, nodes_signature(node.children)))
+                    result.append(("conditional", node.condition_column, node.condition_operator, node.condition_value, nodes_signature(node.children)))
                 elif isinstance(node, GroupNode):
                     result.append(("group", nodes_signature(node.children)))
                 else:
