@@ -8,9 +8,9 @@ from PySide6.QtGui import QAbstractTextDocumentLayout, QColor, QFont, QImage, QP
 from PySide6.QtCore import Qt
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.domain.html_resources import html_image_sources
 from componentpress.domain.nodes import HtmlNode
 from componentpress.bindings.html_policy import validate_html
-from componentpress.project_io.yaml_codec import html_image_sources
 from .geometry import HTML_DPI, mm_to_html_pixels
 from .resources import ProjectResourceLoader
 

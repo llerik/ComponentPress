@@ -161,6 +161,8 @@ def test_module_without_arguments_dispatches_to_gui(monkeypatch) -> None:
 
 
 def test_release_smoke_exercises_saved_gui_workflow(tmp_path: Path, qtbot, monkeypatch) -> None:
+    from componentpress.diagnostics import logging as technical_log
+
     root = demo(tmp_path)
     window = MainWindow(ProjectController(project_service()))
     qtbot.addWidget(window)
@@ -168,6 +170,7 @@ def test_release_smoke_exercises_saved_gui_workflow(tmp_path: Path, qtbot, monke
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args: warnings.append(args)))
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Discard))
     monkeypatch.setattr(window, "_ask_unsaved_choice", lambda *_args: QMessageBox.StandardButton.Discard)
+    technical_log.initialize()
     assert _run_release_smoke(window, root), warnings
     reopened = FileProjectRepository().open(root)
     component = reopened.documents["release-smoke"].model

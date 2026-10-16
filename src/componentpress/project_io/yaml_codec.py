@@ -2,7 +2,6 @@
 
 from copy import deepcopy
 from io import StringIO
-from html.parser import HTMLParser
 import re
 from pathlib import Path
 from typing import Any, TypeVar
@@ -16,6 +15,7 @@ from ruamel.yaml.tokens import AliasToken, AnchorToken, CommentToken, TagToken
 from componentpress.bindings.grammar import GrammarError, parse_references
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.domain.html_resources import html_image_sources
 from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, Node, PositionedNode
 from componentpress.domain.project import ProjectDefinition
 from componentpress.domain.schema import SCHEMA_VERSION
@@ -147,22 +147,110 @@ def _template_path(value: str, path: Path, field: str) -> None:
         )) from exc
 
 
-class _ImageSources(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.sources: list[str] = []
+def _normalize_image_node(item: dict[str, Any], path: Path) -> None:
+    if item.get("type") != "image":
+        return
+    source = item.get("source")
+    if not isinstance(source, dict):
+        raise ProjectError(Diagnostic("CONTENT_SOURCE_INVALID", "источник изображения должен задавать mode и path/column", path, "source"))
+    item["source_mode"] = source.get("mode", "manual")
+    item["source_column"] = source.get("column")
+    item["source"] = source.get("path", "")
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag.lower() == "img":
-            for name, value in attrs:
-                if name.lower() == "src" and value is not None:
-                    self.sources.append(value)
+
+def _normalize_html_node(item: dict[str, Any], path: Path) -> None:
+    if item.get("type") != "html":
+        return
+    content = item.get("content")
+    if not isinstance(content, dict):
+        raise ProjectError(Diagnostic("CONTENT_SOURCE_INVALID", "содержимое HTML должно задавать mode и html/column", path, "content"))
+    item["content_mode"] = content.get("mode", "manual")
+    item["content_column"] = content.get("column")
+    item["html"] = content.get("html", "")
+    if item["content_mode"] == "manual":
+        from componentpress.bindings.html_policy import validate_html
+
+        validate_html(item["html"], path, f"elements.{item.get('id', '?')}.content.html")
+    del item["content"]
 
 
-def html_image_sources(html: str) -> tuple[str, ...]:
-    parser = _ImageSources()
-    parser.feed(html)
-    return tuple(parser.sources)
+def _normalize_component_nodes(items: Any, path: Path) -> None:
+    if not isinstance(items, list):
+        return
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        _normalize_image_node(item, path)
+        _normalize_html_node(item, path)
+        if item.get("type") in ("group", "conditional_group"):
+            _normalize_component_nodes(item.get("children"), path)
+
+
+def _check_component_schema(tree: CommentedMap, path: Path) -> None:
+    version = tree.get("schema_version")
+    if type(version) is not int or version != SCHEMA_VERSION:
+        raise ProjectError(Diagnostic("SCHEMA_UNSUPPORTED", f"неподдерживаемая версия схемы {version!r}", path, "schema_version", _field_line(tree, ("schema_version",))))
+
+
+def _field_address(location: tuple[Any, ...]) -> str:
+    return ".".join(map(str, location))
+
+
+def _column_without_data(path: Path, field: str, message: str) -> ProjectError:
+    return ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", message, path, field))
+
+
+def _validate_image_binding(node: ImageNode, base: tuple[Any, ...], model: ComponentDefinition, path: Path) -> None:
+    location = (*base, "source")
+    field = _field_address(location)
+    if node.source_mode == "manual":
+        if not (node.optional and not node.source):
+            _template_path(node.source, path, field)
+    elif model.data is None:
+        raise _column_without_data(path, field, "столбец изображения без привязки к листу")
+
+
+def _validate_html_binding(
+    node: HtmlNode, base: tuple[Any, ...], model: ComponentDefinition,
+    path: Path, tree: CommentedMap, variables: dict[str, str] | None,
+) -> None:
+    location = (*base, "html")
+    field = _field_address(location)
+    if node.content_mode == "manual":
+        _grammar(node.html, path, field, tree, location, has_data=False, variables=variables)
+        for source in html_image_sources(node.html):
+            _template_path(source, path, f"{field}.img.src")
+    elif model.data is None:
+        raise _column_without_data(path, field, "столбец HTML без привязки к листу")
+
+
+def _validate_conditional_binding(node: ConditionalGroupNode, base: tuple[Any, ...], path: Path) -> None:
+    if node.condition_column:
+        field = _field_address((*base, "condition_column"))
+        raise ProjectError(Diagnostic(
+            "COLUMN_WITHOUT_DATA",
+            "Условной группе нужен источник Excel для столбца {column}.",
+            path,
+            field,
+            message_key="error.condition_column_without_data",
+            params={"column": node.condition_column},
+        ))
+
+
+def _visit_component_nodes(
+    nodes: tuple[Node, ...], prefix: tuple[Any, ...], model: ComponentDefinition,
+    path: Path, tree: CommentedMap, variables: dict[str, str] | None,
+) -> None:
+    for index, node in enumerate(nodes):
+        base = (*prefix, index)
+        if isinstance(node, ImageNode):
+            _validate_image_binding(node, base, model, path)
+        elif isinstance(node, HtmlNode):
+            _validate_html_binding(node, base, model, path, tree, variables)
+        elif isinstance(node, ConditionalGroupNode) and model.data is None:
+            _validate_conditional_binding(node, base, path)
+        if isinstance(node, GroupNode):
+            _visit_component_nodes(node.children, (*base, "children"), model, path, tree, variables)
 
 
 def parse_project(text: str, path: Path) -> tuple[ProjectDefinition, CommentedMap]:
@@ -191,71 +279,13 @@ def parse_project(text: str, path: Path) -> tuple[ProjectDefinition, CommentedMa
 
 def parse_component(text: str, path: Path, variables: dict[str, str] | None = None) -> tuple[ComponentDefinition, CommentedMap]:
     tree = _load(text, path)
-    version = tree.get("schema_version")
-    if type(version) is not int or version != SCHEMA_VERSION:
-        raise ProjectError(Diagnostic("SCHEMA_UNSUPPORTED", f"неподдерживаемая версия схемы {version!r}", path, "schema_version", _field_line(tree, ("schema_version",))))
+    _check_component_schema(tree, path)
     model_tree = deepcopy(tree)
-    # Keep the application model convenient for the renderer while the public
-    # YAML format expresses an explicit manual/column content source.
-    def normalize_nodes(items: Any) -> None:
-        if not isinstance(items, list):
-            return
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            if item.get("type") == "image" and not isinstance(item.get("source"), dict):
-                raise ProjectError(Diagnostic("CONTENT_SOURCE_INVALID", "источник изображения должен задавать mode и path/column", path, "source"))
-            if item.get("type") == "image" and isinstance(item.get("source"), dict):
-                source = item["source"]
-                item["source_mode"] = source.get("mode", "manual")
-                item["source_column"] = source.get("column")
-                item["source"] = source.get("path", "")
-            if item.get("type") == "html" and not isinstance(item.get("content"), dict):
-                raise ProjectError(Diagnostic("CONTENT_SOURCE_INVALID", "содержимое HTML должно задавать mode и html/column", path, "content"))
-            if item.get("type") == "html" and isinstance(item.get("content"), dict):
-                content = item["content"]
-                item["content_mode"] = content.get("mode", "manual")
-                item["content_column"] = content.get("column")
-                item["html"] = content.get("html", "")
-                if item["content_mode"] == "manual":
-                    from componentpress.bindings.html_policy import validate_html
-
-                    validate_html(item["html"], path, f"elements.{item.get('id', '?')}.content.html")
-                del item["content"]
-            if item.get("type") in ("group", "conditional_group"):
-                normalize_nodes(item.get("children"))
-        # The v3 project has one source; components only select a sheet.
     if isinstance(model_tree.get("data"), dict):
         model_tree["data"].setdefault("source", "main")
-    normalize_nodes(model_tree.get("elements"))
+    _normalize_component_nodes(model_tree.get("elements"), path)
     model = _validate(model_tree, ComponentDefinition, path)
-
-    def visit(nodes: tuple[Node, ...], prefix: tuple[Any, ...]) -> None:
-        for i, node in enumerate(nodes):
-            base = (*prefix, i)
-            if isinstance(node, ImageNode):
-                location = (*base, "source")
-                field = ".".join(map(str, location))
-                if node.source_mode == "manual":
-                    if not (node.optional and not node.source):
-                        _template_path(node.source, path, field)
-                elif model.data is None:
-                    raise ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", "столбец изображения без привязки к листу", path, field))
-            elif isinstance(node, HtmlNode):
-                location = (*base, "html")
-                field = ".".join(map(str, location))
-                if node.content_mode == "manual":
-                    _grammar(node.html, path, field, tree, location, has_data=False, variables=variables)
-                    for source in html_image_sources(node.html):
-                        _template_path(source, path, f"{field}.img.src")
-                elif model.data is None:
-                    raise ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", "столбец HTML без привязки к листу", path, field))
-            elif isinstance(node, GroupNode):
-                if isinstance(node, ConditionalGroupNode) and model.data is None:
-                    raise ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", "условной группе нужен источник Excel", path, f"{field}.condition_column"))
-                visit(node.children, (*base, "children"))
-
-    visit(model.elements, ("elements",))
+    _visit_component_nodes(model.elements, ("elements",), model, path, tree, variables)
     return model, tree
 
 

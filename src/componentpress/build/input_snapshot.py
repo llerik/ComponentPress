@@ -21,11 +21,11 @@ from componentpress.data_sources import XlsxReader
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.copy_mode import copies_for_mode, validate_copy_mode
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.domain.html_resources import html_image_sources
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
 from componentpress.domain.project import PrintSettings, ProjectDefinition
 from componentpress.project_io.files import file_hash
 from componentpress.project_io.paths import check_exact_case, resolve_project_path
-from componentpress.project_io.yaml_codec import html_image_sources
 from componentpress.rendering.resources import LoadedImage, ProjectResourceLoader
 from componentpress.rendering.image_quality import measure_component_images
 from componentpress.execution.cancellation import CancellationToken

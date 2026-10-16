@@ -9,11 +9,11 @@ from urllib.parse import unquote, urlsplit
 
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.domain.html_resources import html_image_sources
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
 from componentpress.domain.geometry import Affine
 from componentpress.domain.project import ProjectDefinition
 from componentpress.project_io.paths import validate_relative_path
-from componentpress.project_io.yaml_codec import html_image_sources
 from .geometry import HTML_DPI, MM_PER_INCH, image_fit_geometry
 from .resources import ProjectResourceLoader
 

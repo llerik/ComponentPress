@@ -10,6 +10,7 @@ import unicodedata
 from componentpress.application.contracts import DocumentSnapshot, ProjectSnapshot
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.domain.html_resources import html_image_sources
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
 from componentpress.domain.project import ProjectDefinition
 from componentpress.domain.schema import SCHEMA_VERSION
@@ -20,7 +21,7 @@ from .paths import check_case_collisions, check_exact_case, resolve_project_path
 from .transactions import change_component_membership, recover, recover_component_membership, register_component
 from .migrations import migrate_v1_to_v2, migration_required, recover_migration, recovery_required
 from .schema_checks import preflight_project_schemas
-from .yaml_codec import _load, dump_yaml, html_image_sources, parse_component, parse_project, update_tree
+from .yaml_codec import _load, dump_yaml, parse_component, parse_project, update_tree
 
 
 def _read_text(path: Path) -> tuple[str, str]:

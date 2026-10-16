@@ -72,6 +72,31 @@ class ResourcePickerDialog(QDialog):
         buttons.rejected.connect(self.reject)
         self.tree.doubleClicked.connect(lambda _index: self._accept_selection())
 
+    def _relative(self, path: Path) -> str:
+        return PurePosixPath(path.relative_to(self.root)).as_posix()
+
+    def _accept_selection(self) -> None:
+        path = Path(self.model.filePath(self.tree.currentIndex()))
+        if not path.is_file():
+            QMessageBox.information(self, tr("ui.image_select_title"), tr("ui.image_select_format"))
+            return
+        self.selected_path = self._relative(path)
+        self.accept()
+
+    def _import(self) -> None:
+        source, _ = QFileDialog.getOpenFileName(self, tr("ui.image_import_one"), "", tr("ui.image_filter"))
+        if not source:
+            return
+        folder, accepted = QInputDialog.getText(self, tr("ui.image_resource_folder"), tr("ui.image_resource_subfolder"))
+        if not accepted:
+            return
+        try:
+            self.selected_path = self.importer(Path(source), folder.strip().replace("\\", "/").strip("/"))
+        except Exception as exc:
+            QMessageBox.critical(self, tr("ui.image_import_error"), format_error(exc))
+            return
+        self.accept()
+
 
 class ImageManagerDialog(QDialog):
     folderImportRequested = Signal(object, str)
@@ -176,36 +201,6 @@ class ImageManagerDialog(QDialog):
             return
         self.refresh()
         self.set_import_progress(len(paths or ()), len(paths or ()), tr("ui.image_import_complete", count=len(paths or ())))
-
-    def _relative(self, path: Path) -> str:
-        return PurePosixPath(path.relative_to(self.root)).as_posix()
-
-    def _accept_selection(self) -> None:
-        path = Path(self.model.filePath(self.tree.currentIndex()))
-        if not path.is_file():
-            QMessageBox.information(self, tr("ui.image_select_title"), tr("ui.image_select_format"))
-            return
-        self.selected_path = self._relative(path)
-        self.accept()
-
-    def _import(self) -> None:
-        source, _ = QFileDialog.getOpenFileName(self, tr("ui.image_import_one"), "", tr("ui.image_filter"))
-        if not source:
-            return
-        folder, accepted = QInputDialog.getText(
-            self,
-            tr("ui.image_resource_folder"),
-            tr("ui.image_resource_subfolder"),
-        )
-        if not accepted:
-            return
-        try:
-            self.selected_path = self.importer(Path(source), folder.strip().replace("\\", "/"))
-        except Exception as exc:
-            QMessageBox.critical(self, tr("ui.image_import_error"), format_error(exc))
-            return
-        self.accept()
-
 
 class ImageAddDialog(QDialog):
     def __init__(self, root: Path, importer: Callable[[Path, str], str], parent=None, *, columns: tuple[str, ...] = ()):

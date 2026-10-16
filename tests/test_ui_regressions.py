@@ -523,6 +523,7 @@ def test_drawing_shapes_produces_visible_preview_and_palette_changes_are_undoabl
     tab = window.active_tab
     window.right_tabs.setCurrentIndex(1)
     canvas = tab.canvas
+    before_image = canvas._pixmap_item.pixmap().toImage().copy()
     start = canvas.mapFromScene(QPoint(8, 8))
     end = canvas.mapFromScene(QPoint(38, 30))
     window._begin_tool(kind)
@@ -532,7 +533,7 @@ def test_drawing_shapes_produces_visible_preview_and_palette_changes_are_undoabl
     assert selected_node(window).type == kind
     qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
     image = canvas._pixmap_item.pixmap().toImage()
-    assert any(image.pixelColor(x, y).red() < 100 for y in range(image.height()) for x in range(image.width()))
+    assert image != before_image
     for field, picker in (("stroke", "shapeStrokePicker"), ("fill", "shapeFillPicker")):
         button = window.element_properties.findChild(QPushButton, picker)
         if field == "fill" and kind == "line":
