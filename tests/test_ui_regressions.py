@@ -176,6 +176,28 @@ def test_pending_preview_keeps_stale_raster_and_current_selection_interactive(ma
     assert not errors
 
 
+def test_cancelled_window_close_keeps_preview_queue_open(make_editor, monkeypatch):
+    from componentpress.preview_coordinator import PreviewJob, PreviewPhase
+
+    window, _root, _errors = make_editor()
+    tab = window.active_tab
+    window.session.documents[tab.component_id].set_draft("unsaved")
+    tab.queue_preview(window.session)
+    tab.preview_timer.setInterval(60000)
+    request = tab.preview_request_data(window._preview_session_identity)
+    job = PreviewJob(request, tab, SimpleNamespace(close=lambda: None))
+    window._preview_coordinator.submit(job)
+    window._preview_coordinator.begin_render(request.identity.request)
+    monkeypatch.setattr(window, "_ask_unsaved_choice", lambda *_args: QMessageBox.StandardButton.Cancel)
+
+    window.close()
+
+    assert not window._preview_coordinator.closed
+    assert tab.preview_timer.isActive()
+    assert window._preview_coordinator.active is job
+    assert window._preview_coordinator.phase is PreviewPhase.RENDER
+
+
 def test_preview_first_and_last_follow_filtered_excel_rows(make_editor, qtbot):
     window, _root, errors = make_editor(excel=True)
     tab = window.open_component("forest-card")

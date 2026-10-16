@@ -149,6 +149,14 @@ class ComponentCanvas(QGraphicsView):
     def selected_ids(self) -> tuple[str, ...]:
         return tuple(item.node_id for item in self._overlays.values() if item.isSelected())
 
+    @property
+    def available_node_ids(self) -> frozenset[str]:
+        return frozenset(self._overlays)
+
+    @property
+    def gesture_active(self) -> bool:
+        return self._drag_start is not None or self._draw_start is not None or self._nudge_key is not None
+
     def set_tool(self, tool: str | None) -> None:
         self._tool = tool
         self._update_hover_cursor()
@@ -197,7 +205,7 @@ class ComponentCanvas(QGraphicsView):
 
     def set_component_model(self, component: ComponentDefinition, selected: tuple[str, ...] = ()) -> None:
         """Refresh hit targets and lock indicators even if preview rendering failed."""
-        if self._gesture_active:
+        if self.gesture_active:
             self._deferred_model = (component, selected)
             return
         self._component = component
@@ -348,12 +356,8 @@ class ComponentCanvas(QGraphicsView):
             parent_id = index[parent_id].parent_id
         return False
 
-    @property
-    def _gesture_active(self) -> bool:
-        return self._drag_start is not None or self._draw_start is not None or self._nudge_key is not None
-
     def _flush_deferred_model(self) -> None:
-        if self._deferred_model is None or self._gesture_active:
+        if self._deferred_model is None or self.gesture_active:
             return
         component, selected = self._deferred_model
         self._deferred_model = None

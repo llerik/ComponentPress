@@ -1,7 +1,10 @@
 """One component tab with synchronized layout and YAML views."""
 
+from dataclasses import dataclass
+from uuid import uuid4
+
 from PySide6.QtCore import QEvent, QRegularExpression, QSize, QTimer, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat, QUndoStack
+from PySide6.QtGui import QColor, QFont, QImage, QSyntaxHighlighter, QTextCharFormat, QUndoStack
 from PySide6.QtWidgets import (
     QButtonGroup,
     QHBoxLayout,
@@ -15,13 +18,36 @@ from PySide6.QtWidgets import (
 
 from componentpress.i18n import tr
 from componentpress.application.sessions import ProjectSession
+from componentpress.application.contracts import ProjectSnapshot
 from componentpress.domain.diagnostics import ProjectError
 from componentpress.rendering import render_component_image
+from componentpress.rendering.image_quality import ImageQuality
 from componentpress.rendering.geometry import MM_PER_INCH
 from componentpress.domain.component import ComponentDefinition
 from componentpress.app_assets import set_themed_icon
 
 from .canvas import ComponentCanvas
+from componentpress.preview_coordinator import PreviewIdentity, PreviewRequest
+
+
+@dataclass(frozen=True)
+class PreviewArguments:
+    snapshot: ProjectSnapshot
+    component: ComponentDefinition
+    revision: int
+    dpi: int
+    fit: bool
+    selected_ids: tuple[str, ...]
+    bindings_resolved: bool
+    row_number: int | None
+
+
+@dataclass(frozen=True)
+class DeferredPreview:
+    image: QImage
+    quality: tuple[ImageQuality, ...]
+    generation: int
+    fit: bool
 
 
 class YamlHighlighter(QSyntaxHighlighter):
@@ -68,14 +94,14 @@ class DocumentTab(QWidget):
     def __init__(self, component_id: str, parent=None):
         super().__init__(parent)
         self.component_id = component_id
+        self.identity, self.preview_generation = uuid4().hex, 0
         self.preview_row_number: int | None = None
         self.resolved_component: ComponentDefinition | None = None
-        self.preview_generation = 0
         self.preview_deferred = False
         self.displayed_generation = -1
         self.image_quality = ()
         self.quality_warning_fingerprint = ()
-        self._preview_arguments = None
+        self._preview_arguments: PreviewArguments | None = None; self._deferred_preview: DeferredPreview | None = None
         self._applying_image = False
         self.undo_stack = QUndoStack(self)
         self.setObjectName(f"documentTab-{component_id}")
@@ -244,11 +270,35 @@ class DocumentTab(QWidget):
         by_area = (8_000_000 * MM_PER_INCH * MM_PER_INCH / (component.size_mm.width * component.size_mm.height)) ** 0.5
         return max(1, min(requested, int(by_edge), int(by_area)))
 
-    def preview_request_data(self):
-        if self._preview_arguments is None:
+    def preview_request_data(self, project: str) -> PreviewRequest | None:
+        arguments = self._preview_arguments
+        if arguments is None:
             return None
-        snapshot, component, dpi, _fit, _selected, bindings_resolved = self._preview_arguments
-        return snapshot, component, dpi, bindings_resolved, self.preview_generation
+        identity = PreviewIdentity(
+            project, self.component_id, self.identity, arguments.revision,
+            self.preview_generation, uuid4().hex,
+        )
+        return PreviewRequest(
+            identity, arguments.snapshot, arguments.component, arguments.dpi,
+            arguments.bindings_resolved, arguments.row_number,
+            arguments.selected_ids, arguments.fit,
+        )
+
+    @property
+    def preview_arguments(self) -> PreviewArguments | None:
+        return self._preview_arguments
+
+    def update_preview_resolution(self, dpi: int) -> bool:
+        arguments = self._preview_arguments
+        if arguments is None or arguments.dpi == dpi:
+            return False
+        self._preview_arguments = PreviewArguments(
+            arguments.snapshot, arguments.component, arguments.revision, dpi,
+            False, arguments.selected_ids, arguments.bindings_resolved, arguments.row_number,
+        )
+        self.preview_generation += 1
+        self.preview_timer.start()
+        return True
 
     def queue_preview(self, session: ProjectSession, *, component: ComponentDefinition | None = None, dpi: int = 96, fit: bool = False, selected: tuple[str, ...] | None = None, bindings_resolved: bool | None = None) -> int:
         document = session.documents[self.component_id]
@@ -258,38 +308,40 @@ class DocumentTab(QWidget):
         self.canvas.set_component_model(active_component, selected)
         self.canvas.set_preview_pending(True)
         self.preview_generation += 1
-        self._preview_arguments = (
-            session.snapshot, active_component, dpi, fit, selected,
+        self._preview_arguments = PreviewArguments(
+            session.snapshot, active_component, document.revision, dpi, fit, selected,
             component is not None if bindings_resolved is None else bindings_resolved,
+            self.preview_row_number,
         )
         self.preview_timer.start()
         return self.preview_generation
 
     def render_queued_preview(self, *, register_fonts: bool = False):
-        if self._preview_arguments is None:
+        arguments = self._preview_arguments
+        if arguments is None:
             return None
-        snapshot, component, dpi, _fit, _selected, bindings_resolved = self._preview_arguments
         return render_component_image(
-            snapshot,
+            arguments.snapshot,
             self.component_id,
-            component=component,
-            dpi=dpi,
-            bindings_resolved=bindings_resolved,
+            component=arguments.component,
+            dpi=arguments.dpi,
+            bindings_resolved=arguments.bindings_resolved,
             register_fonts=register_fonts,
         )
 
     def apply_preview(self, image, quality=(), *, generation: int, fit: bool = False) -> bool:
         if self._preview_arguments is None or generation != self.preview_generation:
             return False
-        _snapshot, active_component, _dpi, requested_fit, selected, _bindings_resolved = self._preview_arguments
-        if self.canvas._gesture_active:
-            self._deferred_preview = (image, quality, generation, fit or requested_fit)
+        arguments = self._preview_arguments
+        if self.canvas.gesture_active:
+            requested_fit = arguments.fit
+            self._deferred_preview = DeferredPreview(image, quality, generation, fit or requested_fit)
             return True
-        self._present_preview(image, active_component, selected, quality, generation, fit or requested_fit)
+        self._present_preview(image, arguments.component, arguments.selected_ids, quality, generation, fit or arguments.fit)
         return True
 
     def _present_preview(self, image, component, selected, quality, generation: int, fit: bool) -> None:
-        selected = tuple(node_id for node_id in self.canvas.selected_ids if node_id in self.canvas._overlays) or selected
+        selected = tuple(node_id for node_id in self.canvas.selected_ids if node_id in self.canvas.available_node_ids) or selected
         self._applying_image = True
         try:
             self.canvas.set_document(image, component, fit=fit, selected=selected)
@@ -303,17 +355,17 @@ class DocumentTab(QWidget):
         if deferred is None:
             return
         self._deferred_preview = None
-        image, quality, generation, fit = deferred
+        image, quality, generation, fit = deferred.image, deferred.quality, deferred.generation, deferred.fit
         if self._preview_arguments is None or generation != self.preview_generation:
             return
-        _snapshot, component, _dpi, _fit, selected, _resolved = self._preview_arguments
-        self._present_preview(image, component, selected, quality, generation, fit)
+        arguments = self._preview_arguments
+        self._present_preview(image, arguments.component, arguments.selected_ids, quality, generation, fit)
 
     def fail_preview(self, message: str, *, generation: int) -> bool:
         if self._preview_arguments is None or generation != self.preview_generation:
             return False
-        _snapshot, active_component, _dpi, _fit, selected, _bindings_resolved = self._preview_arguments
-        self.canvas.set_component_model(active_component, selected)
+        arguments = self._preview_arguments
+        self.canvas.set_component_model(arguments.component, arguments.selected_ids)
         self.previewError.emit(message)
         return True
 

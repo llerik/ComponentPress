@@ -83,7 +83,17 @@ from .dialogs import HtmlAddDialog, ImageAddDialog, ImageManagerDialog, Resource
 from .build_dialog import BuildOptionsDialog
 from .document_tab import DocumentTab
 from .properties import ComponentProperties, ElementProperties
-from .preview_worker import PreviewFontReadTask, PreviewRequest, PreviewSignals, PreviewTask
+from componentpress.preview_coordinator import PreviewCoordinator, PreviewJob, PreviewPhase, PreviewRequest
+from .preview_worker import (
+    FontReadFailed,
+    FontReadSucceeded,
+    PreviewFontReadTask,
+    PreviewRenderFailed,
+    PreviewRenderSucceeded,
+    PreviewSignals,
+    PreviewTask,
+    PreviewTaskResult,
+)
 from .version_worker import VersionTask
 from .qt_models import ID_ROLE, LayerTreeView, component_model, element_model
 from .component_dialog import ComponentDialog
@@ -106,12 +116,12 @@ class MainWindow(QMainWindow):
         self._last_build_result: BuildResult | None = None
         self._build_progress: QProgressDialog | None = None
         self._close_after_build = False
+        self._preview_session_identity, self._preview_coordinator = uuid4().hex, PreviewCoordinator()
         self._preview_pool = QThreadPool(self)
         self._preview_pool.setMaxThreadCount(1)
         self._preview_signals = PreviewSignals(self)
         self._preview_signals.finished.connect(self._preview_task_finished, Qt.ConnectionType.QueuedConnection)
-        self._preview_active: tuple[DocumentTab, PreviewRequest, ProjectFonts | None] | None = None
-        self._preview_pending: DocumentTab | None = None
+        self._preview_close_pending = False; self._preview_close_confirmed = False
         self._build_retry_scheduled = False
         self._version_pool = QThreadPool(self)
         self._version_pool.setMaxThreadCount(1)
@@ -823,6 +833,7 @@ class MainWindow(QMainWindow):
     def load_session(self, session: ProjectSession) -> None:
         """Install an already opened session; useful to bootstrap and to test the UI."""
         self._clear_tabs(discard=True)
+        self._preview_session_identity = uuid4().hex
         self.controller.set_session(session)
         self._component_history.clear()
         self._component_history_index = 0
@@ -1297,8 +1308,8 @@ class MainWindow(QMainWindow):
             entry["tab"] = tab or entry.get("tab")
             self.session.snapshot = snapshot
             self.session.documents.pop(component_id, None)
-            if self._preview_active and self._preview_active[0].component_id == component_id:
-                self._preview_pending = None
+            if tab is not None:
+                self._preview_coordinator.discard_pending(tab.identity)
         else:
             snapshot = self.controller.restore_component_from_history(
                 component_id, reference_path=entry["reference_path"], backup_path=entry["backup_path"],
@@ -1719,15 +1730,11 @@ class MainWindow(QMainWindow):
 
     def _request_visible_preview_resolution(self) -> None:
         tab = self.active_tab
-        if tab is None or tab._preview_arguments is None or self.session is None:
+        if tab is None or tab.preview_arguments is None or self.session is None:
             return
-        snapshot, component, dpi, _fit, selected, bindings_resolved = tab._preview_arguments
+        component = tab.preview_arguments.component
         target_dpi = self._preview_dpi_for_visible_views(tab, component)
-        if target_dpi == dpi:
-            return
-        tab.preview_generation += 1
-        tab._preview_arguments = (snapshot, component, target_dpi, False, selected, bindings_resolved)
-        tab.preview_timer.start()
+        tab.update_preview_resolution(target_dpi)
 
     def _invalidate_preview_cache(self) -> None:
         if self.controller.preview is not None and self.session is not None:
@@ -1779,76 +1786,159 @@ class MainWindow(QMainWindow):
         if self.active_tab is not tab or self._active_build_job is not None:
             tab.preview_deferred = True
             return
-        if self._preview_active is not None:
-            self._preview_pending = tab
+        if self._preview_coordinator.closed:
             return
-        payload = tab.preview_request_data()
-        if payload is None:
+        request = tab.preview_request_data(self._preview_session_identity)
+        if request is None:
             return
-        snapshot, component, dpi, bindings_resolved, generation = payload
-        request = PreviewRequest(tab.component_id, generation, snapshot, component, dpi, bindings_resolved, tab.preview_row_number)
-        fonts = ProjectFonts(snapshot.root, self._preview_font_families(component))
-        self._preview_active = (tab, request, fonts)
-        self._preview_pool.start(PreviewFontReadTask(request, self._preview_signals))
+        fonts = ProjectFonts(request.snapshot.root, self._preview_font_families(request.component))
+        job = PreviewJob(request, tab, fonts)
+        self._start_preview_job(self._preview_coordinator.submit(job))
 
-    def _preview_task_finished(self, payload) -> None:
-        phase, request, result, error = payload
-        active = self._preview_active
-        if active is None or active[1] != request:
+    def _start_preview_job(self, job: PreviewJob | None) -> None:
+        if job is None:
             return
-        tab, _request, fonts = active
-        if phase == "fonts":
-            try:
-                if error is not None:
-                    raise error
-                assert fonts is not None
-                fonts.register_captured(result)
-                for family in self._preview_font_families(request.component):
-                    fonts.require(family, owner=request.snapshot.root / "project.yaml", field="font_family")
-            except Exception as exc:
-                if fonts is not None:
-                    fonts.close()
-                self._preview_active = None
-                if self._tabs.get(tab.component_id) is tab:
-                    message = format_diagnostic(exc.diagnostic) if isinstance(exc, ProjectError) else str(exc)
-                    tab.fail_preview(message, generation=request.generation)
-                self._start_pending_preview()
-                return
-            self._preview_pool.start(PreviewTask(request, self._preview_signals))
+        request = job.request
+        if self.active_tab is not job.tab or self._active_build_job is not None or not self._preview_is_current(job):
+            self._skip_preview_job(job)
             return
-        if fonts is not None:
-            fonts.close()
-        self._preview_active = None
-        if self._tabs.get(tab.component_id) is tab and self.session is not None and self.session.snapshot.root == request.snapshot.root:
-            if error is None and self.active_tab is tab:
-                image, quality = result
-                if tab.apply_preview(image, quality, generation=request.generation):
-                    self._update_preview_navigation(tab)
-                    self._update_selected_image_quality(tab)
-                    diagnostics = self._preview_quality_diagnostics(request, quality)
-                    fingerprint = tuple((item.node_id, item.source, item.message, item.cell) for item in diagnostics)
-                    if fingerprint != tab.quality_warning_fingerprint:
-                        tab.quality_warning_fingerprint = fingerprint
-                        if diagnostics:
-                            self._add_events(diagnostics)
-                            self.statusBar().showMessage(
-                                tr("ui.preview_quality_count", count=len(diagnostics)),
-                                6000,
-                            )
-            elif error is not None and self.active_tab is tab and tab.fail_preview(format_diagnostic(error.diagnostic) if isinstance(error, ProjectError) else str(error), generation=request.generation):
-                self.event_list.setCurrentRow(self.event_list.count() - 1)
-                self.event_list.setFocus()
-            elif self.active_tab is not tab:
-                tab.preview_deferred = True
-        self._start_pending_preview()
+        try:
+            self._preview_pool.start(PreviewFontReadTask(request, self._preview_signals))
+        except Exception as exc:
+            self._finish_preview_failure(job, PreviewPhase.FONTS, exc)
+
+    def _preview_task_finished(self, result: PreviewTaskResult) -> None:
+        if self._preview_coordinator.closed:
+            self._finish_preview_on_close(result)
+            return
+        if isinstance(result, (FontReadSucceeded, FontReadFailed)):
+            self._preview_fonts_finished(result)
+        elif isinstance(result, (PreviewRenderSucceeded, PreviewRenderFailed)):
+            self._preview_render_finished(result)
+
+    def _finish_preview_on_close(self, result) -> None:
+        phase = PreviewPhase.FONTS if isinstance(result, (FontReadSucceeded, FontReadFailed)) else PreviewPhase.RENDER
+        identity = result.identity
+        if not self._preview_coordinator.accepts(identity.request, phase):
+            return
+        job = self._preview_coordinator.active
+        assert job is not None
+        self._preview_coordinator.finish(identity.request, phase)
+        self._release_preview_fonts(job)
+        if self._preview_close_pending:
+            self._preview_close_pending = False
+            QTimer.singleShot(0, self.close)
+
+    def _preview_fonts_finished(self, result: FontReadSucceeded | FontReadFailed) -> None:
+        request_id = result.identity.request
+        if not self._preview_coordinator.accepts(request_id, PreviewPhase.FONTS):
+            return
+        job = self._preview_coordinator.active
+        assert job is not None
+        if not self._preview_is_current(job) or self.active_tab is not job.tab or self._active_build_job is not None:
+            self._skip_preview_job(job)
+            return
+        if isinstance(result, FontReadFailed):
+            self._finish_preview_failure(job, PreviewPhase.FONTS, result.error)
+            return
+        try:
+            job.fonts.register_captured(result.files)
+            self._require_preview_fonts(job)
+        except Exception as exc:
+            self._finish_preview_failure(job, PreviewPhase.FONTS, exc)
+            return
+        self._start_preview_render(self._preview_coordinator.begin_render(request_id))
+
+    def _require_preview_fonts(self, job: PreviewJob) -> None:
+        for family in self._preview_font_families(job.request.component):
+            job.fonts.require(family, owner=job.request.snapshot.root / "project.yaml", field="font_family")
+
+    def _start_preview_render(self, job: PreviewJob | None) -> None:
+        if job is None:
+            return
+        try:
+            self._preview_pool.start(PreviewTask(job.request, self._preview_signals))
+        except Exception as exc:
+            self._finish_preview_failure(job, PreviewPhase.RENDER, exc)
+
+    def _preview_render_finished(self, result: PreviewRenderSucceeded | PreviewRenderFailed) -> None:
+        phase, request_id = PreviewPhase.RENDER, result.identity.request
+        if not self._preview_coordinator.accepts(request_id, phase):
+            return
+        job = self._preview_coordinator.active
+        assert job is not None
+        transition = self._preview_coordinator.finish(request_id, phase)
+        self._release_preview_fonts(job)
+        if isinstance(result, PreviewRenderSucceeded):
+            self._apply_preview_result(job, result)
+        elif self._preview_is_current(job) and self.active_tab is job.tab:
+            self._show_preview_failure(job, result.error)
+        self._start_preview_job(transition.start)
+
+    def _finish_preview_failure(self, job: PreviewJob, phase: PreviewPhase, error: Exception) -> None:
+        transition = self._preview_coordinator.finish(job.request.identity.request, phase)
+        if transition.finished is None:
+            return
+        self._release_preview_fonts(job)
+        if self._preview_is_current(job) and self.active_tab is job.tab:
+            self._show_preview_failure(job, error)
+        self._start_preview_job(transition.start)
+
+    def _skip_preview_job(self, job: PreviewJob) -> None:
+        transition = self._preview_coordinator.finish(job.request.identity.request, PreviewPhase.FONTS)
+        self._release_preview_fonts(job)
+        if self._tabs.get(job.request.identity.component_id) is job.tab and (
+            self.active_tab is not job.tab or self._active_build_job is not None
+        ):
+            job.tab.preview_deferred = True
+        self._start_preview_job(transition.start)
+
+    def _release_preview_fonts(self, job: PreviewJob) -> None:
+        job.fonts.close()
+
+    def _show_preview_failure(self, job: PreviewJob, error: Exception) -> None:
+        message = format_diagnostic(error.diagnostic) if isinstance(error, ProjectError) else str(error)
+        if job.tab.fail_preview(message, generation=job.request.identity.generation):
+            self.event_list.setCurrentRow(self.event_list.count() - 1)
+            self.event_list.setFocus()
+
+    def _preview_is_current(self, job: PreviewJob) -> bool:
+        identity, tab = job.request.identity, job.tab
+        if self.session is None or identity.project != self._preview_session_identity:
+            return False
+        if self._tabs.get(identity.component_id) is not tab or tab.identity != identity.tab:
+            return False
+        return self.session.documents[identity.component_id].revision == identity.revision and tab.preview_generation == identity.generation
+
+    def _apply_preview_result(self, job: PreviewJob, result: PreviewRenderSucceeded) -> None:
+        if not self._preview_is_current(job):
+            return
+        if self.active_tab is not job.tab:
+            job.tab.preview_deferred = True
+            return
+        if not job.tab.apply_preview(result.image, result.quality, generation=job.request.identity.generation):
+            return
+        self._update_preview_navigation(job.tab)
+        self._update_selected_image_quality(job.tab)
+        self._show_preview_quality(job, result.quality)
+
+    def _show_preview_quality(self, job: PreviewJob, quality) -> None:
+        diagnostics = self._preview_quality_diagnostics(job.request, quality)
+        fingerprint = tuple((item.node_id, item.source, item.message, item.cell) for item in diagnostics)
+        if fingerprint == job.tab.quality_warning_fingerprint:
+            return
+        job.tab.quality_warning_fingerprint = fingerprint
+        if diagnostics:
+            self._add_events(diagnostics)
+            self.statusBar().showMessage(tr("ui.preview_quality_count", count=len(diagnostics)), 6000)
 
     def _preview_quality_diagnostics(self, request: PreviewRequest, quality) -> tuple[Diagnostic, ...]:
-        document = request.snapshot.documents[request.component_id]
+        document = request.snapshot.documents[request.identity.component_id]
         binding = document.model.data
         data = None
         row = None
         if binding is not None and self.controller.preview is not None:
-            data = self.controller.preview.cached_data(request.snapshot, request.component_id, component=document.model)
+            data = self.controller.preview.cached_data(request.snapshot, request.identity.component_id, component=document.model)
             if data is not None:
                 row = next((item for item in data.rows if item.row_number == request.row_number), None)
         source = binding.source if binding is not None else None
@@ -1876,14 +1966,6 @@ class MainWindow(QMainWindow):
                 )
             diagnostics.append(warning)
         return tuple(diagnostics)
-
-    def _start_pending_preview(self) -> None:
-        pending, self._preview_pending = self._preview_pending, None
-        if pending is not None and self._tabs.get(pending.component_id) is pending:
-            if self.active_tab is pending and self._active_build_job is None:
-                self._preview_requested(pending)
-            else:
-                pending.preview_deferred = True
 
     def _row_changed(self, _index: int) -> None:
         tab = self.active_tab
@@ -2040,7 +2122,7 @@ class MainWindow(QMainWindow):
     def _start_build(self, active_only: bool) -> None:
         if self.session is None or self.controller.build is None or self._active_build_job is not None:
             return
-        if self._preview_active is not None or self._preview_pool.activeThreadCount():
+        if self._preview_coordinator.active is not None or self._preview_pool.activeThreadCount():
             if not self._build_retry_scheduled:
                 self._build_retry_scheduled = True
                 self.statusBar().showMessage("Предпросмотр завершает подготовку; сборка начнётся сразу после неё")
@@ -2946,6 +3028,7 @@ class MainWindow(QMainWindow):
             return False
         tab.preview_timer.stop()
         tab.preview_generation += 1
+        self._preview_coordinator.discard_pending(tab.identity)
         self._tabs.pop(tab.component_id, None)
         for entry in self._component_history:
             if entry.get("tab") is tab:
@@ -3009,7 +3092,7 @@ class MainWindow(QMainWindow):
             self.undo_group.removeStack(tab.undo_stack)
         self.tabs.clear()
         self._tabs.clear()
-        self._preview_pending = None
+        self._preview_coordinator.discard_pending()
 
     def _refresh_component_tree(self) -> None:
         if self.session is None:
@@ -3152,33 +3235,52 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(message, 7000)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self._preview_close_pending:
+            event.ignore()
+            return
         if self._version_task is not None:
             QMessageBox.information(self, tr("ui.archive_title"), "Дождитесь завершения операции или отмените её.")
             event.ignore()
             return
-        for tab in self._tabs.values():
-            tab.preview_timer.stop()
-            tab.preview_generation += 1
-        self._preview_pool.waitForDone(10000)
         if self._active_build_job is not None:
-            choice = QMessageBox.question(
-                self,
-                "Выполняется сборка",
-                "Отменить сборку и закрыть окно после освобождения ресурсов?\n"
-                "Выберите «Нет», чтобы дождаться текущей сборки, или «Отмена», чтобы вернуться в редактор.",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Cancel,
-            )
-            if choice == QMessageBox.StandardButton.Cancel:
-                event.ignore()
-                return
+            self._defer_close_for_build(event)
+            return
+        if not self._prepare_preview_close(event):
+            return
+
+        self.ui_state.save(self)
+        event.accept()
+
+    def _defer_close_for_build(self, event: QCloseEvent) -> None:
+        choice = QMessageBox.question(
+            self, "Выполняется сборка",
+            "Отменить сборку и закрыть окно после освобождения ресурсов?\n"
+            "Выберите «Нет», чтобы дождаться текущей сборки, или «Отмена», чтобы вернуться в редактор.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if choice != QMessageBox.StandardButton.Cancel:
             self._close_after_build = True
             if choice == QMessageBox.StandardButton.Yes:
                 self._cancel_build()
+        event.ignore()
+
+    def _prepare_preview_close(self, event: QCloseEvent) -> bool:
+        if not self._preview_close_confirmed and not self._confirm_all_dirty():
             event.ignore()
-            return
-        if self._confirm_all_dirty():
-            self.ui_state.save(self)
-            event.accept()
-        else:
+            return False
+        self._preview_close_confirmed = True
+        for tab in self._tabs.values():
+            tab.preview_timer.stop()
+            tab.preview_generation += 1
+        self._preview_coordinator.shutdown()
+        if not self._preview_pool.waitForDone(10000):
+            self._preview_close_pending = True
             event.ignore()
+            return False
+        job = self._preview_coordinator.active
+        if job is not None:
+            assert self._preview_coordinator.phase is not None
+            self._preview_coordinator.finish(job.request.identity.request, self._preview_coordinator.phase)
+            self._release_preview_fonts(job)
+        return True

@@ -4,27 +4,45 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeAlias
 
 from PySide6.QtCore import QObject, QRunnable, Signal
+from PySide6.QtGui import QImage
 
-from componentpress.application.contracts import ProjectSnapshot
-from componentpress.domain.component import ComponentDefinition
+from componentpress.preview_coordinator import PreviewIdentity, PreviewRequest
 from componentpress.rendering import render_component_image
-from componentpress.rendering.image_quality import measure_component_images
+from componentpress.rendering.image_quality import ImageQuality, measure_component_images
 from componentpress.rendering.resources import ProjectResourceLoader
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.diagnostics.logging import log_exception
 
 
 @dataclass(frozen=True)
-class PreviewRequest:
-    component_id: str
-    generation: int
-    snapshot: ProjectSnapshot
-    component: ComponentDefinition
-    dpi: int
-    bindings_resolved: bool
-    row_number: int | None = None
+class FontReadSucceeded:
+    identity: PreviewIdentity
+    files: tuple[tuple[Path, bytes], ...]
+
+
+@dataclass(frozen=True)
+class FontReadFailed:
+    identity: PreviewIdentity
+    error: Exception
+
+
+@dataclass(frozen=True)
+class PreviewRenderSucceeded:
+    identity: PreviewIdentity
+    image: QImage
+    quality: tuple[ImageQuality, ...]
+
+
+@dataclass(frozen=True)
+class PreviewRenderFailed:
+    identity: PreviewIdentity
+    error: Exception
+
+
+PreviewTaskResult: TypeAlias = FontReadSucceeded | FontReadFailed | PreviewRenderSucceeded | PreviewRenderFailed
 
 
 class PreviewSignals(QObject):
@@ -39,36 +57,11 @@ class PreviewTask(QRunnable):
 
     def run(self) -> None:
         try:
-            loader = ProjectResourceLoader(self.request.snapshot.root)
-            image = render_component_image(
-                self.request.snapshot,
-                self.request.component_id,
-                component=self.request.component,
-                dpi=self.request.dpi,
-                bindings_resolved=self.request.bindings_resolved,
-                register_fonts=False,
-                resource_loader=loader,
-                preserve_logical_size=True,
-            )
-            quality = measure_component_images(
-                self.request.component,
-                self.request.snapshot.model,
-                loader,
-                self.request.snapshot.documents[self.request.component_id].path,
-                bindings_resolved=self.request.bindings_resolved,
-            )
+            image, quality = _render_preview(self.request)
         except Exception as exc:
-            if not isinstance(exc, ProjectError):
-                incident_id = log_exception("preview.render", exc, operation="preview", phase="render")
-                exc = ProjectError(Diagnostic("PREVIEW_ERROR", "Unexpected preview error", incident_id=incident_id, message_key="error.preview_failed"))
-            self.signals.finished.emit(("render", self.request, None, exc))
+            self.signals.finished.emit(PreviewRenderFailed(self.request.identity, _operation_error(exc, "render")))
         else:
-            self.signals.finished.emit(("render", self.request, (image, quality), None))
-
-
-@dataclass(frozen=True)
-class FontReadRequest:
-    render: PreviewRequest
+            self.signals.finished.emit(PreviewRenderSucceeded(self.request.identity, image, quality))
 
 
 class PreviewFontReadTask(QRunnable):
@@ -78,28 +71,53 @@ class PreviewFontReadTask(QRunnable):
         self.signals = signals
 
     def run(self) -> None:
-        folder = self.request.snapshot.root / "assets" / "fonts"
         try:
-            files = []
-            if folder.exists():
-                for path in sorted(folder.rglob("*")):
-                    if path.is_symlink():
-                        from componentpress.domain.diagnostics import Diagnostic, ProjectError
-
-                        raise ProjectError(Diagnostic("PATH_SYMLINK", "", path, message_key="ui.font_symlink_unsupported"))
-                    if path.is_file() and path.suffix.lower() in (".ttf", ".otf"):
-                        before = path.stat()
-                        data = path.read_bytes()
-                        after = path.stat()
-                        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns) or len(data) != after.st_size:
-                            from componentpress.domain.diagnostics import Diagnostic, ProjectError
-
-                            raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "", path, message_key="ui.font_changed"))
-                        files.append((path, data))
+            files = _read_preview_fonts(self.request)
         except Exception as exc:
-            if not isinstance(exc, ProjectError):
-                incident_id = log_exception("preview.fonts", exc, operation="preview", phase="fonts")
-                exc = ProjectError(Diagnostic("PREVIEW_ERROR", "Unexpected font error", incident_id=incident_id, message_key="error.preview_failed"))
-            self.signals.finished.emit(("fonts", self.request, None, exc))
+            self.signals.finished.emit(FontReadFailed(self.request.identity, _operation_error(exc, "fonts")))
         else:
-            self.signals.finished.emit(("fonts", self.request, tuple(files), None))
+            self.signals.finished.emit(FontReadSucceeded(self.request.identity, files))
+
+
+def _render_preview(request: PreviewRequest) -> tuple[QImage, tuple[ImageQuality, ...]]:
+    loader = ProjectResourceLoader(request.snapshot.root)
+    image = render_component_image(
+        request.snapshot, request.identity.component_id, component=request.component,
+        dpi=request.dpi, bindings_resolved=request.bindings_resolved, register_fonts=False,
+        resource_loader=loader, preserve_logical_size=True,
+    )
+    quality = measure_component_images(
+        request.component, request.snapshot.model, loader,
+        request.snapshot.documents[request.identity.component_id].path,
+        bindings_resolved=request.bindings_resolved,
+    )
+    return image, quality
+
+
+def _read_preview_fonts(request: PreviewRequest) -> tuple[tuple[Path, bytes], ...]:
+    folder = request.snapshot.root / "assets" / "fonts"
+    if not folder.exists():
+        return ()
+    files = []
+    for path in sorted(folder.rglob("*")):
+        if path.is_symlink():
+            raise ProjectError(Diagnostic("PATH_SYMLINK", "", path, message_key="ui.font_symlink_unsupported"))
+        if path.is_file() and path.suffix.lower() in (".ttf", ".otf"):
+            files.append(_read_font(path))
+    return tuple(files)
+
+
+def _read_font(path: Path) -> tuple[Path, bytes]:
+    before = path.stat()
+    data = path.read_bytes()
+    after = path.stat()
+    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns) or len(data) != after.st_size:
+        raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "", path, message_key="ui.font_changed"))
+    return path, data
+
+
+def _operation_error(exc: Exception, phase: str) -> Exception:
+    if isinstance(exc, ProjectError):
+        return exc
+    incident = log_exception(f"preview.{phase}", exc, operation="preview", phase=phase)
+    return ProjectError(Diagnostic("PREVIEW_ERROR", "Unexpected preview error", incident_id=incident, message_key="error.preview_failed"))

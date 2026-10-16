@@ -767,14 +767,6 @@
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
     },
-    "src/componentpress/editor/main_window.py|MainWindow._preview_task_finished": {
-      "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow._preview_task_finished",
-      "line": 1793,
-      "length": 50,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
-    },
     "src/componentpress/editor/main_window.py|MainWindow._preview_quality_diagnostics": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._preview_quality_diagnostics",
@@ -925,30 +917,6 @@
       "line": 3063,
       "length": 80,
       "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
-    },
-    "src/componentpress/editor/main_window.py|MainWindow.closeEvent": {
-      "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow.closeEvent",
-      "line": 3153,
-      "length": 31,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
-    },
-    "src/componentpress/editor/preview_worker.py|PreviewTask.run": {
-      "path": "src/componentpress/editor/preview_worker.py",
-      "name": "PreviewTask.run",
-      "line": 40,
-      "length": 27,
-      "stage": "2б",
-      "owner": "coder:src/componentpress/editor"
-    },
-    "src/componentpress/editor/preview_worker.py|PreviewFontReadTask.run": {
-      "path": "src/componentpress/editor/preview_worker.py",
-      "name": "PreviewFontReadTask.run",
-      "line": 80,
-      "length": 26,
-      "stage": "2б",
       "owner": "coder:src/componentpress/editor"
     },
     "src/componentpress/editor/project_settings_dialog.py|ProjectSettingsDialog.__init__": {
