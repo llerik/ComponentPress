@@ -166,6 +166,11 @@ def test_runtime_inventory_covers_every_current_leaf():
     assert set(LEAVES) == BASELINE["runtime"].keys()
 
 
+def test_application_build_contracts_resolve_without_adapters(tmp_path):
+    loaded = _probe(["componentpress.application.ports"], tmp_path)
+    assert loaded == BASELINE["runtime"]["componentpress.application.ports"]["modules"]
+
+
 @pytest.mark.parametrize("module", LEAVES)
 def test_core_leaf_import_has_no_new_runtime_dependencies(module, tmp_path):
     loaded = _probe([module], tmp_path)

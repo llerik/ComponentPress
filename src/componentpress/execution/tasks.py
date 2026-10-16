@@ -7,16 +7,17 @@ from uuid import uuid4
 from PySide6.QtCore import QRunnable
 from PySide6.QtGui import QImage, QPainter
 
-from componentpress.build.input_snapshot import BuildInputSnapshot, BuildInstance, SnapshotResourceLoader
+from componentpress.application.contracts import BuildInputSnapshot, BuildInstance
+from componentpress.application.ports import Cancellation
+from componentpress.build.input_snapshot import SnapshotResourceLoader
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.diagnostics.logging import log_exception
 from componentpress.rendering.geometry import MM_PER_INCH, pixel_size
 from componentpress.rendering.painter import paint_component
-from .cancellation import CancellationToken
 
 
 class RenderInstanceTask(QRunnable):
-    def __init__(self, snapshot: BuildInputSnapshot, instance: BuildInstance, cancellation: CancellationToken, done):
+    def __init__(self, snapshot: BuildInputSnapshot, instance: BuildInstance, cancellation: Cancellation, done):
         super().__init__()
         self.snapshot = snapshot
         self.instance = instance

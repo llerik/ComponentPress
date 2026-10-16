@@ -1,11 +1,14 @@
 """Run with -I -B in a disposable cwd; no pytest/sitecustomize/Qt setup."""
 
 import importlib
+import inspect
 import json
 import os
 from pathlib import Path
 import sys
 import threading
+from types import SimpleNamespace
+from typing import get_type_hints
 
 sys.path[:0] = [sys.argv[1], sys.argv[2], str(Path(__file__).parent)]
 from refactoring_guard import forbidden_runtime
@@ -37,6 +40,51 @@ import _thread
 _thread.start_new_thread = no_thread
 for module in sys.argv[3:]:
     importlib.import_module(module)
+if "componentpress.application.ports" in sys.argv[3:]:
+    from componentpress.application.contracts import BuildInputSnapshot, SnapshotResource
+    from componentpress.application.ports import BuildRunner, Cancellation
+
+    assert get_type_hints(BuildRunner.start)["snapshot"] is BuildInputSnapshot
+    assert tuple(inspect.signature(BuildInputSnapshot).parameters) == (
+        "job_id", "root", "job_directory", "staging_directory", "project", "print_settings",
+        "mode", "instances", "resources", "input_hashes", "font_families",
+        "registered_font_ids", "max_render_workers", "memory_budget_bytes", "warnings",
+    )
+    assert tuple(SnapshotResource.__dataclass_fields__) == (
+        "relative_path", "content_hash", "size", "data", "copied_path",
+    )
+    assert inspect.signature(SnapshotResource).parameters["data"].default is None
+    assert inspect.signature(SnapshotResource).parameters["copied_path"].default is None
+    assert not hasattr(SnapshotResource, "read")
+    assert inspect.signature(BuildInputSnapshot).parameters["warnings"].default == ()
+    assert isinstance(Cancellation.cancelled, property)
+    snapshot = object.__new__(BuildInputSnapshot)
+    object.__setattr__(snapshot, "instances", (SimpleNamespace(copies=2), SimpleNamespace(copies=3)))
+    assert snapshot.total_copies == 5
+
+    class FakeCancellation:
+        cancelled = False
+
+        def cancel(self):
+            self.cancelled = True
+
+        def check(self):
+            assert not self.cancelled
+
+    def is_cancelled(token: Cancellation) -> bool:
+        token.check()
+        return token.cancelled
+
+    token = FakeCancellation()
+    assert not is_cancelled(token)
+    token.cancel()
+    assert token.cancelled
+    try:
+        is_cancelled(token)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("cancelled fake did not stop the operation")
 if all(module.startswith("componentpress.domain.") for module in sys.argv[3:]):
     assert not any(name.startswith("componentpress.application.") for name in sys.modules), "domain imported application"
 assert threading.enumerate() == before_threads

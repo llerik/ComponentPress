@@ -13,6 +13,7 @@ from uuid import uuid4
 from PySide6.QtGui import QFontDatabase
 
 from componentpress.application.contracts import ProjectSnapshot
+from componentpress.application.ports import Cancellation
 from componentpress.build.input_snapshot import InputSnapshotBuilder
 from componentpress.domain.copy_mode import validate_copy_mode
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
@@ -38,7 +39,7 @@ def export_png_archive(
     *,
     mode: str = "prod",
     component_ids: tuple[str, ...] | None = None,
-    cancellation: CancellationToken | None = None,
+    cancellation: Cancellation | None = None,
     snapshot_builder: InputSnapshotBuilder | None = None,
     on_progress=None,
 ) -> PngArchiveResult:

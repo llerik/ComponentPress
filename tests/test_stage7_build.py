@@ -13,11 +13,11 @@ from PySide6.QtGui import QFontDatabase, QImage
 from PySide6.QtPdf import QPdfDocument
 
 from componentpress.application.build_service import BuildService
-from componentpress.application.contracts import BuildRequest
+from componentpress.application.contracts import BuildRequest, SnapshotResource
 from componentpress.bootstrap import project_service
 from componentpress.build.engine import BuildEngine
 from componentpress.build.imposition import calculate_imposition, cut_grid_lines
-from componentpress.build.input_snapshot import BuildInstance, InputSnapshotBuilder
+from componentpress.build.input_snapshot import BuildInstance, InputSnapshotBuilder, SnapshotResourceLoader
 from componentpress.domain.diagnostics import ProjectError
 from componentpress.domain.project import PrintSettings
 from componentpress.execution.cancellation import CancellationToken
@@ -151,15 +151,58 @@ def test_snapshot_uses_disk_spill_only_for_used_resources(tmp_path: Path) -> Non
         assert all(item.data is None and item.copied_path and item.copied_path.is_file() for item in snapshot.resources.values())
         assert "assets/images/unused.png" not in snapshot.resources
         assert "assets/images/unused.png" not in snapshot.input_hashes
-        captured = {name: item.read() for name, item in snapshot.resources.items()}
+        captured = {
+            name: SnapshotResourceLoader(snapshot.resources).image(name).content_hash
+            for name in snapshot.resources
+        }
         live = root / "assets" / "images" / "animals" / "enemy" / "leaf.png"
         live.write_bytes(b"changed after snapshot")
-        assert snapshot.resources["assets/images/animals/enemy/leaf.png"].read() == captured["assets/images/animals/enemy/leaf.png"]
+        name = "assets/images/animals/enemy/leaf.png"
+        loader = SnapshotResourceLoader({name: snapshot.resources[name]})
+        assert loader.image(name).content_hash == captured[name]
     finally:
         for font_id in reversed(snapshot.registered_font_ids):
             QFontDatabase.removeApplicationFont(font_id)
         cleanup_job_directory(store, job_id)
         store.release(job_id)
+
+
+def test_snapshot_resource_loader_prefers_memory_over_disk(tmp_path: Path) -> None:
+    data = (DEMO / "assets" / "images" / "animals" / "enemy" / "leaf.png").read_bytes()
+    name = "assets/image.png"
+    resource = SnapshotResource(name, hashlib.sha256(data).hexdigest(), len(data), data, tmp_path / "missing.png")
+
+    loaded = SnapshotResourceLoader({name: resource}).image(name)
+
+    assert loaded.content_hash == resource.content_hash
+
+
+@pytest.mark.parametrize("storage", ["none", "missing", "corrupt", "empty"])
+def test_snapshot_resource_loader_preserves_read_diagnostics(storage: str, tmp_path: Path) -> None:
+    name = "assets/image.png"
+    copied = tmp_path / "missing.png"
+    resource = SnapshotResource(name, "bad-hash", 0, copied_path=copied)
+    if storage == "corrupt":
+        copied.write_bytes((DEMO / "assets" / "images" / "animals" / "enemy" / "leaf.png").read_bytes())
+    elif storage == "empty":
+        copied.write_bytes((DEMO / "assets" / "images" / "animals" / "enemy" / "leaf.png").read_bytes())
+        resource = SnapshotResource(name, hashlib.sha256(b"").hexdigest(), 0, data=b"", copied_path=copied)
+    loader = SnapshotResourceLoader({name: resource})
+
+    if storage == "none":
+        resource = SnapshotResource(name, "bad-hash", 0)
+        loader = SnapshotResourceLoader({name: resource})
+        with pytest.raises(RuntimeError, match="resource has no storage"):
+            loader.image(name)
+        return
+    with pytest.raises(ProjectError) as error:
+        loader.image(name, owner=DEMO, field="image.source")
+    assert error.value.diagnostic.code == {
+        "missing": "SNAPSHOT_READ", "corrupt": "SNAPSHOT_CORRUPT", "empty": "RESOURCE_INVALID",
+    }[storage]
+    assert error.value.diagnostic.field == "image.source"
+    if storage in {"missing", "corrupt"}:
+        assert error.value.diagnostic.path == copied
 
 
 def test_external_change_during_snapshot_is_diagnosed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1543,12 +1543,6 @@
       "stage": "3г",
       "owner": "coder:src/componentpress/application"
     },
-    "src/componentpress/application/ports.py|<TYPE_CHECKING>|from|componentpress.build.input_snapshot.BuildInputSnapshot": {
-      "count": 1,
-      "line": 11,
-      "stage": "1а",
-      "owner": "coder:src/componentpress/application"
-    },
     "src/componentpress/application/preview_service.py||from|componentpress.bindings.resolver.BindingResolver": {
       "count": 1,
       "line": 12,
@@ -1832,14 +1826,6 @@
     "componentpress.bindings.static -> componentpress.bindings": {
       "stage": "9а",
       "owner": "coder:src/componentpress/bindings"
-    },
-    "componentpress.build -> componentpress.build.imposition": {
-      "stage": "9а",
-      "owner": "coder:src/componentpress/build"
-    },
-    "componentpress.build.imposition -> componentpress.build": {
-      "stage": "9а",
-      "owner": "coder:src/componentpress/build"
     },
     "componentpress.domain.geometry -> componentpress.domain.nodes": {
       "stage": "9а",

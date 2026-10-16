@@ -9,17 +9,17 @@ from uuid import uuid4
 from PySide6.QtCore import QLineF, QMarginsF, QRectF, QSizeF, Qt
 from PySide6.QtGui import QColor, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter, QPen
 
+from componentpress.application.contracts import BuildInputSnapshot
+from componentpress.application.ports import Cancellation
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.i18n import tr
-from componentpress.execution.cancellation import CancellationToken
 from .imposition import ImpositionPlan, cut_grid_lines
-from .input_snapshot import BuildInputSnapshot
 
 
 def write_print_pdf(
     snapshot: BuildInputSnapshot,
     plan: ImpositionPlan,
-    cancellation: CancellationToken,
+    cancellation: Cancellation,
     progress=None,
 ) -> Path:
     target = snapshot.staging_directory / "print.pdf"

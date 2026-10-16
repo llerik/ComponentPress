@@ -9,6 +9,7 @@ from uuid import uuid4
 from PySide6.QtCore import QEventLoop, QObject, QRunnable, QThreadPool, Qt, Signal
 
 from componentpress.application.contracts import BuildProgress, BuildRequest, BuildResult
+from componentpress.application.ports import Cancellation
 from componentpress.application.sessions import ProjectSession
 from componentpress.build.input_snapshot import InputSnapshotBuilder
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
@@ -49,7 +50,7 @@ class _PreparationTask(QRunnable):
 
 @dataclass
 class _Preparing:
-    token: CancellationToken
+    token: Cancellation
     recovery_diagnostics: tuple[Diagnostic, ...]
     on_progress: object
     on_finished: object

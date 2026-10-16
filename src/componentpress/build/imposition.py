@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
+from componentpress.application.contracts import BuildInstance
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.project import PrintSettings
-from .input_snapshot import BuildInstance
 
 
 @dataclass(frozen=True)

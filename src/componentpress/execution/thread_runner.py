@@ -8,9 +8,9 @@ from typing import Callable
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt
 from PySide6.QtGui import QFontDatabase
 
-from componentpress.application.contracts import BuildProgress, BuildResult
+from componentpress.application.contracts import BuildInputSnapshot, BuildProgress, BuildResult
+from componentpress.application.ports import Cancellation
 from componentpress.build.engine import BuildEngine
-from componentpress.build.input_snapshot import BuildInputSnapshot
 from componentpress.domain.diagnostics import Diagnostic
 from componentpress.diagnostics.logging import log_exception
 from .cancellation import CancellationToken
@@ -19,7 +19,7 @@ from .signals import BuildSignals
 
 
 class _CoordinatorTask(QRunnable):
-    def __init__(self, engine: BuildEngine, snapshot: BuildInputSnapshot, token: CancellationToken, signals: BuildSignals):
+    def __init__(self, engine: BuildEngine, snapshot: BuildInputSnapshot, token: Cancellation, signals: BuildSignals):
         super().__init__()
         self.engine = engine
         self.snapshot = snapshot
@@ -42,7 +42,7 @@ class _CoordinatorTask(QRunnable):
 @dataclass
 class _RunningJob:
     snapshot: BuildInputSnapshot
-    token: CancellationToken
+    token: Cancellation
     progress: Callable[[BuildProgress], None] | None
     finished: Callable[[BuildResult], None] | None
 

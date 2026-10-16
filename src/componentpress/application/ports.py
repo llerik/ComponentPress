@@ -1,14 +1,19 @@
 from pathlib import Path
-from typing import Callable, ContextManager, Protocol, TYPE_CHECKING
+from typing import Callable, ContextManager, Protocol
 
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.values import DataSheetSnapshot
 from componentpress.domain.project import DataSource
-from .contracts import DocumentSnapshot, ProjectSnapshot
-from .contracts import BuildProgress, BuildResult
+from .contracts import BuildInputSnapshot, BuildProgress, BuildResult, DocumentSnapshot, ProjectSnapshot
 
-if TYPE_CHECKING:
-    from componentpress.build.input_snapshot import BuildInputSnapshot
+
+class Cancellation(Protocol):
+    @property
+    def cancelled(self) -> bool: ...
+
+    def cancel(self) -> None: ...
+
+    def check(self) -> None: ...
 
 
 class ProjectRepository(Protocol):
@@ -48,7 +53,7 @@ class DataSourceReader(Protocol):
 class BuildRunner(Protocol):
     def start(
         self,
-        snapshot: "BuildInputSnapshot",
+        snapshot: BuildInputSnapshot,
         on_progress: Callable[[BuildProgress], None] | None = None,
         on_finished: Callable[[BuildResult], None] | None = None,
     ) -> str: ...

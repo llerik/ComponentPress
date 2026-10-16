@@ -3,9 +3,8 @@ from pathlib import Path
 from typing import Mapping
 
 from componentpress.domain.component import ComponentDefinition
-from componentpress.domain.project import ProjectDefinition
-from componentpress.domain.project import PrintSettings
 from componentpress.domain.diagnostics import Diagnostic
+from componentpress.domain.project import PrintSettings, ProjectDefinition
 
 
 @dataclass(frozen=True)
@@ -23,6 +22,51 @@ class ProjectSnapshot:
     disk_hash: str
     model: ProjectDefinition
     documents: Mapping[str, DocumentSnapshot]
+
+
+@dataclass(frozen=True)
+class SnapshotResource:
+    relative_path: str
+    content_hash: str
+    size: int
+    data: bytes | None = None
+    copied_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class BuildInstance:
+    index: int
+    component_id: str
+    component_name: str
+    instance_id: str
+    row_number: int | None
+    copies: int
+    component: ComponentDefinition
+    document_path: Path
+    png_name: str
+
+
+@dataclass(frozen=True)
+class BuildInputSnapshot:
+    job_id: str
+    root: Path
+    job_directory: Path
+    staging_directory: Path
+    project: ProjectDefinition
+    print_settings: PrintSettings
+    mode: str
+    instances: tuple[BuildInstance, ...]
+    resources: Mapping[str, SnapshotResource]
+    input_hashes: Mapping[str, str]
+    font_families: tuple[str, ...]
+    registered_font_ids: tuple[int, ...]
+    max_render_workers: int
+    memory_budget_bytes: int
+    warnings: tuple[Diagnostic, ...] = ()
+
+    @property
+    def total_copies(self) -> int:
+        return sum(instance.copies for instance in self.instances)
 
 
 @dataclass(frozen=True)

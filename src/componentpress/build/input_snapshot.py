@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 import hashlib
 import os
 from pathlib import Path
@@ -14,7 +14,7 @@ from uuid import uuid4
 from PySide6.QtCore import QByteArray
 from PySide6.QtGui import QFontDatabase, QImage, QRawFont
 
-from componentpress.application.contracts import ProjectSnapshot
+from componentpress.application.contracts import BuildInputSnapshot, BuildInstance, ProjectSnapshot, SnapshotResource
 from componentpress.application.identifiers import instance_id as make_instance_id
 from componentpress.bindings.resolver import BindingResolver
 from componentpress.data_sources import XlsxReader
@@ -23,64 +23,21 @@ from componentpress.domain.copy_mode import copies_for_mode, validate_copy_mode
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.html_resources import html_image_sources
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
-from componentpress.domain.project import PrintSettings, ProjectDefinition
+from componentpress.domain.project import PrintSettings
 from componentpress.project_io.files import file_hash
 from componentpress.project_io.paths import check_exact_case, resolve_project_path
 from componentpress.rendering.resources import LoadedImage, ProjectResourceLoader
 from componentpress.rendering.image_quality import measure_component_images
+from componentpress.application.ports import Cancellation
 from componentpress.execution.cancellation import CancellationToken
 
 
-@dataclass(frozen=True)
-class SnapshotResource:
-    relative_path: str
-    content_hash: str
-    size: int
-    data: bytes | None = None
-    copied_path: Path | None = None
-
-    def read(self) -> bytes:
-        if self.data is not None:
-            return self.data
-        if self.copied_path is None:
-            raise RuntimeError("resource has no storage")
-        return self.copied_path.read_bytes()
-
-
-@dataclass(frozen=True)
-class BuildInstance:
-    index: int
-    component_id: str
-    component_name: str
-    instance_id: str
-    row_number: int | None
-    copies: int
-    component: ComponentDefinition
-    document_path: Path
-    png_name: str
-
-
-@dataclass(frozen=True)
-class BuildInputSnapshot:
-    job_id: str
-    root: Path
-    job_directory: Path
-    staging_directory: Path
-    project: ProjectDefinition
-    print_settings: PrintSettings
-    mode: str
-    instances: tuple[BuildInstance, ...]
-    resources: Mapping[str, SnapshotResource]
-    input_hashes: Mapping[str, str]
-    font_families: tuple[str, ...]
-    registered_font_ids: tuple[int, ...]
-    max_render_workers: int
-    memory_budget_bytes: int
-    warnings: tuple[Diagnostic, ...] = ()
-
-    @property
-    def total_copies(self) -> int:
-        return sum(instance.copies for instance in self.instances)
+def _read_snapshot_resource(resource: SnapshotResource) -> bytes:
+    if resource.data is not None:
+        return resource.data
+    if resource.copied_path is None:
+        raise RuntimeError("resource has no storage")
+    return resource.copied_path.read_bytes()
 
 
 class SnapshotResourceLoader:
@@ -100,7 +57,7 @@ class SnapshotResourceLoader:
         if cached is not None:
             return cached
         try:
-            data = resource.read()
+            data = _read_snapshot_resource(resource)
         except OSError as exc:
             raise ProjectError(Diagnostic("SNAPSHOT_READ", str(exc), resource.copied_path, field)) from exc
         if hashlib.sha256(data).hexdigest() != resource.content_hash:
@@ -220,7 +177,7 @@ class InputSnapshotBuilder:
         print_settings: PrintSettings | None = None,
         memory_budget_bytes: int = 128 * 1024 * 1024,
         max_render_workers: int = 2,
-        cancellation: CancellationToken | None = None,
+        cancellation: Cancellation | None = None,
         defer_font_registration: bool = False,
     ) -> BuildInputSnapshot:
         token = cancellation or CancellationToken()

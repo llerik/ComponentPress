@@ -10,16 +10,15 @@ from typing import Callable
 
 from PySide6.QtCore import QThreadPool
 
-from componentpress.application.contracts import BuildProgress, BuildResult
+from componentpress.application.contracts import BuildInputSnapshot, BuildProgress, BuildResult
+from componentpress.application.ports import Cancellation
 from componentpress.i18n import tr
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.diagnostics.logging import log_event, log_exception
-from componentpress.execution.cancellation import CancellationToken
 from componentpress.execution.cleanup import cleanup_job_directory
 from componentpress.execution.job_store import JobStore
 from componentpress.execution.tasks import RenderInstanceTask
 from .imposition import calculate_imposition
-from .input_snapshot import BuildInputSnapshot
 from .pdf_writer import write_print_pdf
 from .report import sha256, write_report
 
@@ -31,7 +30,7 @@ class BuildEngine:
     def execute(
         self,
         snapshot: BuildInputSnapshot,
-        cancellation: CancellationToken,
+        cancellation: Cancellation,
         progress: Callable[[BuildProgress], None],
     ) -> BuildResult:
         started = datetime.now(timezone.utc).isoformat()
@@ -157,7 +156,7 @@ class BuildEngine:
         return Diagnostic(code, f"{message}: {detail}", path, severity="warning")
 
     @staticmethod
-    def _render(snapshot: BuildInputSnapshot, cancellation: CancellationToken, progress) -> None:
+    def _render(snapshot: BuildInputSnapshot, cancellation: Cancellation, progress) -> None:
         pool = QThreadPool()
         pool.setMaxThreadCount(snapshot.max_render_workers)
         completed = 0

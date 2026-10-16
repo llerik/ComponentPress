@@ -6,9 +6,9 @@ import json
 from pathlib import Path
 from typing import Mapping
 
+from componentpress.application.contracts import BuildInputSnapshot
 from componentpress.project_io.files import atomic_write
 from .imposition import ImpositionPlan
-from .input_snapshot import BuildInputSnapshot
 
 
 from componentpress.version import APPLICATION_VERSION
