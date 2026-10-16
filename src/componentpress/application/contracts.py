@@ -25,6 +25,21 @@ class ProjectSnapshot:
 
 
 @dataclass(frozen=True)
+class FileFingerprint:
+    size: int
+    mtime_ns: int
+
+
+@dataclass(frozen=True)
+class RenderResult:
+    png: Path
+    pdf: Path | None
+    width_px: int
+    height_px: int
+    dpi: int
+
+
+@dataclass(frozen=True)
 class SnapshotResource:
     relative_path: str
     content_hash: str

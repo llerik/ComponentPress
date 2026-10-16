@@ -92,6 +92,77 @@ if sys.argv[3:] == ["componentpress.domain.diagnostics"]:
     assert str(diagnostic) == "PROBE_ERROR"
     assert str(ProjectError(diagnostic)) == "PROBE_ERROR"
     assert not any(name == "componentpress.i18n" or name.startswith("componentpress.i18n.") for name in sys.modules)
+if sys.argv[3:] == ["componentpress.application.preview_service"]:
+    from pathlib import Path
+    from componentpress.application.contracts import DocumentSnapshot, FileFingerprint, ProjectSnapshot
+    from componentpress.application.preview_service import PreviewService
+    from componentpress.domain.component import ComponentDefinition, DataBinding, SizeMM
+    from componentpress.domain.project import ComponentRef, DataSource, ProjectDefinition
+    from componentpress.domain.render_plan import ResolvedComponent
+    from componentpress.domain.values import DataRow, DataSheetSnapshot
+
+    root = Path("unwritten-project")
+    component = ComponentDefinition(schema_version=6, id="card", name="Card", size_mm=SizeMM(width=40, height=30))
+    project = ProjectDefinition(schema_version=6, id="game", name="Game", version="0.0.1",
+                                components=(ComponentRef(id="card", path="components/card.yaml"),))
+    document = DocumentSnapshot(root / "components/card.yaml", "", "", component)
+    snapshot = ProjectSnapshot(root, "", "", project, {"card": document})
+
+    class Store:
+        def canonical_root(self, path):
+            return path
+
+        def source_path(self, path, relative):
+            return path / relative
+
+        def fingerprint(self, path):
+            return FileFingerprint(1, 2)
+
+        def store_validation(self, *args):
+            self.stored = args
+            return None
+
+    class Resolver:
+        def __init__(self):
+            self.validate_resources = True
+
+        def resolve_component(self, model, data, row, *, owner=None):
+            return ResolvedComponent(model, model.id, row, None)
+
+        def validate_columns(self, component, data, *, owner=None):
+            return None
+
+        def validate_static_resources(self, component, *, owner=None):
+            return None
+
+    resolver = Resolver()
+
+    class Reader:
+        def read(self, path, sheet, **kwargs):
+            row = DataRow(2, "source-id", 1, {})
+            return DataSheetSnapshot("main", path, sheet, "hash", kwargs["version"], (),
+                                     (row,), kwargs["request_id"])
+
+    store = Store()
+
+    def resolver_factory(*args, validate_resources=True):
+        resolver.validate_resources = validate_resources
+        return resolver
+
+    service = PreviewService(Reader(), store, resolver_factory, lambda *args, **kwargs: None)
+    assert service.validate_all(snapshot) == ()
+
+    bound = component.model_copy(update={"data": DataBinding(sheet="Sheet")})
+    source_project = project.model_copy(update={"data_source": DataSource(path="source.xlsx")})
+    source_document = DocumentSnapshot(document.path, "", "", bound)
+    source_snapshot = ProjectSnapshot(root, "", "", source_project, {"card": source_document})
+    assert service.validate_all(source_snapshot) == ()
+    cached = service.cached_data(source_snapshot, "card")
+    assert cached is not None and len(cached.rows) == 1
+    assert store.stored[3] == ["card"]
+    assert service.select_row(source_snapshot, "card", validate_resources=False).component is bound
+    assert resolver.validate_resources is False
+    service.invalidate(root)
 if all(module.startswith("componentpress.domain.") for module in sys.argv[3:]):
     assert not any(name.startswith("componentpress.application.") for name in sys.modules), "domain imported application"
 assert threading.enumerate() == before_threads

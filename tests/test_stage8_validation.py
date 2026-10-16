@@ -9,8 +9,8 @@ from openpyxl import load_workbook
 import pytest
 
 from componentpress.application.identifiers import instance_id
-from componentpress.application.preview_service import PreviewService, ValidationIssues
-from componentpress.bootstrap import project_repository
+from componentpress.application.preview_service import ValidationIssues
+from componentpress.bootstrap import preview_service, project_repository
 from componentpress.data_sources import XlsxReader
 from componentpress.domain.diagnostics import ProjectError
 
@@ -39,7 +39,7 @@ def test_schema_three_rejects_old_project_without_rewriting_files(tmp_path: Path
 def test_validation_checks_zero_copy_rows_and_keeps_last_successful_snapshot(tmp_path: Path) -> None:
     root = copy_demo(tmp_path)
     snapshot = project_repository().open(root)
-    preview = PreviewService(XlsxReader())
+    preview = preview_service(XlsxReader())
     component_id = "forest-card"
     book_path = root / "data/game.xlsx"
     book = load_workbook(book_path)
@@ -88,7 +88,7 @@ def test_unchanged_excel_reuses_data_and_saves_its_fast_fingerprint(tmp_path: Pa
 
     snapshot = project_repository().open(root)
     reader = CountingReader()
-    preview = PreviewService(reader)
+    preview = preview_service(reader)
     data = preview.refresh(snapshot, "forest-card")
     assert data is not None and reader.reads == 2  # Both component sheets.
 
@@ -127,7 +127,7 @@ def test_empty_sheet_checks_column_bindings_and_manual_resources(tmp_path: Path)
     missing_column = model.model_copy(update={
         "elements": (image.model_copy(update={"source_column": "Нет такого столбца"}), *model.elements[1:]),
     })
-    diagnostics = PreviewService(XlsxReader()).validate_all(
+    diagnostics = preview_service(XlsxReader()).validate_all(
         snapshot, manual=True, component_ids=("forest-card",),
         component_overrides={"forest-card": missing_column},
     )
@@ -138,7 +138,7 @@ def test_empty_sheet_checks_column_bindings_and_manual_resources(tmp_path: Path)
             "source_mode": "manual", "source_column": None, "source": "assets/images/missing.png",
         }), *model.elements[1:]),
     })
-    diagnostics = PreviewService(XlsxReader()).validate_all(
+    diagnostics = preview_service(XlsxReader()).validate_all(
         snapshot, manual=True, component_ids=("forest-card",),
         component_overrides={"forest-card": missing_resource},
     )
@@ -162,7 +162,7 @@ def test_validation_does_not_publish_mixed_excel_generations(tmp_path: Path) -> 
                 book_path.touch()
             return data
 
-    preview = PreviewService(ChangingReader())
+    preview = preview_service(ChangingReader())
     diagnostics = preview.validate_all(snapshot, force_read=True)
 
     assert len(diagnostics) == 1
@@ -178,7 +178,7 @@ def test_validate_all_checks_static_component_resources(tmp_path: Path) -> None:
     image_path.unlink()
     snapshot = project_repository().open(root)
 
-    diagnostics = PreviewService(XlsxReader()).validate_all(snapshot)
+    diagnostics = preview_service(XlsxReader()).validate_all(snapshot)
 
     assert diagnostics
     assert any(item.code == "RESOURCE_MISSING" and item.node_id == "leaf-art" for item in diagnostics)
@@ -203,6 +203,6 @@ def test_column_html_rejects_user_supplied_image_tags(tmp_path: Path) -> None:
     book.close()
     snapshot = project_repository().open(root)
     with pytest.raises(ValidationIssues) as caught:
-        PreviewService(XlsxReader()).refresh(snapshot, "forest-card")
+        preview_service(XlsxReader()).refresh(snapshot, "forest-card")
     issue = caught.value.diagnostics[0]
     assert (issue.code, issue.cell, issue.node_id) == ("HTML_UNSUPPORTED", "K2", "heading")

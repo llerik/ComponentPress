@@ -10,9 +10,8 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from openpyxl import Workbook
 
-from componentpress.application.preview_service import PreviewService
 from componentpress.bindings.resolver import BindingResolver
-from componentpress.bootstrap import project_repository
+from componentpress.bootstrap import preview_service, project_repository
 from componentpress.bootstrap import project_controller, project_service
 from componentpress.data_sources import XlsxReader
 from componentpress.domain.diagnostics import ProjectError
@@ -192,7 +191,7 @@ def test_unknown_icon_reports_sheet_row_column_and_node(tmp_path: Path) -> None:
 def test_preview_select_refresh_stale_protection_and_png(tmp_path: Path) -> None:
     root = _bound_project(tmp_path)
     snapshot = project_repository().open(root)
-    service = PreviewService(XlsxReader())
+    service = preview_service(XlsxReader())
     first = service.select_row(snapshot, "forest-card", row_number=2)
     second = service.select_row(snapshot, "forest-card", row_number=3, mode="test")
     assert first.row is not None and second.row is not None
@@ -312,7 +311,7 @@ def test_preview_cache_identity_changes_with_unsaved_binding_model(tmp_path: Pat
     root = tmp_path / "Cache binding"
     shutil.copytree(EXCEL_EXAMPLE, root)
     snapshot = project_repository().open(root)
-    service = PreviewService(XlsxReader())
+    service = preview_service(XlsxReader())
     forest = snapshot.documents["forest-card"].model
     first = service.select_row(snapshot, "forest-card")
     assert first.row is not None and first.row.row_number == 2

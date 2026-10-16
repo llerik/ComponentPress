@@ -2,9 +2,11 @@ from pathlib import Path
 from typing import Callable, ContextManager, Protocol
 
 from componentpress.domain.component import ComponentDefinition
-from componentpress.domain.values import DataSheetSnapshot
-from componentpress.domain.project import DataSource
-from .contracts import BuildInputSnapshot, BuildProgress, BuildResult, DocumentSnapshot, ProjectSnapshot
+from componentpress.domain.diagnostics import Diagnostic
+from componentpress.domain.project import DataSource, ProjectDefinition
+from componentpress.domain.render_plan import ResolvedComponent
+from componentpress.domain.values import DataRow, DataSheetSnapshot
+from .contracts import BuildInputSnapshot, BuildProgress, BuildResult, DocumentSnapshot, FileFingerprint, ProjectSnapshot, RenderResult
 
 
 class Cancellation(Protocol):
@@ -48,6 +50,38 @@ class DataSourceReader(Protocol):
         version: int = 1, request_id: int = 0, data: bytes | None = None,
         copies_columns: tuple[str, str] | None = None,
     ) -> DataSheetSnapshot: ...
+
+
+class ComponentResolver(Protocol):
+    def validate_columns(self, component: ComponentDefinition, data: DataSheetSnapshot, *, owner: Path | None = None) -> None: ...
+    def validate_static_resources(self, component: ComponentDefinition, *, owner: Path | None = None) -> None: ...
+    def resolve_component(
+        self, component: ComponentDefinition, data: DataSheetSnapshot | None,
+        row: DataRow | None, *, owner: Path | None = None,
+    ) -> ResolvedComponent: ...
+
+
+class ValidationStateStore(Protocol):
+    def canonical_root(self, root: Path) -> Path: ...
+    def source_path(self, root: Path, relative_path: str) -> Path: ...
+    def fingerprint(self, path: Path) -> FileFingerprint: ...
+    def store_validation(
+        self, root: Path, source_path: str, fingerprint: FileFingerprint,
+        component_ids: list[str],
+    ) -> Diagnostic | None: ...
+
+
+class BindingResolverFactory(Protocol):
+    def __call__(
+        self, root: Path, project: ProjectDefinition, *, validate_resources: bool = True,
+    ) -> ComponentResolver: ...
+
+
+class ComponentRenderer(Protocol):
+    def __call__(
+        self, snapshot: ProjectSnapshot, component_id: str, output: Path, *,
+        component: ComponentDefinition | None = None, dpi: int | None = None,
+    ) -> RenderResult: ...
 
 
 class BuildRunner(Protocol):

@@ -195,10 +195,10 @@ def _select_render_component(args, snapshot):
     document = snapshot.documents.get(args.component)
     if document is None or document.model.data is None:
         return None
-    from componentpress.application.preview_service import PreviewService
+    from componentpress.bootstrap import preview_service
     from componentpress.data_sources import XlsxReader
 
-    return PreviewService(XlsxReader()).select_row(
+    return preview_service(XlsxReader()).select_row(
         snapshot, args.component, row_number=args.row,
         instance_id=args.instance_id, mode=args.mode,
     ).component

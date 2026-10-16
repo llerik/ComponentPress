@@ -8,8 +8,11 @@ from componentpress.platforms.services import ProjectWriteLock
 from componentpress.application.project_service import ProjectService
 from componentpress.application.preview_service import PreviewService
 from componentpress.application.build_service import BuildService
+from componentpress.bindings.resolver import BindingResolver
 from componentpress.data_sources import XlsxReader
 from componentpress.i18n.diagnostics import format_diagnostic
+from componentpress.project_io.validation_state import PreviewValidationStore
+from componentpress.rendering.exporter import render_component
 
 if TYPE_CHECKING:
     from componentpress.editor.controllers import ProjectController
@@ -34,7 +37,11 @@ def project_controller() -> "ProjectController":
     from componentpress.editor.controllers import ProjectController
 
     service = project_service()
-    return ProjectController(service, PreviewService(XlsxReader()), BuildService(service))
+    return ProjectController(service, preview_service(), BuildService(service))
+
+
+def preview_service(reader=None) -> PreviewService:
+    return PreviewService(reader or XlsxReader(), PreviewValidationStore(), BindingResolver, render_component)
 
 
 def build_service() -> BuildService:

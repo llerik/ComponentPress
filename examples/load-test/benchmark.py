@@ -29,7 +29,8 @@ from PySide6.QtPdf import QPdfDocument
 
 from componentpress.application.build_service import BuildService
 from componentpress.application.contracts import BuildRequest
-from componentpress.application.preview_service import PreviewService, ValidationIssues
+from componentpress.application.preview_service import ValidationIssues
+from componentpress.bootstrap import preview_service
 from componentpress.bootstrap import project_service
 from componentpress.build.engine import BuildEngine
 from componentpress.build.input_snapshot import InputSnapshotBuilder
@@ -155,7 +156,7 @@ def timed_validation(snapshot, reader) -> tuple[float, float]:
         reader.read(xlsx_path, sheet, copies_columns=("Prod", "Test"))
     xlsx_ms = (time.perf_counter() - started) * 1000
 
-    preview = PreviewService(reader)
+    preview = preview_service(reader)
     started = time.perf_counter()
     diagnostics = preview.validate_all(snapshot, force_read=True, manual=True)
     validation_ms = (time.perf_counter() - started) * 1000

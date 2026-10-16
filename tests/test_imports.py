@@ -12,6 +12,7 @@ SINGLE_IMPORTS = (
     "from componentpress.project_io.repository import FileProjectRepository",
     "from componentpress.bindings import BindingResolver",
     "from componentpress.rendering import render_component",
+    "from componentpress.rendering import RenderResult",
 )
 IMPORT_ORDERS = (
     (

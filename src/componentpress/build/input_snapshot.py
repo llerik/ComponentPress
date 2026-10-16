@@ -28,7 +28,7 @@ from componentpress.project_io.files import file_hash
 from componentpress.project_io.paths import check_exact_case, resolve_project_path
 from componentpress.rendering.resources import LoadedImage, ProjectResourceLoader
 from componentpress.rendering.image_quality import measure_component_images
-from componentpress.application.ports import Cancellation
+from componentpress.application.ports import Cancellation, ComponentResolver
 from componentpress.execution.cancellation import CancellationToken
 
 
@@ -206,7 +206,7 @@ class InputSnapshotBuilder:
         xlsx_bytes: dict[Path, bytes] = {}
         xlsx_hashes: dict[Path, str] = {}
         live_loader = ProjectResourceLoader(source.root)
-        resolver = BindingResolver(source.root, source.model, live_loader)
+        resolver: ComponentResolver = BindingResolver(source.root, source.model, live_loader)
 
         for component_id in ordered:
             token.check()

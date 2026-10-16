@@ -13,8 +13,7 @@ import pytest
 from componentpress.application.build_service import BuildService
 from componentpress.application.contracts import BuildRequest
 from componentpress.application.png_archive import export_png_archive
-from componentpress.application.preview_service import PreviewService
-from componentpress.bootstrap import project_repository, project_service
+from componentpress.bootstrap import preview_service, project_repository, project_service
 from componentpress.data_sources import XlsxReader
 from componentpress.domain.diagnostics import ProjectError
 from componentpress.editor.controllers import ProjectController
@@ -168,11 +167,10 @@ def test_cli_build_and_render_accept_test_mode(tmp_path: Path) -> None:
 
 
 def test_cached_preview_lookup_does_not_read_excel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from componentpress.application.preview_service import PreviewService
     from componentpress.data_sources import XlsxReader
 
     snapshot = project_repository().open(_copy_demo(tmp_path))
-    preview = PreviewService(XlsxReader())
+    preview = preview_service(XlsxReader())
     cached = preview.refresh(snapshot, "forest-card")
     assert cached is not None
 
@@ -187,7 +185,7 @@ def test_gui_mode_switch_uses_cached_excel_snapshot(tmp_path: Path, monkeypatch:
     ensure_gui_application()
     service = project_service()
     session = service.open_session(_copy_demo(tmp_path))
-    window = MainWindow(ProjectController(service, PreviewService(XlsxReader()), BuildService(service)))
+    window = MainWindow(ProjectController(service, preview_service(XlsxReader()), BuildService(service)))
     qtbot.addWidget(window)
     window.load_session(session)
     tab = window.open_component("forest-card")

@@ -6,7 +6,7 @@
   "full_pytest": {
     "passed": 478,
     "skipped": 1,
-    "elapsed_seconds": 472.40,
+    "elapsed_seconds": 472.4,
     "command": "$env:QT_SCALE_FACTOR='0.8'; $env:PYTHONDONTWRITEBYTECODE='1'; .\\.venv\\Scripts\\python.exe -m pytest -q -p no:cacheprovider"
   },
   "refactoring_guards": {
@@ -109,38 +109,6 @@
       "line": 35,
       "length": 105,
       "stage": "3г",
-      "owner": "coder:src/componentpress/application"
-    },
-    "src/componentpress/application/preview_service.py|PreviewService.invalidate": {
-      "path": "src/componentpress/application/preview_service.py",
-      "name": "PreviewService.invalidate",
-      "line": 36,
-      "length": 27,
-      "stage": "2а",
-      "owner": "coder:src/componentpress/application"
-    },
-    "src/componentpress/application/preview_service.py|PreviewService._model_signature": {
-      "path": "src/componentpress/application/preview_service.py",
-      "name": "PreviewService._model_signature",
-      "line": 106,
-      "length": 22,
-      "stage": "2а",
-      "owner": "coder:src/componentpress/application"
-    },
-    "src/componentpress/application/preview_service.py|PreviewService.validate_all": {
-      "path": "src/componentpress/application/preview_service.py",
-      "name": "PreviewService.validate_all",
-      "line": 165,
-      "length": 126,
-      "stage": "2а",
-      "owner": "coder:src/componentpress/application"
-    },
-    "src/componentpress/application/preview_service.py|PreviewService.select_row": {
-      "path": "src/componentpress/application/preview_service.py",
-      "name": "PreviewService.select_row",
-      "line": 312,
-      "length": 25,
-      "stage": "2а",
       "owner": "coder:src/componentpress/application"
     },
     "src/componentpress/application/project_service.py|ProjectService.update_project_settings": {
@@ -1535,42 +1503,6 @@
       "stage": "3г",
       "owner": "coder:src/componentpress/application"
     },
-    "src/componentpress/application/preview_service.py||from|componentpress.bindings.resolver.BindingResolver": {
-      "count": 1,
-      "line": 12,
-      "stage": "2а",
-      "owner": "coder:src/componentpress/application"
-    },
-    "src/componentpress/application/preview_service.py||from|componentpress.project_io.paths.check_exact_case": {
-      "count": 1,
-      "line": 18,
-      "stage": "2а",
-      "owner": "coder:src/componentpress/application"
-    },
-    "src/componentpress/application/preview_service.py||from|componentpress.project_io.paths.resolve_project_path": {
-      "count": 1,
-      "line": 18,
-      "stage": "2а",
-      "owner": "coder:src/componentpress/application"
-    },
-    "src/componentpress/application/preview_service.py||from|componentpress.rendering.exporter.RenderResult": {
-      "count": 1,
-      "line": 19,
-      "stage": "2а",
-      "owner": "coder:src/componentpress/application"
-    },
-    "src/componentpress/application/preview_service.py||from|componentpress.rendering.exporter.render_component": {
-      "count": 1,
-      "line": 19,
-      "stage": "2а",
-      "owner": "coder:src/componentpress/application"
-    },
-    "src/componentpress/application/preview_service.py|PreviewService._store_validation_state|from|componentpress.project_io.files.atomic_write": {
-      "count": 1,
-      "line": 140,
-      "stage": "2а",
-      "owner": "coder:src/componentpress/application"
-    },
     "src/componentpress/application/project_service.py||from|componentpress.diagnostics.logging.log_event": {
       "count": 1,
       "line": 7,
@@ -2565,59 +2497,7 @@
       "owner": "coder:src/componentpress/application"
     },
     "componentpress.application.preview_service": {
-      "modules": [
-        "PySide6",
-        "PySide6.QtCore",
-        "PySide6.QtGui",
-        "PySide6.QtWidgets",
-        "PySide6.support",
-        "PySide6.support.deprecated",
-        "PySide6.support.feature",
-        "PySide6.support.signature",
-        "PySide6.support.signature.errorhandler",
-        "PySide6.support.signature.importhandler",
-        "PySide6.support.signature.layout",
-        "PySide6.support.signature.lib",
-        "PySide6.support.signature.lib.enum_sig",
-        "PySide6.support.signature.lib.pyi_generator",
-        "PySide6.support.signature.lib.tool",
-        "PySide6.support.signature.mapping",
-        "PySide6.support.signature.parser",
-        "componentpress.bindings",
-        "componentpress.bindings.grammar",
-        "componentpress.bindings.html_policy",
-        "componentpress.bindings.icons",
-        "componentpress.bindings.resolver",
-        "componentpress.project_io",
-        "componentpress.project_io.paths",
-        "componentpress.rendering",
-        "componentpress.rendering.exporter",
-        "componentpress.rendering.fonts",
-        "componentpress.rendering.geometry",
-        "componentpress.rendering.html_document",
-        "componentpress.rendering.painter",
-        "componentpress.rendering.resources",
-        "jinja2",
-        "jinja2._identifier",
-        "jinja2.async_utils",
-        "jinja2.bccache",
-        "jinja2.compiler",
-        "jinja2.defaults",
-        "jinja2.environment",
-        "jinja2.exceptions",
-        "jinja2.filters",
-        "jinja2.idtracking",
-        "jinja2.lexer",
-        "jinja2.loaders",
-        "jinja2.nodes",
-        "jinja2.optimizer",
-        "jinja2.parser",
-        "jinja2.runtime",
-        "jinja2.sandbox",
-        "jinja2.tests",
-        "jinja2.utils",
-        "jinja2.visitor"
-      ],
+      "modules": [],
       "stage": "2а",
       "owner": "coder:src/componentpress/application"
     },

@@ -12,10 +12,9 @@ import pytest
 from PySide6.QtGui import QImage
 
 from componentpress.application.contracts import DocumentSnapshot, ProjectSnapshot
-from componentpress.application.preview_service import PreviewService
 from componentpress.bindings.resolver import BindingResolver
 from componentpress.bindings.static import resolve_static
-from componentpress.bootstrap import project_repository
+from componentpress.bootstrap import preview_service, project_repository
 from componentpress.cli import main as cli_main
 from componentpress.data_sources import XlsxReader
 from componentpress.domain.component import ComponentDefinition, DataBinding, SizeMM
@@ -269,7 +268,7 @@ def test_demo_two_sheets_icons_nested_paths_and_template_immutability(tmp_path: 
     snapshot = project_repository().open(root)
     before_yaml = {name: doc.path.read_bytes() for name, doc in snapshot.documents.items()}
     before_models = {name: doc.model for name, doc in snapshot.documents.items()}
-    service = PreviewService(XlsxReader())
+    service = preview_service(XlsxReader())
 
     forest = service.select_row(snapshot, "forest-card", row_number=2)
     event = service.select_row(snapshot, "event-card", row_number=2)
@@ -309,7 +308,7 @@ def test_preview_rejects_result_that_becomes_stale_while_reader_is_running(tmp_p
             )
 
     reader = SupersedingReader()
-    service = PreviewService(reader)
+    service = preview_service(reader)
     reader.service = service
     request = service.begin_refresh(root, "card")
     with pytest.raises(ProjectError) as caught:
@@ -325,7 +324,7 @@ def test_cli_preview_export_and_gui_canvas_use_same_resolved_pixels(tmp_path: Pa
     root = tmp_path / "demo"
     shutil.copytree(DEMO, root)
     snapshot = project_repository().open(root)
-    service = PreviewService(XlsxReader())
+    service = preview_service(XlsxReader())
     expected = tmp_path / "service.png"
     cli = tmp_path / "cli.png"
     service.export_png(snapshot, "forest-card", expected, row_number=2, dpi=96)
@@ -485,7 +484,7 @@ def test_preview_cache_uses_project_source_and_component_sheet(tmp_path: Path) -
             )
 
     reader = RecordingReader()
-    service = PreviewService(reader)
+    service = preview_service(reader)
     cases: list[tuple[ProjectSnapshot, ComponentDefinition]] = [(base, component)]
     cases.append((base, component.model_copy(update={"data": component.data.model_copy(update={"sheet": "Другой"})})))
     path_project = project.model_copy(update={"data_source": DataSource(path="data/b.xlsx")})

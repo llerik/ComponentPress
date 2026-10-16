@@ -10,9 +10,8 @@ from PySide6.QtGui import QFocusEvent, QKeyEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from componentpress.application.preview_service import PreviewService
 from componentpress.application.edits import ensure_visual_edit_respects_locks
-from componentpress.bootstrap import project_repository, project_service
+from componentpress.bootstrap import preview_service, project_repository, project_service
 from componentpress.data_sources import XlsxReader
 from componentpress.domain.component import ComponentDefinition, SizeMM
 from componentpress.domain.diagnostics import ProjectError
@@ -276,7 +275,7 @@ def test_excel_html_css_fails_full_sheet_validation_in_zero_copy_row(tmp_path: P
     workbook.save(workbook_path)
     workbook.close()
     snapshot = project_repository().open(root)
-    diagnostics = PreviewService(XlsxReader()).validate_all(snapshot)
+    diagnostics = preview_service(XlsxReader()).validate_all(snapshot)
     assert any(item.code == "HTML_UNSUPPORTED" and item.cell == "K3" for item in diagnostics)
 
 

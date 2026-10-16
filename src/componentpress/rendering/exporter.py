@@ -1,6 +1,5 @@
 """PNG export and the stage-two single-component PDF proof."""
 
-from dataclasses import dataclass
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -9,7 +8,7 @@ from PySide6.QtCore import QMarginsF, QRectF, QSizeF
 from PySide6.QtGui import QGuiApplication, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter
 from PySide6.QtWidgets import QApplication
 
-from componentpress.application.contracts import ProjectSnapshot
+from componentpress.application.contracts import ProjectSnapshot, RenderResult
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.nodes import GroupNode, HtmlNode, Node
@@ -20,15 +19,6 @@ from .resources import ProjectResourceLoader
 
 
 _application: QApplication | None = None
-
-
-@dataclass(frozen=True)
-class RenderResult:
-    png: Path
-    pdf: Path | None
-    width_px: int
-    height_px: int
-    dpi: int
 
 
 def ensure_gui_application() -> QGuiApplication:
