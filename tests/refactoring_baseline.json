@@ -1,0 +1,2858 @@
+{
+  "source_revision": "bf9811b",
+  "limit": 20,
+  "test_collection_before_guards": 417,
+  "test_collection_after_guards": 479,
+  "full_pytest": {
+    "passed": 478,
+    "skipped": 1,
+    "elapsed_seconds": 472.40,
+    "command": "$env:QT_SCALE_FACTOR='0.8'; $env:PYTHONDONTWRITEBYTECODE='1'; .\\.venv\\Scripts\\python.exe -m pytest -q -p no:cacheprovider"
+  },
+  "refactoring_guards": {
+    "passed": 62,
+    "elapsed_seconds": 14.25,
+    "command": "$env:QT_SCALE_FACTOR='0.8'; $env:PYTHONDONTWRITEBYTECODE='1'; .\\.venv\\Scripts\\python.exe -m pytest tests/test_refactoring_guards.py -q -p no:cacheprovider"
+  },
+  "functions": {
+    "examples/generate_demo_xlsx.py|main": {
+      "path": "examples/generate_demo_xlsx.py",
+      "name": "main",
+      "line": 15,
+      "length": 28,
+      "stage": "9д",
+      "owner": "coder:examples"
+    },
+    "examples/load-test/benchmark.py|check_workbook": {
+      "path": "examples/load-test/benchmark.py",
+      "name": "check_workbook",
+      "line": 82,
+      "length": 65,
+      "stage": "9д",
+      "owner": "coder:examples/load-test"
+    },
+    "examples/load-test/benchmark.py|system_info": {
+      "path": "examples/load-test/benchmark.py",
+      "name": "system_info",
+      "line": 179,
+      "length": 22,
+      "stage": "9д",
+      "owner": "coder:examples/load-test"
+    },
+    "examples/load-test/benchmark.py|main": {
+      "path": "examples/load-test/benchmark.py",
+      "name": "main",
+      "line": 203,
+      "length": 135,
+      "stage": "9д",
+      "owner": "coder:examples/load-test"
+    },
+    "examples/load-test/create_fixture.py|image_for": {
+      "path": "examples/load-test/create_fixture.py",
+      "name": "image_for",
+      "line": 27,
+      "length": 21,
+      "stage": "9д",
+      "owner": "coder:examples/load-test"
+    },
+    "examples/load-test/create_fixture.py|main": {
+      "path": "examples/load-test/create_fixture.py",
+      "name": "main",
+      "line": 50,
+      "length": 123,
+      "stage": "9д",
+      "owner": "coder:examples/load-test"
+    },
+    "packaging/build_release.py|main": {
+      "path": "packaging/build_release.py",
+      "name": "main",
+      "line": 32,
+      "length": 111,
+      "stage": "9г",
+      "owner": "coder:packaging"
+    },
+    "packaging/generate_icon.py|build_icon": {
+      "path": "packaging/generate_icon.py",
+      "name": "build_icon",
+      "line": 42,
+      "length": 27,
+      "stage": "9г",
+      "owner": "coder:packaging"
+    },
+    "src/componentpress/application/build_service.py|BuildService.start": {
+      "path": "src/componentpress/application/build_service.py",
+      "name": "BuildService.start",
+      "line": 85,
+      "length": 33,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/build_service.py|BuildService._prepared": {
+      "path": "src/componentpress/application/build_service.py",
+      "name": "BuildService._prepared",
+      "line": 119,
+      "length": 77,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/edits.py|ensure_visual_edit_respects_locks": {
+      "path": "src/componentpress/application/edits.py",
+      "name": "ensure_visual_edit_respects_locks",
+      "line": 8,
+      "length": 24,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/png_archive.py|export_png_archive": {
+      "path": "src/componentpress/application/png_archive.py",
+      "name": "export_png_archive",
+      "line": 35,
+      "length": 105,
+      "stage": "3г",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/preview_service.py|PreviewService.invalidate": {
+      "path": "src/componentpress/application/preview_service.py",
+      "name": "PreviewService.invalidate",
+      "line": 36,
+      "length": 27,
+      "stage": "2а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/preview_service.py|PreviewService._model_signature": {
+      "path": "src/componentpress/application/preview_service.py",
+      "name": "PreviewService._model_signature",
+      "line": 106,
+      "length": 22,
+      "stage": "2а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/preview_service.py|PreviewService.validate_all": {
+      "path": "src/componentpress/application/preview_service.py",
+      "name": "PreviewService.validate_all",
+      "line": 165,
+      "length": 126,
+      "stage": "2а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/preview_service.py|PreviewService.select_row": {
+      "path": "src/componentpress/application/preview_service.py",
+      "name": "PreviewService.select_row",
+      "line": 312,
+      "length": 25,
+      "stage": "2а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/project_service.py|ProjectService.update_project_settings": {
+      "path": "src/componentpress/application/project_service.py",
+      "name": "ProjectService.update_project_settings",
+      "line": 156,
+      "length": 44,
+      "stage": "5а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py|_manifest_for": {
+      "path": "src/componentpress/application/version_service.py",
+      "name": "_manifest_for",
+      "line": 55,
+      "length": 71,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py|_verify_archive": {
+      "path": "src/componentpress/application/version_service.py",
+      "name": "_verify_archive",
+      "line": 128,
+      "length": 70,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py|_recover_project_versions_locked": {
+      "path": "src/componentpress/application/version_service.py",
+      "name": "_recover_project_versions_locked",
+      "line": 243,
+      "length": 67,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py|export_project_version": {
+      "path": "src/componentpress/application/version_service.py",
+      "name": "export_project_version",
+      "line": 333,
+      "length": 177,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py|import_project_archive": {
+      "path": "src/componentpress/application/version_service.py",
+      "name": "import_project_archive",
+      "line": 512,
+      "length": 64,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/bindings/grammar.py|parse_references": {
+      "path": "src/componentpress/bindings/grammar.py",
+      "name": "parse_references",
+      "line": 24,
+      "length": 30,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/bindings"
+    },
+    "src/componentpress/bindings/icons.py|_HtmlIconParser.__init__": {
+      "path": "src/componentpress/bindings/icons.py",
+      "name": "_HtmlIconParser.__init__",
+      "line": 22,
+      "length": 22,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/bindings"
+    },
+    "src/componentpress/bindings/icons.py|expand_icons": {
+      "path": "src/componentpress/bindings/icons.py",
+      "name": "expand_icons",
+      "line": 86,
+      "length": 45,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/bindings"
+    },
+    "src/componentpress/bindings/icons.py|expand_html_icons": {
+      "path": "src/componentpress/bindings/icons.py",
+      "name": "expand_html_icons",
+      "line": 133,
+      "length": 26,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/bindings"
+    },
+    "src/componentpress/bindings/resolver.py|BindingResolver._replace": {
+      "path": "src/componentpress/bindings/resolver.py",
+      "name": "BindingResolver._replace",
+      "line": 88,
+      "length": 39,
+      "stage": "8в",
+      "owner": "coder:src/componentpress/bindings"
+    },
+    "src/componentpress/bindings/resolver.py|BindingResolver.resolve_component": {
+      "path": "src/componentpress/bindings/resolver.py",
+      "name": "BindingResolver.resolve_component",
+      "line": 190,
+      "length": 115,
+      "stage": "8в",
+      "owner": "coder:src/componentpress/bindings"
+    },
+    "src/componentpress/bindings/resolver.py|BindingResolver.resolve_component.visit": {
+      "path": "src/componentpress/bindings/resolver.py",
+      "name": "BindingResolver.resolve_component.visit",
+      "line": 214,
+      "length": 88,
+      "stage": "8в",
+      "owner": "coder:src/componentpress/bindings"
+    },
+    "src/componentpress/bindings/resolver.py|BindingResolver.validate_columns": {
+      "path": "src/componentpress/bindings/resolver.py",
+      "name": "BindingResolver.validate_columns",
+      "line": 306,
+      "length": 30,
+      "stage": "8в",
+      "owner": "coder:src/componentpress/bindings"
+    },
+    "src/componentpress/bindings/static.py|resolve_static": {
+      "path": "src/componentpress/bindings/static.py",
+      "name": "resolve_static",
+      "line": 14,
+      "length": 23,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/bindings"
+    },
+    "src/componentpress/build/engine.py|BuildEngine.execute": {
+      "path": "src/componentpress/build/engine.py",
+      "name": "BuildEngine.execute",
+      "line": 31,
+      "length": 120,
+      "stage": "3в",
+      "owner": "coder:src/componentpress/build"
+    },
+    "src/componentpress/build/engine.py|BuildEngine._render": {
+      "path": "src/componentpress/build/engine.py",
+      "name": "BuildEngine._render",
+      "line": 160,
+      "length": 34,
+      "stage": "3в",
+      "owner": "coder:src/componentpress/build"
+    },
+    "src/componentpress/build/imposition.py|cut_grid_lines": {
+      "path": "src/componentpress/build/imposition.py",
+      "name": "cut_grid_lines",
+      "line": 39,
+      "length": 22,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/build"
+    },
+    "src/componentpress/build/imposition.py|calculate_imposition": {
+      "path": "src/componentpress/build/imposition.py",
+      "name": "calculate_imposition",
+      "line": 68,
+      "length": 36,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/build"
+    },
+    "src/componentpress/build/input_snapshot.py|SnapshotResourceLoader.image": {
+      "path": "src/componentpress/build/input_snapshot.py",
+      "name": "SnapshotResourceLoader.image",
+      "line": 95,
+      "length": 22,
+      "stage": "3а",
+      "owner": "coder:src/componentpress/build"
+    },
+    "src/componentpress/build/input_snapshot.py|InputSnapshotBuilder._copy_stable": {
+      "path": "src/componentpress/build/input_snapshot.py",
+      "name": "InputSnapshotBuilder._copy_stable",
+      "line": 178,
+      "length": 33,
+      "stage": "3а",
+      "owner": "coder:src/componentpress/build"
+    },
+    "src/componentpress/build/input_snapshot.py|InputSnapshotBuilder.create": {
+      "path": "src/componentpress/build/input_snapshot.py",
+      "name": "InputSnapshotBuilder.create",
+      "line": 212,
+      "length": 170,
+      "stage": "3а",
+      "owner": "coder:src/componentpress/build"
+    },
+    "src/componentpress/build/input_snapshot.py|InputSnapshotBuilder.register_snapshot_fonts": {
+      "path": "src/componentpress/build/input_snapshot.py",
+      "name": "InputSnapshotBuilder.register_snapshot_fonts",
+      "line": 383,
+      "length": 68,
+      "stage": "3а",
+      "owner": "coder:src/componentpress/build"
+    },
+    "src/componentpress/build/pdf_writer.py|write_print_pdf": {
+      "path": "src/componentpress/build/pdf_writer.py",
+      "name": "write_print_pdf",
+      "line": 19,
+      "length": 67,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/build"
+    },
+    "src/componentpress/build/report.py|write_report": {
+      "path": "src/componentpress/build/report.py",
+      "name": "write_report",
+      "line": 25,
+      "length": 72,
+      "stage": "9в",
+      "owner": "coder:src/componentpress/build"
+    },
+    "src/componentpress/data_sources/xlsx_reader.py|_formula_xml_states": {
+      "path": "src/componentpress/data_sources/xlsx_reader.py",
+      "name": "_formula_xml_states",
+      "line": 31,
+      "length": 38,
+      "stage": "8б",
+      "owner": "coder:src/componentpress/data_sources"
+    },
+    "src/componentpress/data_sources/xlsx_reader.py|XlsxReader.read": {
+      "path": "src/componentpress/data_sources/xlsx_reader.py",
+      "name": "XlsxReader.read",
+      "line": 85,
+      "length": 136,
+      "stage": "8б",
+      "owner": "coder:src/componentpress/data_sources"
+    },
+    "src/componentpress/diagnostics/logging.py|_prune": {
+      "path": "src/componentpress/diagnostics/logging.py",
+      "name": "_prune",
+      "line": 57,
+      "length": 35,
+      "stage": "9в",
+      "owner": "coder:src/componentpress/diagnostics"
+    },
+    "src/componentpress/diagnostics/logging.py|initialize": {
+      "path": "src/componentpress/diagnostics/logging.py",
+      "name": "initialize",
+      "line": 94,
+      "length": 34,
+      "stage": "9в",
+      "owner": "coder:src/componentpress/diagnostics"
+    },
+    "src/componentpress/diagnostics/logging.py|log_event": {
+      "path": "src/componentpress/diagnostics/logging.py",
+      "name": "log_event",
+      "line": 130,
+      "length": 37,
+      "stage": "9в",
+      "owner": "coder:src/componentpress/diagnostics"
+    },
+    "src/componentpress/diagnostics/logging.py|create_report": {
+      "path": "src/componentpress/diagnostics/logging.py",
+      "name": "create_report",
+      "line": 199,
+      "length": 47,
+      "stage": "9в",
+      "owner": "coder:src/componentpress/diagnostics"
+    },
+    "src/componentpress/domain/diagnostics.py|Diagnostic.__str__": {
+      "path": "src/componentpress/domain/diagnostics.py",
+      "name": "Diagnostic.__str__",
+      "line": 21,
+      "length": 30,
+      "stage": "1б",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "src/componentpress/domain/tree.py|update_node": {
+      "path": "src/componentpress/domain/tree.py",
+      "name": "update_node",
+      "line": 91,
+      "length": 21,
+      "stage": "7",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "src/componentpress/domain/tree.py|resize_node": {
+      "path": "src/componentpress/domain/tree.py",
+      "name": "resize_node",
+      "line": 161,
+      "length": 61,
+      "stage": "7",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "src/componentpress/domain/tree.py|duplicate_nodes": {
+      "path": "src/componentpress/domain/tree.py",
+      "name": "duplicate_nodes",
+      "line": 261,
+      "length": 35,
+      "stage": "7",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "src/componentpress/domain/tree.py|group_nodes": {
+      "path": "src/componentpress/domain/tree.py",
+      "name": "group_nodes",
+      "line": 336,
+      "length": 25,
+      "stage": "7",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "src/componentpress/domain/tree.py|reparent_nodes": {
+      "path": "src/componentpress/domain/tree.py",
+      "name": "reparent_nodes",
+      "line": 382,
+      "length": 30,
+      "stage": "7",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "src/componentpress/domain/tree.py|drop_nodes": {
+      "path": "src/componentpress/domain/tree.py",
+      "name": "drop_nodes",
+      "line": 414,
+      "length": 26,
+      "stage": "7",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "src/componentpress/domain/tree.py|align_nodes": {
+      "path": "src/componentpress/domain/tree.py",
+      "name": "align_nodes",
+      "line": 487,
+      "length": 31,
+      "stage": "7",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "src/componentpress/domain/values.py|value_to_text": {
+      "path": "src/componentpress/domain/values.py",
+      "name": "value_to_text",
+      "line": 68,
+      "length": 21,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "src/componentpress/editor/build_dialog.py|BuildOptionsDialog.__init__": {
+      "path": "src/componentpress/editor/build_dialog.py",
+      "name": "BuildOptionsDialog.__init__",
+      "line": 18,
+      "length": 44,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/canvas/view.py|ComponentCanvas.__init__": {
+      "path": "src/componentpress/editor/canvas/view.py",
+      "name": "ComponentCanvas.__init__",
+      "line": 92,
+      "length": 39,
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "src/componentpress/editor/canvas/view.py|ComponentCanvas.set_document": {
+      "path": "src/componentpress/editor/canvas/view.py",
+      "name": "ComponentCanvas.set_document",
+      "line": 170,
+      "length": 27,
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "src/componentpress/editor/canvas/view.py|ComponentCanvas._sync_model_overlays": {
+      "path": "src/componentpress/editor/canvas/view.py",
+      "name": "ComponentCanvas._sync_model_overlays",
+      "line": 211,
+      "length": 55,
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "src/componentpress/editor/canvas/view.py|ComponentCanvas._sync_model_overlays.add": {
+      "path": "src/componentpress/editor/canvas/view.py",
+      "name": "ComponentCanvas._sync_model_overlays.add",
+      "line": 226,
+      "length": 32,
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "src/componentpress/editor/canvas/view.py|ComponentCanvas._cursor_for_handle": {
+      "path": "src/componentpress/editor/canvas/view.py",
+      "name": "ComponentCanvas._cursor_for_handle",
+      "line": 363,
+      "length": 23,
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "src/componentpress/editor/canvas/view.py|ComponentCanvas._update_hover_cursor": {
+      "path": "src/componentpress/editor/canvas/view.py",
+      "name": "ComponentCanvas._update_hover_cursor",
+      "line": 387,
+      "length": 23,
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "src/componentpress/editor/canvas/view.py|ComponentCanvas.drawForeground": {
+      "path": "src/componentpress/editor/canvas/view.py",
+      "name": "ComponentCanvas.drawForeground",
+      "line": 411,
+      "length": 24,
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "src/componentpress/editor/canvas/view.py|ComponentCanvas._overlay_at": {
+      "path": "src/componentpress/editor/canvas/view.py",
+      "name": "ComponentCanvas._overlay_at",
+      "line": 436,
+      "length": 21,
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "src/componentpress/editor/canvas/view.py|ComponentCanvas.mousePressEvent": {
+      "path": "src/componentpress/editor/canvas/view.py",
+      "name": "ComponentCanvas.mousePressEvent",
+      "line": 461,
+      "length": 97,
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "src/componentpress/editor/canvas/view.py|ComponentCanvas.mouseMoveEvent": {
+      "path": "src/componentpress/editor/canvas/view.py",
+      "name": "ComponentCanvas.mouseMoveEvent",
+      "line": 559,
+      "length": 33,
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "src/componentpress/editor/canvas/view.py|ComponentCanvas.mouseReleaseEvent": {
+      "path": "src/componentpress/editor/canvas/view.py",
+      "name": "ComponentCanvas.mouseReleaseEvent",
+      "line": 593,
+      "length": 63,
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "src/componentpress/editor/canvas/view.py|ComponentCanvas.keyPressEvent": {
+      "path": "src/componentpress/editor/canvas/view.py",
+      "name": "ComponentCanvas.keyPressEvent",
+      "line": 657,
+      "length": 42,
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "src/componentpress/editor/canvas/view.py|ComponentCanvas._finish_nudge": {
+      "path": "src/componentpress/editor/canvas/view.py",
+      "name": "ComponentCanvas._finish_nudge",
+      "line": 707,
+      "length": 21,
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "src/componentpress/editor/component_dialog.py|ComponentDialog.__init__": {
+      "path": "src/componentpress/editor/component_dialog.py",
+      "name": "ComponentDialog.__init__",
+      "line": 28,
+      "length": 46,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/dialogs.py|ResourcePickerDialog.__init__": {
+      "path": "src/componentpress/editor/dialogs.py",
+      "name": "ResourcePickerDialog.__init__",
+      "line": 45,
+      "length": 29,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/dialogs.py|ImageManagerDialog.__init__": {
+      "path": "src/componentpress/editor/dialogs.py",
+      "name": "ImageManagerDialog.__init__",
+      "line": 104,
+      "length": 28,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/dialogs.py|ImageAddDialog.__init__": {
+      "path": "src/componentpress/editor/dialogs.py",
+      "name": "ImageAddDialog.__init__",
+      "line": 206,
+      "length": 36,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/dialogs.py|HtmlAddDialog.__init__": {
+      "path": "src/componentpress/editor/dialogs.py",
+      "name": "HtmlAddDialog.__init__",
+      "line": 269,
+      "length": 55,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/document_tab.py|DocumentTab.__init__": {
+      "path": "src/componentpress/editor/document_tab.py",
+      "name": "DocumentTab.__init__",
+      "line": 68,
+      "length": 130,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow.__init__": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow.__init__",
+      "line": 99,
+      "length": 44,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._build_actions": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._build_actions",
+      "line": 175,
+      "length": 75,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._build_ui": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._build_ui",
+      "line": 261,
+      "length": 80,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._left_panel": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._left_panel",
+      "line": 350,
+      "length": 93,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._right_panel": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._right_panel",
+      "line": 485,
+      "length": 79,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._show_about": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._show_about",
+      "line": 634,
+      "length": 112,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._show_about.show_report": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._show_about.show_report",
+      "line": 709,
+      "length": 25,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._connect_signals": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._connect_signals",
+      "line": 750,
+      "length": 71,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._import_project_archive": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._import_project_archive",
+      "line": 876,
+      "length": 30,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._export_project_archive": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._export_project_archive",
+      "line": 907,
+      "length": 21,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._version_task_finished": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._version_task_finished",
+      "line": 960,
+      "length": 85,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow.project_settings_dialog": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow.project_settings_dialog",
+      "line": 1046,
+      "length": 30,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow.delete_component": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow.delete_component",
+      "line": 1237,
+      "length": 36,
+      "stage": "5а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._apply_component_membership": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._apply_component_membership",
+      "line": 1274,
+      "length": 45,
+      "stage": "5а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._undo": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._undo",
+      "line": 1320,
+      "length": 29,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._redo": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._redo",
+      "line": 1350,
+      "length": 29,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow.open_component": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow.open_component",
+      "line": 1390,
+      "length": 38,
+      "stage": "5а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._active_tab_changed": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._active_tab_changed",
+      "line": 1429,
+      "length": 28,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._populate_data_panel": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._populate_data_panel",
+      "line": 1470,
+      "length": 31,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._validate_active": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._validate_active",
+      "line": 1558,
+      "length": 36,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._refresh_data": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._refresh_data",
+      "line": 1614,
+      "length": 31,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._refresh_preview": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._refresh_preview",
+      "line": 1646,
+      "length": 47,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._update_preview_navigation": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._update_preview_navigation",
+      "line": 1736,
+      "length": 24,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._preview_task_finished": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._preview_task_finished",
+      "line": 1793,
+      "length": 50,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._preview_quality_diagnostics": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._preview_quality_diagnostics",
+      "line": 1844,
+      "length": 34,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._export_png_archive": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._export_png_archive",
+      "line": 1982,
+      "length": 56,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._start_build": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._start_build",
+      "line": 2039,
+      "length": 46,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._on_build_finished": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._on_build_finished",
+      "line": 2093,
+      "length": 23,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._apply_draft": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._apply_draft",
+      "line": 2159,
+      "length": 34,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._set_selection": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._set_selection",
+      "line": 2232,
+      "length": 32,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._show_selection": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._show_selection",
+      "line": 2265,
+      "length": 48,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._commit_component": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._commit_component",
+      "line": 2378,
+      "length": 22,
+      "stage": "5а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._document_changed": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._document_changed",
+      "line": 2401,
+      "length": 28,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow.duplicate_selected": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow.duplicate_selected",
+      "line": 2506,
+      "length": 27,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._show_element_context_menu": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._show_element_context_menu",
+      "line": 2541,
+      "length": 29,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._layer_drop": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._layer_drop",
+      "line": 2635,
+      "length": 27,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._place_element": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._place_element",
+      "line": 2732,
+      "length": 57,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._draw_element": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._draw_element",
+      "line": 2790,
+      "length": 22,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow.add_image": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow.add_image",
+      "line": 2813,
+      "length": 25,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow.add_html": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow.add_html",
+      "line": 2839,
+      "length": 32,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow.insert_html_image": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow.insert_html_image",
+      "line": 2872,
+      "length": 21,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow.save_all": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow.save_all",
+      "line": 2916,
+      "length": 21,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._update_actions": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._update_actions",
+      "line": 3063,
+      "length": 80,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow.closeEvent": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow.closeEvent",
+      "line": 3153,
+      "length": 31,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/preview_worker.py|PreviewTask.run": {
+      "path": "src/componentpress/editor/preview_worker.py",
+      "name": "PreviewTask.run",
+      "line": 40,
+      "length": 27,
+      "stage": "2б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/preview_worker.py|PreviewFontReadTask.run": {
+      "path": "src/componentpress/editor/preview_worker.py",
+      "name": "PreviewFontReadTask.run",
+      "line": 80,
+      "length": 26,
+      "stage": "2б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/project_settings_dialog.py|ProjectSettingsDialog.__init__": {
+      "path": "src/componentpress/editor/project_settings_dialog.py",
+      "name": "ProjectSettingsDialog.__init__",
+      "line": 16,
+      "length": 35,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/properties.py|ComponentProperties.__init__": {
+      "path": "src/componentpress/editor/properties.py",
+      "name": "ComponentProperties.__init__",
+      "line": 36,
+      "length": 41,
+      "stage": "6а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/properties.py|ComponentProperties.show_component": {
+      "path": "src/componentpress/editor/properties.py",
+      "name": "ComponentProperties.show_component",
+      "line": 103,
+      "length": 27,
+      "stage": "6а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/properties.py|ElementProperties.__init__": {
+      "path": "src/componentpress/editor/properties.py",
+      "name": "ElementProperties.__init__",
+      "line": 140,
+      "length": 184,
+      "stage": "6а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/properties.py|ElementProperties.show_node": {
+      "path": "src/componentpress/editor/properties.py",
+      "name": "ElementProperties.show_node",
+      "line": 425,
+      "length": 155,
+      "stage": "6а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/properties.py|ElementProperties.show_image_quality": {
+      "path": "src/componentpress/editor/properties.py",
+      "name": "ElementProperties.show_image_quality",
+      "line": 600,
+      "length": 21,
+      "stage": "6а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/theme.py|apply_theme": {
+      "path": "src/componentpress/editor/theme.py",
+      "name": "apply_theme",
+      "line": 21,
+      "length": 28,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/ui_state.py|UiState.restore": {
+      "path": "src/componentpress/editor/ui_state.py",
+      "name": "UiState.restore",
+      "line": 24,
+      "length": 29,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/execution/cleanup.py|cleanup_job_directory": {
+      "path": "src/componentpress/execution/cleanup.py",
+      "name": "cleanup_job_directory",
+      "line": 9,
+      "length": 43,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/execution"
+    },
+    "src/componentpress/execution/job_store.py|JobStore.initialize": {
+      "path": "src/componentpress/execution/job_store.py",
+      "name": "JobStore.initialize",
+      "line": 35,
+      "length": 24,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/execution"
+    },
+    "src/componentpress/execution/job_store.py|JobStore.verify_published": {
+      "path": "src/componentpress/execution/job_store.py",
+      "name": "JobStore.verify_published",
+      "line": 105,
+      "length": 30,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/execution"
+    },
+    "src/componentpress/execution/job_store.py|JobStore.recover": {
+      "path": "src/componentpress/execution/job_store.py",
+      "name": "JobStore.recover",
+      "line": 136,
+      "length": 66,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/execution"
+    },
+    "src/componentpress/execution/tasks.py|RenderInstanceTask.run": {
+      "path": "src/componentpress/execution/tasks.py",
+      "name": "RenderInstanceTask.run",
+      "line": 26,
+      "length": 46,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/execution"
+    },
+    "src/componentpress/execution/thread_runner.py|ThreadBuildRunner._deliver_finished": {
+      "path": "src/componentpress/execution/thread_runner.py",
+      "name": "ThreadBuildRunner._deliver_finished",
+      "line": 88,
+      "length": 21,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/execution"
+    },
+    "src/componentpress/gui.py|_run_release_smoke": {
+      "path": "src/componentpress/gui.py",
+      "name": "_run_release_smoke",
+      "line": 35,
+      "length": 358,
+      "stage": "9г",
+      "owner": "coder:src/componentpress"
+    },
+    "src/componentpress/gui.py|main": {
+      "path": "src/componentpress/gui.py",
+      "name": "main",
+      "line": 413,
+      "length": 56,
+      "stage": "9г",
+      "owner": "coder:src/componentpress"
+    },
+    "src/componentpress/project_io/archive_snapshots.py|snapshot_sources": {
+      "path": "src/componentpress/project_io/archive_snapshots.py",
+      "name": "snapshot_sources",
+      "line": 44,
+      "length": 97,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/archive_snapshots.py|verify_source_inventory": {
+      "path": "src/componentpress/project_io/archive_snapshots.py",
+      "name": "verify_source_inventory",
+      "line": 154,
+      "length": 35,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/migrations.py|recover_migration": {
+      "path": "src/componentpress/project_io/migrations.py",
+      "name": "recover_migration",
+      "line": 42,
+      "length": 31,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/repository.py|FileProjectRepository.create": {
+      "path": "src/componentpress/project_io/repository.py",
+      "name": "FileProjectRepository.create",
+      "line": 41,
+      "length": 30,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/repository.py|FileProjectRepository.open": {
+      "path": "src/componentpress/project_io/repository.py",
+      "name": "FileProjectRepository.open",
+      "line": 72,
+      "length": 73,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/repository.py|FileProjectRepository.add_component": {
+      "path": "src/componentpress/project_io/repository.py",
+      "name": "FileProjectRepository.add_component",
+      "line": 226,
+      "length": 28,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/repository.py|FileProjectRepository.remove_component": {
+      "path": "src/componentpress/project_io/repository.py",
+      "name": "FileProjectRepository.remove_component",
+      "line": 255,
+      "length": 31,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/repository.py|FileProjectRepository.restore_component": {
+      "path": "src/componentpress/project_io/repository.py",
+      "name": "FileProjectRepository.restore_component",
+      "line": 287,
+      "length": 36,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/resource_transactions.py|_rollback": {
+      "path": "src/componentpress/project_io/resource_transactions.py",
+      "name": "_rollback",
+      "line": 18,
+      "length": 24,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/resource_transactions.py|publish_resources": {
+      "path": "src/componentpress/project_io/resource_transactions.py",
+      "name": "publish_resources",
+      "line": 61,
+      "length": 52,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/schema_checks.py|preflight_project_schemas": {
+      "path": "src/componentpress/project_io/schema_checks.py",
+      "name": "preflight_project_schemas",
+      "line": 23,
+      "length": 75,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/transactions.py|recover": {
+      "path": "src/componentpress/project_io/transactions.py",
+      "name": "recover",
+      "line": 21,
+      "length": 26,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/transactions.py|recover_component_membership": {
+      "path": "src/componentpress/project_io/transactions.py",
+      "name": "recover_component_membership",
+      "line": 49,
+      "length": 52,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/transactions.py|change_component_membership": {
+      "path": "src/componentpress/project_io/transactions.py",
+      "name": "change_component_membership",
+      "line": 103,
+      "length": 35,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/transactions.py|register_component": {
+      "path": "src/componentpress/project_io/transactions.py",
+      "name": "register_component",
+      "line": 140,
+      "length": 22,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/yaml_codec.py|_load": {
+      "path": "src/componentpress/project_io/yaml_codec.py",
+      "name": "_load",
+      "line": 52,
+      "length": 26,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/yaml_codec.py|_validate": {
+      "path": "src/componentpress/project_io/yaml_codec.py",
+      "name": "_validate",
+      "line": 80,
+      "length": 41,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/yaml_codec.py|parse_project": {
+      "path": "src/componentpress/project_io/yaml_codec.py",
+      "name": "parse_project",
+      "line": 256,
+      "length": 22,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/yaml_codec.py|update_tree": {
+      "path": "src/componentpress/project_io/yaml_codec.py",
+      "name": "update_tree",
+      "line": 298,
+      "length": 167,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/yaml_codec.py|update_tree.collect": {
+      "path": "src/componentpress/project_io/yaml_codec.py",
+      "name": "update_tree.collect",
+      "line": 321,
+      "length": 30,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/project_io/yaml_codec.py|update_tree.schema_data": {
+      "path": "src/componentpress/project_io/yaml_codec.py",
+      "name": "update_tree.schema_data",
+      "line": 353,
+      "length": 24,
+      "stage": "9б",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "src/componentpress/rendering/exporter.py|_save_pdf": {
+      "path": "src/componentpress/rendering/exporter.py",
+      "name": "_save_pdf",
+      "line": 64,
+      "length": 30,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "src/componentpress/rendering/exporter.py|render_component_image": {
+      "path": "src/componentpress/rendering/exporter.py",
+      "name": "render_component_image",
+      "line": 96,
+      "length": 62,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "src/componentpress/rendering/exporter.py|render_component_image.draw": {
+      "path": "src/componentpress/rendering/exporter.py",
+      "name": "render_component_image.draw",
+      "line": 128,
+      "length": 24,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "src/componentpress/rendering/fonts.py|ProjectFonts.register": {
+      "path": "src/componentpress/rendering/fonts.py",
+      "name": "ProjectFonts.register",
+      "line": 17,
+      "length": 29,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "src/componentpress/rendering/geometry.py|image_fit_geometry": {
+      "path": "src/componentpress/rendering/geometry.py",
+      "name": "image_fit_geometry",
+      "line": 18,
+      "length": 40,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "src/componentpress/rendering/html_document.py|prepare_html": {
+      "path": "src/componentpress/rendering/html_document.py",
+      "name": "prepare_html",
+      "line": 42,
+      "length": 44,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "src/componentpress/rendering/image_quality.py|measure_component_images": {
+      "path": "src/componentpress/rendering/image_quality.py",
+      "name": "measure_component_images",
+      "line": 98,
+      "length": 61,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "src/componentpress/rendering/image_quality.py|measure_component_images.visit": {
+      "path": "src/componentpress/rendering/image_quality.py",
+      "name": "measure_component_images.visit",
+      "line": 108,
+      "length": 48,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "src/componentpress/rendering/painter.py|paint_component": {
+      "path": "src/componentpress/rendering/painter.py",
+      "name": "paint_component",
+      "line": 29,
+      "length": 71,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "src/componentpress/rendering/painter.py|paint_component.visit": {
+      "path": "src/componentpress/rendering/painter.py",
+      "name": "paint_component.visit",
+      "line": 49,
+      "length": 46,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "src/componentpress/rendering/resources.py|ProjectResourceLoader.image": {
+      "path": "src/componentpress/rendering/resources.py",
+      "name": "ProjectResourceLoader.image",
+      "line": 31,
+      "length": 40,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "src/componentpress/resources/repository.py|ResourceRepository.import_image": {
+      "path": "src/componentpress/resources/repository.py",
+      "name": "ResourceRepository.import_image",
+      "line": 40,
+      "length": 21,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/resources"
+    },
+    "src/componentpress/resources/repository.py|ResourceRepository.import_image_folder": {
+      "path": "src/componentpress/resources/repository.py",
+      "name": "ResourceRepository.import_image_folder",
+      "line": 84,
+      "length": 59,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/resources"
+    }
+  },
+  "imports": {
+    "src/componentpress/application/build_service.py||from|PySide6.QtCore.QEventLoop": {
+      "count": 1,
+      "line": 9,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/build_service.py||from|PySide6.QtCore.QObject": {
+      "count": 1,
+      "line": 9,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/build_service.py||from|PySide6.QtCore.QRunnable": {
+      "count": 1,
+      "line": 9,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/build_service.py||from|PySide6.QtCore.QThreadPool": {
+      "count": 1,
+      "line": 9,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/build_service.py||from|PySide6.QtCore.Qt": {
+      "count": 1,
+      "line": 9,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/build_service.py||from|PySide6.QtCore.Signal": {
+      "count": 1,
+      "line": 9,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/build_service.py||from|componentpress.build.input_snapshot.InputSnapshotBuilder": {
+      "count": 1,
+      "line": 13,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/build_service.py||from|componentpress.diagnostics.logging.log_event": {
+      "count": 1,
+      "line": 15,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/build_service.py||from|componentpress.diagnostics.logging.log_exception": {
+      "count": 1,
+      "line": 15,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/build_service.py||from|componentpress.execution.cancellation.CancellationToken": {
+      "count": 1,
+      "line": 17,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/build_service.py||from|componentpress.execution.cleanup.cleanup_job_directory": {
+      "count": 1,
+      "line": 18,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/build_service.py||from|componentpress.execution.job_store.JobStore": {
+      "count": 1,
+      "line": 19,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/build_service.py||from|componentpress.execution.thread_runner.ThreadBuildRunner": {
+      "count": 1,
+      "line": 20,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/build_service.py||from|componentpress.platforms.services.ProjectWriteLock": {
+      "count": 1,
+      "line": 21,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/build_service.py||from|componentpress.i18n.tr": {
+      "count": 1,
+      "line": 22,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/build_service.py|BuildService._prepared|from|PySide6.QtGui.QFontDatabase": {
+      "count": 1,
+      "line": 177,
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/png_archive.py||from|PySide6.QtGui.QFontDatabase": {
+      "count": 1,
+      "line": 13,
+      "stage": "3г",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/png_archive.py||from|componentpress.build.input_snapshot.InputSnapshotBuilder": {
+      "count": 1,
+      "line": 16,
+      "stage": "3г",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/png_archive.py||from|componentpress.diagnostics.logging.log_event": {
+      "count": 1,
+      "line": 19,
+      "stage": "3г",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/png_archive.py||from|componentpress.diagnostics.logging.log_exception": {
+      "count": 1,
+      "line": 19,
+      "stage": "3г",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/png_archive.py||from|componentpress.execution.cancellation.CancellationToken": {
+      "count": 1,
+      "line": 20,
+      "stage": "3г",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/png_archive.py||from|componentpress.execution.cleanup.cleanup_job_directory": {
+      "count": 1,
+      "line": 21,
+      "stage": "3г",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/png_archive.py||from|componentpress.execution.job_store.JobStore": {
+      "count": 1,
+      "line": 22,
+      "stage": "3г",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/png_archive.py||from|componentpress.i18n.tr": {
+      "count": 1,
+      "line": 23,
+      "stage": "3г",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/png_archive.py||from|componentpress.execution.tasks.RenderInstanceTask": {
+      "count": 1,
+      "line": 24,
+      "stage": "3г",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/ports.py|<TYPE_CHECKING>|from|componentpress.build.input_snapshot.BuildInputSnapshot": {
+      "count": 1,
+      "line": 11,
+      "stage": "1а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/preview_service.py||from|componentpress.bindings.resolver.BindingResolver": {
+      "count": 1,
+      "line": 12,
+      "stage": "2а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/preview_service.py||from|componentpress.project_io.paths.check_exact_case": {
+      "count": 1,
+      "line": 18,
+      "stage": "2а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/preview_service.py||from|componentpress.project_io.paths.resolve_project_path": {
+      "count": 1,
+      "line": 18,
+      "stage": "2а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/preview_service.py||from|componentpress.rendering.exporter.RenderResult": {
+      "count": 1,
+      "line": 19,
+      "stage": "2а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/preview_service.py||from|componentpress.rendering.exporter.render_component": {
+      "count": 1,
+      "line": 19,
+      "stage": "2а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/preview_service.py|PreviewService._store_validation_state|from|componentpress.project_io.files.atomic_write": {
+      "count": 1,
+      "line": 140,
+      "stage": "2а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/project_service.py||from|componentpress.diagnostics.logging.log_event": {
+      "count": 1,
+      "line": 7,
+      "stage": "5в",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/project_service.py||from|componentpress.diagnostics.logging.log_exception": {
+      "count": 1,
+      "line": 7,
+      "stage": "5в",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/project_service.py|ProjectService.update_project_settings|from|componentpress.project_io.files.file_hash": {
+      "count": 1,
+      "line": 159,
+      "stage": "5а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/project_service.py|ProjectService.update_project_settings|from|componentpress.project_io.paths.resolve_project_path": {
+      "count": 1,
+      "line": 160,
+      "stage": "5а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py||from|componentpress.project_io.archive_snapshots.snapshot_sources": {
+      "count": 1,
+      "line": 20,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py||from|componentpress.project_io.archive_snapshots.verify_source_inventory": {
+      "count": 1,
+      "line": 20,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py||from|componentpress.project_io.archive_snapshots._is_reparse": {
+      "count": 1,
+      "line": 20,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py||from|componentpress.project_io.archive_snapshots.EXCLUDED_ROOTS": {
+      "count": 1,
+      "line": 21,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py||from|componentpress.project_io.files.atomic_write": {
+      "count": 1,
+      "line": 22,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py||from|componentpress.project_io.files.file_hash": {
+      "count": 1,
+      "line": 22,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py||from|componentpress.project_io.paths.validate_relative_path": {
+      "count": 1,
+      "line": 23,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py||from|componentpress.project_io.repository.FileProjectRepository": {
+      "count": 1,
+      "line": 25,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py||from|componentpress.project_io.yaml_codec.dump_yaml": {
+      "count": 1,
+      "line": 26,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py||from|componentpress.project_io.yaml_codec.parse_project": {
+      "count": 1,
+      "line": 26,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py||from|componentpress.project_io.yaml_codec.update_tree": {
+      "count": 1,
+      "line": 26,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py||from|componentpress.project_io.yaml_codec.parse_component": {
+      "count": 1,
+      "line": 27,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py||from|componentpress.platforms.services.ProjectWriteLock": {
+      "count": 1,
+      "line": 28,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/application/version_service.py||from|componentpress.i18n.tr": {
+      "count": 1,
+      "line": 29,
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "src/componentpress/build/input_snapshot.py||from|componentpress.application.identifiers.instance_id": {
+      "count": 1,
+      "line": 18,
+      "stage": "3а",
+      "owner": "coder:src/componentpress/build"
+    },
+    "src/componentpress/domain/diagnostics.py|Diagnostic.__str__|from|componentpress.i18n.tr": {
+      "count": 2,
+      "line": 44,
+      "stage": "1б",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "src/componentpress/domain/diagnostics.py|Diagnostic.__str__|from|componentpress.i18n.language": {
+      "count": 1,
+      "line": 44,
+      "stage": "1б",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "src/componentpress/domain/values.py|value_to_text|dynamic|math": {
+      "count": 1,
+      "line": 83,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "src/componentpress/editor/commands.py||from|componentpress.application.sessions.DocumentSession": {
+      "count": 1,
+      "line": 7,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/controllers.py||from|componentpress.application.project_service.ProjectService": {
+      "count": 1,
+      "line": 5,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/controllers.py||from|componentpress.application.preview_service.PreviewService": {
+      "count": 1,
+      "line": 6,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/controllers.py||from|componentpress.application.build_service.BuildService": {
+      "count": 1,
+      "line": 7,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/controllers.py||from|componentpress.application.sessions.DocumentSession": {
+      "count": 1,
+      "line": 9,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/controllers.py||from|componentpress.application.sessions.ProjectSession": {
+      "count": 1,
+      "line": 9,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/document_tab.py||from|componentpress.application.sessions.ProjectSession": {
+      "count": 1,
+      "line": 17,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py||from|componentpress.application.sessions.ProjectSession": {
+      "count": 1,
+      "line": 45,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py||from|componentpress.application.preview_service.ValidationIssues": {
+      "count": 1,
+      "line": 49,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._export_png_archive|from|componentpress.application.png_archive.export_png_archive": {
+      "count": 1,
+      "line": 2001,
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/project_settings_dialog.py||from|componentpress.application.sessions.ProjectSession": {
+      "count": 1,
+      "line": 12,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/editor/qt_models.py||from|componentpress.application.sessions.ProjectSession": {
+      "count": 1,
+      "line": 9,
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/project_io/repository.py|FileProjectRepository.open|from|componentpress.application.version_service.recover_project_versions": {
+      "count": 1,
+      "line": 76,
+      "stage": "4а",
+      "owner": "coder:src/componentpress/project_io"
+    }
+  },
+  "cycles": {
+    "componentpress.app_assets -> componentpress.editor": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/app_assets"
+    },
+    "componentpress.app_assets -> componentpress.editor.theme": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/app_assets"
+    },
+    "componentpress.application.version_service -> componentpress.project_io.repository": {
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "componentpress.bindings -> componentpress.bindings.resolver": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/bindings"
+    },
+    "componentpress.bindings.icons -> componentpress.rendering": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/bindings"
+    },
+    "componentpress.bindings.resolver -> componentpress.bindings": {
+      "stage": "8в",
+      "owner": "coder:src/componentpress/bindings"
+    },
+    "componentpress.bindings.resolver -> componentpress.bindings.icons": {
+      "stage": "8в",
+      "owner": "coder:src/componentpress/bindings"
+    },
+    "componentpress.bindings.resolver -> componentpress.rendering": {
+      "stage": "8в",
+      "owner": "coder:src/componentpress/bindings"
+    },
+    "componentpress.bindings.static -> componentpress.bindings": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/bindings"
+    },
+    "componentpress.build -> componentpress.build.imposition": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/build"
+    },
+    "componentpress.build.imposition -> componentpress.build": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/build"
+    },
+    "componentpress.domain.geometry -> componentpress.domain.nodes": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "componentpress.domain.nodes -> componentpress.domain.geometry": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "componentpress.editor -> componentpress.editor.main_window": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "componentpress.editor.canvas -> componentpress.editor": {
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "componentpress.editor.canvas -> componentpress.editor.canvas.preview": {
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "componentpress.editor.canvas -> componentpress.editor.canvas.view": {
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "componentpress.editor.canvas.preview -> componentpress.editor": {
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "componentpress.editor.canvas.preview -> componentpress.editor.canvas": {
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "componentpress.editor.canvas.preview -> componentpress.editor.canvas.view": {
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "componentpress.editor.canvas.view -> componentpress.editor": {
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "componentpress.editor.canvas.view -> componentpress.editor.theme": {
+      "stage": "7",
+      "owner": "coder:src/componentpress/editor/canvas"
+    },
+    "componentpress.editor.document_tab -> componentpress.app_assets": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "componentpress.editor.document_tab -> componentpress.editor": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "componentpress.editor.document_tab -> componentpress.editor.canvas": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "componentpress.editor.document_tab -> componentpress.editor.theme": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "componentpress.editor.main_window -> componentpress.app_assets": {
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "componentpress.editor.main_window -> componentpress.editor": {
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "componentpress.editor.main_window -> componentpress.editor.document_tab": {
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "componentpress.editor.main_window -> componentpress.editor.properties": {
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "componentpress.editor.main_window -> componentpress.editor.qt_models": {
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "componentpress.editor.main_window -> componentpress.editor.theme": {
+      "stage": "6б",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "componentpress.editor.properties -> componentpress.app_assets": {
+      "stage": "6а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "componentpress.editor.properties -> componentpress.editor": {
+      "stage": "6а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "componentpress.editor.properties -> componentpress.editor.theme": {
+      "stage": "6а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "componentpress.editor.qt_models -> componentpress.app_assets": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "componentpress.editor.theme -> componentpress.app_assets": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/editor"
+    },
+    "componentpress.project_io.repository -> componentpress.application.version_service": {
+      "stage": "4а",
+      "owner": "coder:src/componentpress/project_io"
+    },
+    "componentpress.rendering -> componentpress.rendering.exporter": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "componentpress.rendering.exporter -> componentpress.rendering": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "componentpress.rendering.exporter -> componentpress.rendering.painter": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "componentpress.rendering.html_document -> componentpress.bindings": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "componentpress.rendering.html_document -> componentpress.rendering": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "componentpress.rendering.painter -> componentpress.bindings": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "componentpress.rendering.painter -> componentpress.bindings.static": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "componentpress.rendering.painter -> componentpress.rendering": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    },
+    "componentpress.rendering.painter -> componentpress.rendering.html_document": {
+      "stage": "9а",
+      "owner": "coder:src/componentpress/rendering"
+    }
+  },
+  "runtime": {
+    "componentpress.domain.component": {
+      "modules": [],
+      "stage": "9а",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "componentpress.domain.copy_mode": {
+      "modules": [],
+      "stage": "9а",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "componentpress.domain.diagnostics": {
+      "modules": [],
+      "stage": "1б",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "componentpress.domain.geometry": {
+      "modules": [],
+      "stage": "9а",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "componentpress.domain.html_resources": {
+      "modules": [],
+      "stage": "9а",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "componentpress.domain.nodes": {
+      "modules": [],
+      "stage": "9а",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "componentpress.domain.project": {
+      "modules": [],
+      "stage": "9а",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "componentpress.domain.render_plan": {
+      "modules": [],
+      "stage": "9а",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "componentpress.domain.schema": {
+      "modules": [],
+      "stage": "9а",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "componentpress.domain.tree": {
+      "modules": [],
+      "stage": "7",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "componentpress.domain.values": {
+      "modules": [],
+      "stage": "9а",
+      "owner": "coder:src/componentpress/domain"
+    },
+    "componentpress.application.build_service": {
+      "modules": [
+        "PySide6",
+        "PySide6.QtCore",
+        "PySide6.QtGui",
+        "PySide6.QtWidgets",
+        "PySide6.support",
+        "PySide6.support.deprecated",
+        "PySide6.support.feature",
+        "PySide6.support.signature",
+        "PySide6.support.signature.errorhandler",
+        "PySide6.support.signature.importhandler",
+        "PySide6.support.signature.layout",
+        "PySide6.support.signature.lib",
+        "PySide6.support.signature.lib.enum_sig",
+        "PySide6.support.signature.lib.pyi_generator",
+        "PySide6.support.signature.lib.tool",
+        "PySide6.support.signature.mapping",
+        "PySide6.support.signature.parser",
+        "componentpress.bindings",
+        "componentpress.bindings.grammar",
+        "componentpress.bindings.html_policy",
+        "componentpress.bindings.icons",
+        "componentpress.bindings.resolver",
+        "componentpress.build",
+        "componentpress.build.engine",
+        "componentpress.build.imposition",
+        "componentpress.build.input_snapshot",
+        "componentpress.build.pdf_writer",
+        "componentpress.build.report",
+        "componentpress.data_sources",
+        "componentpress.data_sources.xlsx_reader",
+        "componentpress.diagnostics",
+        "componentpress.diagnostics.logging",
+        "componentpress.execution",
+        "componentpress.execution.cancellation",
+        "componentpress.execution.cleanup",
+        "componentpress.execution.job_store",
+        "componentpress.execution.signals",
+        "componentpress.execution.tasks",
+        "componentpress.execution.thread_runner",
+        "componentpress.i18n",
+        "componentpress.platforms",
+        "componentpress.platforms.services",
+        "componentpress.project_io",
+        "componentpress.project_io.archive_snapshots",
+        "componentpress.project_io.files",
+        "componentpress.project_io.migrations",
+        "componentpress.project_io.paths",
+        "componentpress.project_io.repository",
+        "componentpress.project_io.schema_checks",
+        "componentpress.project_io.transactions",
+        "componentpress.project_io.yaml_codec",
+        "componentpress.rendering",
+        "componentpress.rendering.exporter",
+        "componentpress.rendering.fonts",
+        "componentpress.rendering.geometry",
+        "componentpress.rendering.html_document",
+        "componentpress.rendering.image_quality",
+        "componentpress.rendering.painter",
+        "componentpress.rendering.resources",
+        "jinja2",
+        "jinja2._identifier",
+        "jinja2.async_utils",
+        "jinja2.bccache",
+        "jinja2.compiler",
+        "jinja2.defaults",
+        "jinja2.environment",
+        "jinja2.exceptions",
+        "jinja2.filters",
+        "jinja2.idtracking",
+        "jinja2.lexer",
+        "jinja2.loaders",
+        "jinja2.nodes",
+        "jinja2.optimizer",
+        "jinja2.parser",
+        "jinja2.runtime",
+        "jinja2.sandbox",
+        "jinja2.tests",
+        "jinja2.utils",
+        "jinja2.visitor",
+        "openpyxl",
+        "openpyxl._constants",
+        "openpyxl.cell",
+        "openpyxl.cell._writer",
+        "openpyxl.cell.cell",
+        "openpyxl.cell.read_only",
+        "openpyxl.cell.rich_text",
+        "openpyxl.cell.text",
+        "openpyxl.chart",
+        "openpyxl.chart._3d",
+        "openpyxl.chart._chart",
+        "openpyxl.chart.area_chart",
+        "openpyxl.chart.axis",
+        "openpyxl.chart.bar_chart",
+        "openpyxl.chart.bubble_chart",
+        "openpyxl.chart.chartspace",
+        "openpyxl.chart.data_source",
+        "openpyxl.chart.descriptors",
+        "openpyxl.chart.error_bar",
+        "openpyxl.chart.label",
+        "openpyxl.chart.layout",
+        "openpyxl.chart.legend",
+        "openpyxl.chart.line_chart",
+        "openpyxl.chart.marker",
+        "openpyxl.chart.picture",
+        "openpyxl.chart.pie_chart",
+        "openpyxl.chart.pivot",
+        "openpyxl.chart.plotarea",
+        "openpyxl.chart.print_settings",
+        "openpyxl.chart.radar_chart",
+        "openpyxl.chart.reader",
+        "openpyxl.chart.reference",
+        "openpyxl.chart.scatter_chart",
+        "openpyxl.chart.series",
+        "openpyxl.chart.series_factory",
+        "openpyxl.chart.shapes",
+        "openpyxl.chart.stock_chart",
+        "openpyxl.chart.surface_chart",
+        "openpyxl.chart.text",
+        "openpyxl.chart.title",
+        "openpyxl.chart.trendline",
+        "openpyxl.chart.updown_bars",
+        "openpyxl.chartsheet",
+        "openpyxl.chartsheet.chartsheet",
+        "openpyxl.chartsheet.custom",
+        "openpyxl.chartsheet.properties",
+        "openpyxl.chartsheet.protection",
+        "openpyxl.chartsheet.publish",
+        "openpyxl.chartsheet.relation",
+        "openpyxl.chartsheet.views",
+        "openpyxl.comments",
+        "openpyxl.comments.author",
+        "openpyxl.comments.comment_sheet",
+        "openpyxl.comments.comments",
+        "openpyxl.comments.shape_writer",
+        "openpyxl.compat",
+        "openpyxl.compat.numbers",
+        "openpyxl.compat.strings",
+        "openpyxl.descriptors",
+        "openpyxl.descriptors.base",
+        "openpyxl.descriptors.container",
+        "openpyxl.descriptors.excel",
+        "openpyxl.descriptors.namespace",
+        "openpyxl.descriptors.nested",
+        "openpyxl.descriptors.sequence",
+        "openpyxl.descriptors.serialisable",
+        "openpyxl.drawing",
+        "openpyxl.drawing.colors",
+        "openpyxl.drawing.connector",
+        "openpyxl.drawing.drawing",
+        "openpyxl.drawing.effect",
+        "openpyxl.drawing.fill",
+        "openpyxl.drawing.geometry",
+        "openpyxl.drawing.graphic",
+        "openpyxl.drawing.image",
+        "openpyxl.drawing.line",
+        "openpyxl.drawing.picture",
+        "openpyxl.drawing.properties",
+        "openpyxl.drawing.relation",
+        "openpyxl.drawing.spreadsheet_drawing",
+        "openpyxl.drawing.text",
+        "openpyxl.drawing.xdr",
+        "openpyxl.formatting",
+        "openpyxl.formatting.formatting",
+        "openpyxl.formatting.rule",
+        "openpyxl.formula",
+        "openpyxl.formula.tokenizer",
+        "openpyxl.formula.translate",
+        "openpyxl.packaging",
+        "openpyxl.packaging.core",
+        "openpyxl.packaging.custom",
+        "openpyxl.packaging.manifest",
+        "openpyxl.packaging.relationship",
+        "openpyxl.packaging.workbook",
+        "openpyxl.pivot",
+        "openpyxl.pivot.cache",
+        "openpyxl.pivot.fields",
+        "openpyxl.pivot.record",
+        "openpyxl.pivot.table",
+        "openpyxl.reader",
+        "openpyxl.reader.drawings",
+        "openpyxl.reader.excel",
+        "openpyxl.reader.strings",
+        "openpyxl.reader.workbook",
+        "openpyxl.styles",
+        "openpyxl.styles.alignment",
+        "openpyxl.styles.borders",
+        "openpyxl.styles.builtins",
+        "openpyxl.styles.cell_style",
+        "openpyxl.styles.colors",
+        "openpyxl.styles.differential",
+        "openpyxl.styles.fills",
+        "openpyxl.styles.fonts",
+        "openpyxl.styles.named_styles",
+        "openpyxl.styles.numbers",
+        "openpyxl.styles.protection",
+        "openpyxl.styles.proxy",
+        "openpyxl.styles.styleable",
+        "openpyxl.styles.stylesheet",
+        "openpyxl.styles.table",
+        "openpyxl.utils",
+        "openpyxl.utils.bound_dictionary",
+        "openpyxl.utils.cell",
+        "openpyxl.utils.datetime",
+        "openpyxl.utils.escape",
+        "openpyxl.utils.exceptions",
+        "openpyxl.utils.formulas",
+        "openpyxl.utils.indexed_list",
+        "openpyxl.utils.protection",
+        "openpyxl.utils.units",
+        "openpyxl.workbook",
+        "openpyxl.workbook._writer",
+        "openpyxl.workbook.child",
+        "openpyxl.workbook.defined_name",
+        "openpyxl.workbook.external_link",
+        "openpyxl.workbook.external_link.external",
+        "openpyxl.workbook.external_reference",
+        "openpyxl.workbook.function_group",
+        "openpyxl.workbook.properties",
+        "openpyxl.workbook.protection",
+        "openpyxl.workbook.smart_tags",
+        "openpyxl.workbook.views",
+        "openpyxl.workbook.web",
+        "openpyxl.workbook.workbook",
+        "openpyxl.worksheet",
+        "openpyxl.worksheet._read_only",
+        "openpyxl.worksheet._reader",
+        "openpyxl.worksheet._write_only",
+        "openpyxl.worksheet._writer",
+        "openpyxl.worksheet.cell_range",
+        "openpyxl.worksheet.copier",
+        "openpyxl.worksheet.datavalidation",
+        "openpyxl.worksheet.dimensions",
+        "openpyxl.worksheet.drawing",
+        "openpyxl.worksheet.filters",
+        "openpyxl.worksheet.formula",
+        "openpyxl.worksheet.header_footer",
+        "openpyxl.worksheet.hyperlink",
+        "openpyxl.worksheet.merge",
+        "openpyxl.worksheet.page",
+        "openpyxl.worksheet.pagebreak",
+        "openpyxl.worksheet.print_settings",
+        "openpyxl.worksheet.properties",
+        "openpyxl.worksheet.protection",
+        "openpyxl.worksheet.related",
+        "openpyxl.worksheet.scenario",
+        "openpyxl.worksheet.table",
+        "openpyxl.worksheet.views",
+        "openpyxl.worksheet.worksheet",
+        "openpyxl.writer",
+        "openpyxl.writer.excel",
+        "openpyxl.writer.theme",
+        "openpyxl.xml",
+        "openpyxl.xml.constants",
+        "openpyxl.xml.functions",
+        "ruamel",
+        "ruamel.yaml",
+        "ruamel.yaml.anchor",
+        "ruamel.yaml.comments",
+        "ruamel.yaml.compat",
+        "ruamel.yaml.composer",
+        "ruamel.yaml.constructor",
+        "ruamel.yaml.docinfo",
+        "ruamel.yaml.dumper",
+        "ruamel.yaml.emitter",
+        "ruamel.yaml.error",
+        "ruamel.yaml.events",
+        "ruamel.yaml.loader",
+        "ruamel.yaml.main",
+        "ruamel.yaml.nodes",
+        "ruamel.yaml.parser",
+        "ruamel.yaml.reader",
+        "ruamel.yaml.representer",
+        "ruamel.yaml.resolver",
+        "ruamel.yaml.scalarbool",
+        "ruamel.yaml.scalarfloat",
+        "ruamel.yaml.scalarint",
+        "ruamel.yaml.scalarstring",
+        "ruamel.yaml.scanner",
+        "ruamel.yaml.serializer",
+        "ruamel.yaml.tag",
+        "ruamel.yaml.timestamp",
+        "ruamel.yaml.tokens",
+        "ruamel.yaml.util"
+      ],
+      "stage": "3б",
+      "owner": "coder:src/componentpress/application"
+    },
+    "componentpress.application.contracts": {
+      "modules": [],
+      "stage": "1а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "componentpress.application.edits": {
+      "modules": [],
+      "stage": "9а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "componentpress.application.identifiers": {
+      "modules": [],
+      "stage": "9а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "componentpress.application.png_archive": {
+      "modules": [
+        "PySide6",
+        "PySide6.QtCore",
+        "PySide6.QtGui",
+        "PySide6.QtWidgets",
+        "PySide6.support",
+        "PySide6.support.deprecated",
+        "PySide6.support.feature",
+        "PySide6.support.signature",
+        "PySide6.support.signature.errorhandler",
+        "PySide6.support.signature.importhandler",
+        "PySide6.support.signature.layout",
+        "PySide6.support.signature.lib",
+        "PySide6.support.signature.lib.enum_sig",
+        "PySide6.support.signature.lib.pyi_generator",
+        "PySide6.support.signature.lib.tool",
+        "PySide6.support.signature.mapping",
+        "PySide6.support.signature.parser",
+        "componentpress.bindings",
+        "componentpress.bindings.grammar",
+        "componentpress.bindings.html_policy",
+        "componentpress.bindings.icons",
+        "componentpress.bindings.resolver",
+        "componentpress.build",
+        "componentpress.build.imposition",
+        "componentpress.build.input_snapshot",
+        "componentpress.data_sources",
+        "componentpress.data_sources.xlsx_reader",
+        "componentpress.diagnostics",
+        "componentpress.diagnostics.logging",
+        "componentpress.execution",
+        "componentpress.execution.cancellation",
+        "componentpress.execution.cleanup",
+        "componentpress.execution.job_store",
+        "componentpress.execution.tasks",
+        "componentpress.i18n",
+        "componentpress.project_io",
+        "componentpress.project_io.files",
+        "componentpress.project_io.paths",
+        "componentpress.rendering",
+        "componentpress.rendering.exporter",
+        "componentpress.rendering.fonts",
+        "componentpress.rendering.geometry",
+        "componentpress.rendering.html_document",
+        "componentpress.rendering.image_quality",
+        "componentpress.rendering.painter",
+        "componentpress.rendering.resources",
+        "jinja2",
+        "jinja2._identifier",
+        "jinja2.async_utils",
+        "jinja2.bccache",
+        "jinja2.compiler",
+        "jinja2.defaults",
+        "jinja2.environment",
+        "jinja2.exceptions",
+        "jinja2.filters",
+        "jinja2.idtracking",
+        "jinja2.lexer",
+        "jinja2.loaders",
+        "jinja2.nodes",
+        "jinja2.optimizer",
+        "jinja2.parser",
+        "jinja2.runtime",
+        "jinja2.sandbox",
+        "jinja2.tests",
+        "jinja2.utils",
+        "jinja2.visitor",
+        "openpyxl",
+        "openpyxl._constants",
+        "openpyxl.cell",
+        "openpyxl.cell._writer",
+        "openpyxl.cell.cell",
+        "openpyxl.cell.read_only",
+        "openpyxl.cell.rich_text",
+        "openpyxl.cell.text",
+        "openpyxl.chart",
+        "openpyxl.chart._3d",
+        "openpyxl.chart._chart",
+        "openpyxl.chart.area_chart",
+        "openpyxl.chart.axis",
+        "openpyxl.chart.bar_chart",
+        "openpyxl.chart.bubble_chart",
+        "openpyxl.chart.chartspace",
+        "openpyxl.chart.data_source",
+        "openpyxl.chart.descriptors",
+        "openpyxl.chart.error_bar",
+        "openpyxl.chart.label",
+        "openpyxl.chart.layout",
+        "openpyxl.chart.legend",
+        "openpyxl.chart.line_chart",
+        "openpyxl.chart.marker",
+        "openpyxl.chart.picture",
+        "openpyxl.chart.pie_chart",
+        "openpyxl.chart.pivot",
+        "openpyxl.chart.plotarea",
+        "openpyxl.chart.print_settings",
+        "openpyxl.chart.radar_chart",
+        "openpyxl.chart.reader",
+        "openpyxl.chart.reference",
+        "openpyxl.chart.scatter_chart",
+        "openpyxl.chart.series",
+        "openpyxl.chart.series_factory",
+        "openpyxl.chart.shapes",
+        "openpyxl.chart.stock_chart",
+        "openpyxl.chart.surface_chart",
+        "openpyxl.chart.text",
+        "openpyxl.chart.title",
+        "openpyxl.chart.trendline",
+        "openpyxl.chart.updown_bars",
+        "openpyxl.chartsheet",
+        "openpyxl.chartsheet.chartsheet",
+        "openpyxl.chartsheet.custom",
+        "openpyxl.chartsheet.properties",
+        "openpyxl.chartsheet.protection",
+        "openpyxl.chartsheet.publish",
+        "openpyxl.chartsheet.relation",
+        "openpyxl.chartsheet.views",
+        "openpyxl.comments",
+        "openpyxl.comments.author",
+        "openpyxl.comments.comment_sheet",
+        "openpyxl.comments.comments",
+        "openpyxl.comments.shape_writer",
+        "openpyxl.compat",
+        "openpyxl.compat.numbers",
+        "openpyxl.compat.strings",
+        "openpyxl.descriptors",
+        "openpyxl.descriptors.base",
+        "openpyxl.descriptors.container",
+        "openpyxl.descriptors.excel",
+        "openpyxl.descriptors.namespace",
+        "openpyxl.descriptors.nested",
+        "openpyxl.descriptors.sequence",
+        "openpyxl.descriptors.serialisable",
+        "openpyxl.drawing",
+        "openpyxl.drawing.colors",
+        "openpyxl.drawing.connector",
+        "openpyxl.drawing.drawing",
+        "openpyxl.drawing.effect",
+        "openpyxl.drawing.fill",
+        "openpyxl.drawing.geometry",
+        "openpyxl.drawing.graphic",
+        "openpyxl.drawing.image",
+        "openpyxl.drawing.line",
+        "openpyxl.drawing.picture",
+        "openpyxl.drawing.properties",
+        "openpyxl.drawing.relation",
+        "openpyxl.drawing.spreadsheet_drawing",
+        "openpyxl.drawing.text",
+        "openpyxl.drawing.xdr",
+        "openpyxl.formatting",
+        "openpyxl.formatting.formatting",
+        "openpyxl.formatting.rule",
+        "openpyxl.formula",
+        "openpyxl.formula.tokenizer",
+        "openpyxl.formula.translate",
+        "openpyxl.packaging",
+        "openpyxl.packaging.core",
+        "openpyxl.packaging.custom",
+        "openpyxl.packaging.manifest",
+        "openpyxl.packaging.relationship",
+        "openpyxl.packaging.workbook",
+        "openpyxl.pivot",
+        "openpyxl.pivot.cache",
+        "openpyxl.pivot.fields",
+        "openpyxl.pivot.record",
+        "openpyxl.pivot.table",
+        "openpyxl.reader",
+        "openpyxl.reader.drawings",
+        "openpyxl.reader.excel",
+        "openpyxl.reader.strings",
+        "openpyxl.reader.workbook",
+        "openpyxl.styles",
+        "openpyxl.styles.alignment",
+        "openpyxl.styles.borders",
+        "openpyxl.styles.builtins",
+        "openpyxl.styles.cell_style",
+        "openpyxl.styles.colors",
+        "openpyxl.styles.differential",
+        "openpyxl.styles.fills",
+        "openpyxl.styles.fonts",
+        "openpyxl.styles.named_styles",
+        "openpyxl.styles.numbers",
+        "openpyxl.styles.protection",
+        "openpyxl.styles.proxy",
+        "openpyxl.styles.styleable",
+        "openpyxl.styles.stylesheet",
+        "openpyxl.styles.table",
+        "openpyxl.utils",
+        "openpyxl.utils.bound_dictionary",
+        "openpyxl.utils.cell",
+        "openpyxl.utils.datetime",
+        "openpyxl.utils.escape",
+        "openpyxl.utils.exceptions",
+        "openpyxl.utils.formulas",
+        "openpyxl.utils.indexed_list",
+        "openpyxl.utils.protection",
+        "openpyxl.utils.units",
+        "openpyxl.workbook",
+        "openpyxl.workbook._writer",
+        "openpyxl.workbook.child",
+        "openpyxl.workbook.defined_name",
+        "openpyxl.workbook.external_link",
+        "openpyxl.workbook.external_link.external",
+        "openpyxl.workbook.external_reference",
+        "openpyxl.workbook.function_group",
+        "openpyxl.workbook.properties",
+        "openpyxl.workbook.protection",
+        "openpyxl.workbook.smart_tags",
+        "openpyxl.workbook.views",
+        "openpyxl.workbook.web",
+        "openpyxl.workbook.workbook",
+        "openpyxl.worksheet",
+        "openpyxl.worksheet._read_only",
+        "openpyxl.worksheet._reader",
+        "openpyxl.worksheet._write_only",
+        "openpyxl.worksheet._writer",
+        "openpyxl.worksheet.cell_range",
+        "openpyxl.worksheet.copier",
+        "openpyxl.worksheet.datavalidation",
+        "openpyxl.worksheet.dimensions",
+        "openpyxl.worksheet.drawing",
+        "openpyxl.worksheet.filters",
+        "openpyxl.worksheet.formula",
+        "openpyxl.worksheet.header_footer",
+        "openpyxl.worksheet.hyperlink",
+        "openpyxl.worksheet.merge",
+        "openpyxl.worksheet.page",
+        "openpyxl.worksheet.pagebreak",
+        "openpyxl.worksheet.print_settings",
+        "openpyxl.worksheet.properties",
+        "openpyxl.worksheet.protection",
+        "openpyxl.worksheet.related",
+        "openpyxl.worksheet.scenario",
+        "openpyxl.worksheet.table",
+        "openpyxl.worksheet.views",
+        "openpyxl.worksheet.worksheet",
+        "openpyxl.writer",
+        "openpyxl.writer.excel",
+        "openpyxl.writer.theme",
+        "openpyxl.xml",
+        "openpyxl.xml.constants",
+        "openpyxl.xml.functions"
+      ],
+      "stage": "3г",
+      "owner": "coder:src/componentpress/application"
+    },
+    "componentpress.application.ports": {
+      "modules": [],
+      "stage": "1а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "componentpress.application.preview_service": {
+      "modules": [
+        "PySide6",
+        "PySide6.QtCore",
+        "PySide6.QtGui",
+        "PySide6.QtWidgets",
+        "PySide6.support",
+        "PySide6.support.deprecated",
+        "PySide6.support.feature",
+        "PySide6.support.signature",
+        "PySide6.support.signature.errorhandler",
+        "PySide6.support.signature.importhandler",
+        "PySide6.support.signature.layout",
+        "PySide6.support.signature.lib",
+        "PySide6.support.signature.lib.enum_sig",
+        "PySide6.support.signature.lib.pyi_generator",
+        "PySide6.support.signature.lib.tool",
+        "PySide6.support.signature.mapping",
+        "PySide6.support.signature.parser",
+        "componentpress.bindings",
+        "componentpress.bindings.grammar",
+        "componentpress.bindings.html_policy",
+        "componentpress.bindings.icons",
+        "componentpress.bindings.resolver",
+        "componentpress.project_io",
+        "componentpress.project_io.paths",
+        "componentpress.rendering",
+        "componentpress.rendering.exporter",
+        "componentpress.rendering.fonts",
+        "componentpress.rendering.geometry",
+        "componentpress.rendering.html_document",
+        "componentpress.rendering.painter",
+        "componentpress.rendering.resources",
+        "jinja2",
+        "jinja2._identifier",
+        "jinja2.async_utils",
+        "jinja2.bccache",
+        "jinja2.compiler",
+        "jinja2.defaults",
+        "jinja2.environment",
+        "jinja2.exceptions",
+        "jinja2.filters",
+        "jinja2.idtracking",
+        "jinja2.lexer",
+        "jinja2.loaders",
+        "jinja2.nodes",
+        "jinja2.optimizer",
+        "jinja2.parser",
+        "jinja2.runtime",
+        "jinja2.sandbox",
+        "jinja2.tests",
+        "jinja2.utils",
+        "jinja2.visitor"
+      ],
+      "stage": "2а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "componentpress.application.project_service": {
+      "modules": [
+        "PySide6",
+        "PySide6.QtCore",
+        "PySide6.QtGui",
+        "PySide6.QtWidgets",
+        "PySide6.support",
+        "PySide6.support.deprecated",
+        "PySide6.support.feature",
+        "PySide6.support.signature",
+        "PySide6.support.signature.errorhandler",
+        "PySide6.support.signature.importhandler",
+        "PySide6.support.signature.layout",
+        "PySide6.support.signature.lib",
+        "PySide6.support.signature.lib.enum_sig",
+        "PySide6.support.signature.lib.pyi_generator",
+        "PySide6.support.signature.lib.tool",
+        "PySide6.support.signature.mapping",
+        "PySide6.support.signature.parser",
+        "componentpress.bindings",
+        "componentpress.bindings.grammar",
+        "componentpress.bindings.html_policy",
+        "componentpress.bindings.icons",
+        "componentpress.bindings.resolver",
+        "componentpress.diagnostics",
+        "componentpress.diagnostics.logging",
+        "componentpress.i18n",
+        "componentpress.platforms",
+        "componentpress.platforms.services",
+        "componentpress.project_io",
+        "componentpress.project_io.archive_snapshots",
+        "componentpress.project_io.files",
+        "componentpress.project_io.migrations",
+        "componentpress.project_io.paths",
+        "componentpress.project_io.repository",
+        "componentpress.project_io.schema_checks",
+        "componentpress.project_io.transactions",
+        "componentpress.project_io.yaml_codec",
+        "componentpress.rendering",
+        "componentpress.rendering.exporter",
+        "componentpress.rendering.fonts",
+        "componentpress.rendering.geometry",
+        "componentpress.rendering.html_document",
+        "componentpress.rendering.painter",
+        "componentpress.rendering.resources",
+        "jinja2",
+        "jinja2._identifier",
+        "jinja2.async_utils",
+        "jinja2.bccache",
+        "jinja2.compiler",
+        "jinja2.defaults",
+        "jinja2.environment",
+        "jinja2.exceptions",
+        "jinja2.filters",
+        "jinja2.idtracking",
+        "jinja2.lexer",
+        "jinja2.loaders",
+        "jinja2.nodes",
+        "jinja2.optimizer",
+        "jinja2.parser",
+        "jinja2.runtime",
+        "jinja2.sandbox",
+        "jinja2.tests",
+        "jinja2.utils",
+        "jinja2.visitor",
+        "ruamel",
+        "ruamel.yaml",
+        "ruamel.yaml.anchor",
+        "ruamel.yaml.comments",
+        "ruamel.yaml.compat",
+        "ruamel.yaml.composer",
+        "ruamel.yaml.constructor",
+        "ruamel.yaml.docinfo",
+        "ruamel.yaml.dumper",
+        "ruamel.yaml.emitter",
+        "ruamel.yaml.error",
+        "ruamel.yaml.events",
+        "ruamel.yaml.loader",
+        "ruamel.yaml.main",
+        "ruamel.yaml.nodes",
+        "ruamel.yaml.parser",
+        "ruamel.yaml.reader",
+        "ruamel.yaml.representer",
+        "ruamel.yaml.resolver",
+        "ruamel.yaml.scalarbool",
+        "ruamel.yaml.scalarfloat",
+        "ruamel.yaml.scalarint",
+        "ruamel.yaml.scalarstring",
+        "ruamel.yaml.scanner",
+        "ruamel.yaml.serializer",
+        "ruamel.yaml.tag",
+        "ruamel.yaml.timestamp",
+        "ruamel.yaml.tokens",
+        "ruamel.yaml.util"
+      ],
+      "stage": "5а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "componentpress.application.sessions": {
+      "modules": [],
+      "stage": "9а",
+      "owner": "coder:src/componentpress/application"
+    },
+    "componentpress.application.version_service": {
+      "modules": [
+        "PySide6",
+        "PySide6.QtCore",
+        "PySide6.QtGui",
+        "PySide6.QtWidgets",
+        "PySide6.support",
+        "PySide6.support.deprecated",
+        "PySide6.support.feature",
+        "PySide6.support.signature",
+        "PySide6.support.signature.errorhandler",
+        "PySide6.support.signature.importhandler",
+        "PySide6.support.signature.layout",
+        "PySide6.support.signature.lib",
+        "PySide6.support.signature.lib.enum_sig",
+        "PySide6.support.signature.lib.pyi_generator",
+        "PySide6.support.signature.lib.tool",
+        "PySide6.support.signature.mapping",
+        "PySide6.support.signature.parser",
+        "componentpress.bindings",
+        "componentpress.bindings.grammar",
+        "componentpress.bindings.html_policy",
+        "componentpress.bindings.icons",
+        "componentpress.bindings.resolver",
+        "componentpress.i18n",
+        "componentpress.platforms",
+        "componentpress.platforms.services",
+        "componentpress.project_io",
+        "componentpress.project_io.archive_snapshots",
+        "componentpress.project_io.files",
+        "componentpress.project_io.migrations",
+        "componentpress.project_io.paths",
+        "componentpress.project_io.repository",
+        "componentpress.project_io.schema_checks",
+        "componentpress.project_io.transactions",
+        "componentpress.project_io.yaml_codec",
+        "componentpress.rendering",
+        "componentpress.rendering.exporter",
+        "componentpress.rendering.fonts",
+        "componentpress.rendering.geometry",
+        "componentpress.rendering.html_document",
+        "componentpress.rendering.painter",
+        "componentpress.rendering.resources",
+        "jinja2",
+        "jinja2._identifier",
+        "jinja2.async_utils",
+        "jinja2.bccache",
+        "jinja2.compiler",
+        "jinja2.defaults",
+        "jinja2.environment",
+        "jinja2.exceptions",
+        "jinja2.filters",
+        "jinja2.idtracking",
+        "jinja2.lexer",
+        "jinja2.loaders",
+        "jinja2.nodes",
+        "jinja2.optimizer",
+        "jinja2.parser",
+        "jinja2.runtime",
+        "jinja2.sandbox",
+        "jinja2.tests",
+        "jinja2.utils",
+        "jinja2.visitor",
+        "ruamel",
+        "ruamel.yaml",
+        "ruamel.yaml.anchor",
+        "ruamel.yaml.comments",
+        "ruamel.yaml.compat",
+        "ruamel.yaml.composer",
+        "ruamel.yaml.constructor",
+        "ruamel.yaml.docinfo",
+        "ruamel.yaml.dumper",
+        "ruamel.yaml.emitter",
+        "ruamel.yaml.error",
+        "ruamel.yaml.events",
+        "ruamel.yaml.loader",
+        "ruamel.yaml.main",
+        "ruamel.yaml.nodes",
+        "ruamel.yaml.parser",
+        "ruamel.yaml.reader",
+        "ruamel.yaml.representer",
+        "ruamel.yaml.resolver",
+        "ruamel.yaml.scalarbool",
+        "ruamel.yaml.scalarfloat",
+        "ruamel.yaml.scalarint",
+        "ruamel.yaml.scalarstring",
+        "ruamel.yaml.scanner",
+        "ruamel.yaml.serializer",
+        "ruamel.yaml.tag",
+        "ruamel.yaml.timestamp",
+        "ruamel.yaml.tokens",
+        "ruamel.yaml.util"
+      ],
+      "stage": "4б",
+      "owner": "coder:src/componentpress/application"
+    }
+  }
+}
