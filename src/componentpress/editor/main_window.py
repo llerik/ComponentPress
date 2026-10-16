@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 )
 
 from componentpress.i18n import catalogs, tr
+from componentpress.i18n.diagnostics import format_diagnostic
 from componentpress.application.sessions import ProjectSession
 from componentpress.application.contracts import BuildRequest, BuildResult, BuildProgress
 from componentpress.domain.component import ComponentDefinition, SizeMM
@@ -831,7 +832,7 @@ class MainWindow(QMainWindow):
         self.status_project.setText(str(session.snapshot.root))
         self._update_project_visibility()
         if self.controller.recovery_diagnostics:
-            details = "; ".join(item.message for item in self.controller.recovery_diagnostics)
+            details = "; ".join(format_diagnostic(item) for item in self.controller.recovery_diagnostics)
             self.statusBar().showMessage(f"Восстановление операций: {details}", 15000)
         if self.controller.preview is not None:
             self.controller.preview.invalidate(session.snapshot.root)
@@ -930,7 +931,7 @@ class MainWindow(QMainWindow):
         if self._version_task is not None:
             return
         cancellation = CancellationToken()
-        task = VersionTask(operation, cancellation, kind)
+        task = VersionTask(operation, cancellation, kind, locale=language())
         task.signals.progress.connect(self._version_task_progress, Qt.ConnectionType.QueuedConnection)
         task.signals.finished.connect(self._version_task_finished, Qt.ConnectionType.QueuedConnection)
         self._version_task = task
@@ -957,7 +958,7 @@ class MainWindow(QMainWindow):
         if self._version_task_kind == "image_import" and getattr(self, "_image_manager_dialog", None) is not None:
             self._image_manager_dialog.set_import_progress(completed, total, label)
 
-    def _version_task_finished(self, result, error) -> None:
+    def _version_task_finished(self, result, error, error_message=None) -> None:
         kind, payload = self._version_task_kind, self._version_task_payload
         if self._version_progress is not None:
             self._version_progress.close()
@@ -971,7 +972,7 @@ class MainWindow(QMainWindow):
             if kind == "image_import":
                 dialog = getattr(self, "_image_manager_dialog", None)
                 if dialog is not None:
-                    dialog.finish_import(None, error)
+                    dialog.finish_import(None, error, error_message)
                 return
             if kind == "export" and error.diagnostic.code in {"ARCHIVE_EXISTS", "ARCHIVE_VERSION_EXISTS"}:
                 _snapshot, target, _replace = payload
@@ -1483,7 +1484,7 @@ class MainWindow(QMainWindow):
                 names = self.controller.preview.reader.sheet_names(resolve_project_path(self.session.snapshot.root, source.path))
                 sheets = [(name, name) for name in names]
             except ProjectError as exc:
-                message = str(exc.diagnostic)
+                message = format_diagnostic(exc.diagnostic)
                 self.statusBar().showMessage(message, 7000)
         self._fill_combo(self.data_sheet, sheets, binding.sheet if binding else None)
         self.properties.set_sheets(tuple(str(value) for _, value in sheets if value))
@@ -1534,7 +1535,7 @@ class MainWindow(QMainWindow):
         reveal = False
         for diagnostic in diagnostics:
             technical_log.log_event("project.diagnostic", code=getattr(diagnostic, "code", "UNKNOWN"), status=getattr(diagnostic, "severity", "error"))
-            self.event_list.addItem(str(diagnostic))
+            self.event_list.addItem(format_diagnostic(diagnostic))
             if getattr(diagnostic, "severity", "error") != "info":
                 reveal = True
         self._filter_events(self.event_search.text())
@@ -1625,14 +1626,14 @@ class MainWindow(QMainWindow):
                 )
                 if diagnostics:
                     self._add_events(diagnostics)
-                    self.statusBar().showMessage(str(diagnostics[0]), 10000)
+                    self.statusBar().showMessage(format_diagnostic(diagnostics[0]), 10000)
                     return None
                 data = self.controller.preview.cached_data(self.session.snapshot, tab.component_id, component=component)
             else:
                 data = self.controller.preview.cached_data(self.session.snapshot, tab.component_id, component=component)
         except ProjectError as exc:
             self._add_events(exc.diagnostics if isinstance(exc, ValidationIssues) else (exc.diagnostic,))
-            self.statusBar().showMessage(str(exc.diagnostic), 10000)
+            self.statusBar().showMessage(format_diagnostic(exc.diagnostic), 10000)
             return None
         if data is not None:
             self._populate_rows(data)
@@ -1675,7 +1676,7 @@ class MainWindow(QMainWindow):
                     validate_resources=False,
                 )
             except ProjectError as exc:
-                tab.previewError.emit(str(exc.diagnostic))
+                tab.previewError.emit(format_diagnostic(exc.diagnostic))
                 if self.active_tab is tab and len(tab.canvas.selected_ids) == 1:
                     self._show_selection(tab.canvas.selected_ids)
                 return False
@@ -1809,7 +1810,7 @@ class MainWindow(QMainWindow):
                     fonts.close()
                 self._preview_active = None
                 if self._tabs.get(tab.component_id) is tab:
-                    message = str(exc.diagnostic) if isinstance(exc, ProjectError) else str(exc)
+                    message = format_diagnostic(exc.diagnostic) if isinstance(exc, ProjectError) else str(exc)
                     tab.fail_preview(message, generation=request.generation)
                 self._start_pending_preview()
                 return
@@ -1834,7 +1835,7 @@ class MainWindow(QMainWindow):
                                 tr("ui.preview_quality_count", count=len(diagnostics)),
                                 6000,
                             )
-            elif error is not None and self.active_tab is tab and tab.fail_preview(str(error.diagnostic) if isinstance(error, ProjectError) else str(error), generation=request.generation):
+            elif error is not None and self.active_tab is tab and tab.fail_preview(format_diagnostic(error.diagnostic) if isinstance(error, ProjectError) else str(error), generation=request.generation):
                 self.event_list.setCurrentRow(self.event_list.count() - 1)
                 self.event_list.setFocus()
             elif self.active_tab is not tab:
@@ -2100,10 +2101,10 @@ class MainWindow(QMainWindow):
         self._update_actions()
         if result.status == "succeeded":
             suffix = " (очистка будет повторена)" if result.cleanup_state == "cleanup_pending" else ""
-            warning = f"; предупреждения: {'; '.join(str(item) for item in result.diagnostics)}" if result.diagnostics else ""
+            warning = f"; предупреждения: {'; '.join(format_diagnostic(item) for item in result.diagnostics)}" if result.diagnostics else ""
             self.statusBar().showMessage(f"Сборка готова: {result.output_directory}{suffix}{warning}", 12000)
         else:
-            message = "\n".join(str(item) for item in result.diagnostics) or f"Сборка: {result.status}"
+            message = "\n".join(format_diagnostic(item) for item in result.diagnostics) or f"Сборка: {result.status}"
             QMessageBox.warning(self, "Сборка не завершена", format_error(ValueError(message)))
         if self.active_tab is not None and self.active_tab.canvas._pixmap_item is None:
             self._refresh_preview(self.active_tab)
@@ -2149,7 +2150,7 @@ class MainWindow(QMainWindow):
             self.controller.prepare_text(tab.component_id, text)
         except ProjectError as exc:
             document.set_draft(text, (exc.diagnostic,))
-            tab.show_diagnostic(str(exc.diagnostic))
+            tab.show_diagnostic(format_diagnostic(exc.diagnostic))
         else:
             document.set_draft(text)
             tab.show_diagnostic()
@@ -2168,8 +2169,8 @@ class MainWindow(QMainWindow):
         except ProjectError as exc:
             document.set_draft(document.draft_text, (exc.diagnostic,))
             if tab is not None:
-                tab.show_diagnostic(str(exc.diagnostic))
-            self.statusBar().showMessage(str(exc.diagnostic), 7000)
+                tab.show_diagnostic(format_diagnostic(exc.diagnostic))
+            self.statusBar().showMessage(format_diagnostic(exc.diagnostic), 7000)
             return False
         if after.text == document.committed.text:
             document.clear_draft()
@@ -2297,7 +2298,7 @@ class MainWindow(QMainWindow):
             self.multi_properties_group.hide()
             self.element_properties_group.show()
             self.element_properties.set_edit_locked(ids[0] in effectively_locked_ids(component))
-            message = str(font_error.diagnostic) if font_error is not None else f"Выбран элемент: {node.id}"
+            message = format_diagnostic(font_error.diagnostic) if font_error is not None else f"Выбран элемент: {node.id}"
             self.statusBar().showMessage(message, 7000 if font_error is not None else 2500)
         else:
             self.element_properties.show_node(None)

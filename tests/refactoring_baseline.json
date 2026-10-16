@@ -391,14 +391,6 @@
       "stage": "9в",
       "owner": "coder:src/componentpress/diagnostics"
     },
-    "src/componentpress/domain/diagnostics.py|Diagnostic.__str__": {
-      "path": "src/componentpress/domain/diagnostics.py",
-      "name": "Diagnostic.__str__",
-      "line": 21,
-      "length": 30,
-      "stage": "1б",
-      "owner": "coder:src/componentpress/domain"
-    },
     "src/componentpress/domain/tree.py|update_node": {
       "path": "src/componentpress/domain/tree.py",
       "name": "update_node",
@@ -1692,18 +1684,6 @@
       "line": 18,
       "stage": "3а",
       "owner": "coder:src/componentpress/build"
-    },
-    "src/componentpress/domain/diagnostics.py|Diagnostic.__str__|from|componentpress.i18n.tr": {
-      "count": 2,
-      "line": 44,
-      "stage": "1б",
-      "owner": "coder:src/componentpress/domain"
-    },
-    "src/componentpress/domain/diagnostics.py|Diagnostic.__str__|from|componentpress.i18n.language": {
-      "count": 1,
-      "line": 44,
-      "stage": "1б",
-      "owner": "coder:src/componentpress/domain"
     },
     "src/componentpress/domain/values.py|value_to_text|dynamic|math": {
       "count": 1,

@@ -28,9 +28,10 @@ def language() -> str:
     return _LANGUAGE
 
 
-def tr(key: str, **values: Any) -> str:
+def tr(key: str, *, locale: str | None = None, **values: Any) -> str:
     catalog = catalogs()
-    template = catalog.get(_LANGUAGE, {}).get(key, catalog["ru"].get(key, key))
+    selected = locale if locale in catalog else _LANGUAGE
+    template = catalog.get(selected, {}).get(key, catalog["ru"].get(key, key))
     try:
         return template.format(**values)
     except (KeyError, ValueError):

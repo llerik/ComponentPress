@@ -7,6 +7,7 @@ import pytest
 
 from componentpress.domain.diagnostics import ProjectError
 from componentpress.i18n import set_language
+from componentpress.i18n.diagnostics import format_project_error
 from componentpress.project_io.yaml_codec import parse_component
 
 
@@ -97,7 +98,7 @@ def test_unbound_condition_reports_its_exact_yaml_address(
     assert error.value.diagnostic.code == "COLUMN_WITHOUT_DATA"
     assert error.value.diagnostic.path == path
     assert error.value.diagnostic.field == expected_field
-    assert str(error.value).endswith(message)
+    assert format_project_error(error.value).endswith(message)
     assert not path.exists()
 
 

@@ -18,6 +18,7 @@ from componentpress.application.version_service import (
 )
 from componentpress.bootstrap import project_controller, project_service
 from componentpress.domain.diagnostics import ProjectError
+from componentpress.i18n.diagnostics import format_diagnostic
 from componentpress.editor.main_window import MainWindow
 from componentpress.project_io.repository import FileProjectRepository
 
@@ -48,7 +49,9 @@ def test_export_then_restore_preserves_all_project_bytes_and_version(tmp_path: P
     snapshot = repository.open(root)
     archive_path = root / "archive" / "game-0.1.0.zip"
 
-    path, next_version, patched, error = VersionService(repository).export(snapshot, archive_path)
+    path, next_version, patched, error = VersionService(
+        repository, diagnostic_formatter=format_diagnostic,
+    ).export(snapshot, archive_path)
 
     assert path == archive_path
     assert (next_version, patched, error) == ("0.1.1", True, None)
@@ -78,7 +81,7 @@ def test_source_file_cannot_be_export_target_and_existing_zip_is_preserved(tmp_p
     target.write_bytes(original)
 
     with pytest.raises(ProjectError) as error:
-        VersionService(repository).export(repository.open(root), target, replace=True)
+        VersionService(repository, diagnostic_formatter=format_diagnostic).export(repository.open(root), target, replace=True)
     assert error.value.diagnostic.code == "ARCHIVE_DESTINATION"
     assert target.read_bytes() == original
 
@@ -87,7 +90,7 @@ def test_version_collision_requires_an_explicit_target_choice(tmp_path: Path) ->
     first = tmp_path / "first"
     first_repo = _project(first)
     source_archive = first / "archive" / "original.zip"
-    VersionService(first_repo).export(first_repo.open(first), source_archive)
+    VersionService(first_repo, diagnostic_formatter=format_diagnostic).export(first_repo.open(first), source_archive)
 
     second = tmp_path / "second"
     second_repo = _project(second)
@@ -97,7 +100,7 @@ def test_version_collision_requires_an_explicit_target_choice(tmp_path: Path) ->
     shutil.copy2(source_archive, competing_archive)
 
     with pytest.raises(ProjectError) as error:
-        VersionService(second_repo).export(second_repo.open(second), second_archive_dir / "renamed.zip")
+        VersionService(second_repo, diagnostic_formatter=format_diagnostic).export(second_repo.open(second), second_archive_dir / "renamed.zip")
     assert error.value.diagnostic.code == "ARCHIVE_VERSION_EXISTS"
     assert error.value.diagnostic.path == competing_archive
     assert competing_archive.is_file()
@@ -142,8 +145,11 @@ def test_recovery_finishes_only_the_patch_after_published_archive(tmp_path: Path
 
     monkeypatch.setattr(module, "atomic_write", fail_project_patch)
     archive_path = root / "archive" / "game-0.1.0.zip"
-    result = VersionService(repository).export(source_snapshot, archive_path)
+    result = VersionService(
+        repository, diagnostic_formatter=lambda diagnostic: f"external:{diagnostic.code}",
+    ).export(source_snapshot, archive_path)
     assert result[2] is False
+    assert result[3] == "external:FILE_WRITE"
     assert archive_path.is_file()
     assert repository.open(root).model.version == "0.1.0"
     monkeypatch.setattr(module, "atomic_write", actual_atomic_write)

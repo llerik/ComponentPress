@@ -9,6 +9,7 @@ from componentpress.application.project_service import ProjectService
 from componentpress.application.preview_service import PreviewService
 from componentpress.application.build_service import BuildService
 from componentpress.data_sources import XlsxReader
+from componentpress.i18n.diagnostics import format_diagnostic
 
 if TYPE_CHECKING:
     from componentpress.editor.controllers import ProjectController
@@ -23,7 +24,10 @@ def resource_repository() -> ResourceRepository:
 
 
 def project_service() -> ProjectService:
-    return ProjectService(project_repository(), resource_repository(), ProjectWriteLock)
+    return ProjectService(
+        project_repository(), resource_repository(), ProjectWriteLock,
+        diagnostic_formatter=format_diagnostic,
+    )
 
 
 def project_controller() -> "ProjectController":

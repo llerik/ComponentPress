@@ -171,6 +171,11 @@ def test_application_build_contracts_resolve_without_adapters(tmp_path):
     assert loaded == BASELINE["runtime"]["componentpress.application.ports"]["modules"]
 
 
+def test_diagnostic_string_conversion_stays_neutral_in_a_fresh_process(tmp_path):
+    loaded = _probe(["componentpress.domain.diagnostics"], tmp_path)
+    assert loaded == BASELINE["runtime"]["componentpress.domain.diagnostics"]["modules"]
+
+
 @pytest.mark.parametrize("module", LEAVES)
 def test_core_leaf_import_has_no_new_runtime_dependencies(module, tmp_path):
     loaded = _probe([module], tmp_path)

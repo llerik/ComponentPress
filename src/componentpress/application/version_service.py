@@ -13,6 +13,7 @@ import socket
 import tempfile
 import uuid
 import zipfile
+from collections.abc import Callable
 
 from componentpress.application.contracts import ProjectSnapshot
 from componentpress.application.ports import ArchiveRepository
@@ -312,14 +313,22 @@ def _recover_project_versions_locked(root: Path, operation_root: Path) -> tuple[
 class VersionService(ArchiveRepository):
     """Application facade for archive creation and project recovery."""
 
-    def __init__(self, repository: ProjectRepository | None = None, write_lock: WriteLockFactory = ProjectWriteLock):
+    def __init__(
+        self, repository: ProjectRepository | None = None,
+        write_lock: WriteLockFactory = ProjectWriteLock, *,
+        diagnostic_formatter: Callable[[Diagnostic], str],
+    ):
         self.repository = repository or FileProjectRepository()
         self.write_lock = write_lock
+        self.diagnostic_formatter = diagnostic_formatter
 
     def export(self, snapshot: ProjectSnapshot, target: Path, *, replace: bool = False, cancellation=None, on_progress=None) -> tuple[Path, str, bool, str | None]:
         root = snapshot.root.resolve()
         with self.write_lock(root):
-            result = export_project_version(snapshot, target, replace=replace, cancellation=cancellation, on_progress=on_progress)
+            result = export_project_version(
+                snapshot, target, replace=replace, cancellation=cancellation,
+                on_progress=on_progress, diagnostic_formatter=self.diagnostic_formatter,
+            )
         return result
 
     def restore_path(self, archive_path: Path, destination: Path, *, cancellation=None, on_progress=None) -> Path:
@@ -335,8 +344,7 @@ def export_project_version(
     target: Path,
     *,
     replace: bool = False,
-    cancellation=None,
-    on_progress=None,
+    cancellation=None, on_progress=None, diagnostic_formatter: Callable[[Diagnostic], str],
 ) -> tuple[Path, str, bool, str | None]:
     """Publish one verified archive; return path, next version, and patch status."""
     if target.suffix.casefold() != ".zip":
@@ -479,7 +487,7 @@ def export_project_version(
         try:
             atomic_write(project_path, next_text, old_project_hash)
         except ProjectError as exc:
-            return target, new_version, False, str(exc.diagnostic)
+            return target, new_version, False, diagnostic_formatter(exc.diagnostic)
         journal.unlink(missing_ok=True)
         return target, new_version, True, None
     except ProjectError as exc:
@@ -489,7 +497,7 @@ def export_project_version(
             except OSError:
                 pass
             raise
-        return target, new_version, False, str(exc.diagnostic)
+        return target, new_version, False, diagnostic_formatter(exc.diagnostic)
     except (OSError, zipfile.BadZipFile, ValueError) as exc:
         if not published:
             try:

@@ -85,6 +85,13 @@ if "componentpress.application.ports" in sys.argv[3:]:
         pass
     else:
         raise AssertionError("cancelled fake did not stop the operation")
+if sys.argv[3:] == ["componentpress.domain.diagnostics"]:
+    from componentpress.domain.diagnostics import Diagnostic, ProjectError
+
+    diagnostic = Diagnostic("PROBE_ERROR", "private message")
+    assert str(diagnostic) == "PROBE_ERROR"
+    assert str(ProjectError(diagnostic)) == "PROBE_ERROR"
+    assert not any(name == "componentpress.i18n" or name.startswith("componentpress.i18n.") for name in sys.modules)
 if all(module.startswith("componentpress.domain.") for module in sys.argv[3:]):
     assert not any(name.startswith("componentpress.application.") for name in sys.modules), "domain imported application"
 assert threading.enumerate() == before_threads

@@ -23,6 +23,12 @@ from .pdf_writer import write_print_pdf
 from .report import sha256, write_report
 
 
+def _diagnostic_text(diagnostic: Diagnostic) -> str:
+    from componentpress.i18n.diagnostics import format_diagnostic
+
+    return format_diagnostic(diagnostic)
+
+
 class BuildEngine:
     def __init__(self, store: JobStore):
         self.store = store
@@ -135,7 +141,7 @@ class BuildEngine:
                 self.store.save_history(snapshot.job_id, {
                     "job_id": snapshot.job_id,
                     "status": status,
-                    "diagnostics": [str(diagnostic)],
+                    "diagnostics": [_diagnostic_text(diagnostic)],
                 })
             except ProjectError:
                 pass

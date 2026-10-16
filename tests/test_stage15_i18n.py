@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication, QComboBox, QDialogButtonBox, QLabel,
 from componentpress.domain.diagnostics import Diagnostic
 from componentpress.domain.schema import SCHEMA_VERSION
 from componentpress.i18n import catalogs, language, set_language, tr, validate_catalogs
+from componentpress.i18n.diagnostics import format_diagnostic
 from componentpress.version import APPLICATION_VERSION
 from componentpress.editor.component_dialog import ComponentDialog
 from componentpress.editor.copy_mode_switch import CopyModeSwitch
@@ -69,7 +70,7 @@ def test_unsaved_alert_and_about_close_buttons_use_both_catalogs(tmp_path: Path,
     assert tr("about.schema", version=SCHEMA_VERSION).endswith(str(SCHEMA_VERSION))
     set_language("en")
     assert tr("about.schema", version=SCHEMA_VERSION).startswith("Supported")
-    assert str(Diagnostic("YAML_SYNTAX", "Синтаксис YAML нарушен")).endswith("The operation needs attention (YAML_SYNTAX).")
+    assert format_diagnostic(Diagnostic("YAML_SYNTAX", "Синтаксис YAML нарушен")).endswith("The operation needs attention (YAML_SYNTAX).")
     set_language("ru")
 
 
@@ -171,10 +172,25 @@ def test_editor_panels_and_dynamic_controls_use_english_catalog(tmp_path: Path, 
             tmp_path / "project.yaml", source="main", sheet="Cards",
         )
         assert diagnostic is not None
-        rendered = str(diagnostic)
+        rendered = format_diagnostic(diagnostic)
         assert "source main" in rendered and "sheet Cards" in rendered and "element node" in rendered
         assert "Image assets/icon.png: 80×60 px" in rendered
         assert "effective resolution 101.6×101.6 dpi" in rendered
+    finally:
+        set_language(previous)
+
+
+def test_event_list_uses_the_selected_diagnostic_language(tmp_path: Path, qtbot) -> None:
+    from test_stage14_ui import make_window
+
+    previous = language()
+    try:
+        set_language("en")
+        _root, window, _service = make_window(tmp_path, qtbot)
+        diagnostic = Diagnostic("FILE_READ", "файл недоступен", tmp_path / "game.yaml")
+        window._add_events((diagnostic,))
+        assert window.event_list.item(0).text() == format_diagnostic(diagnostic)
+        assert "The operation needs attention (FILE_READ)." in window.event_list.item(0).text()
     finally:
         set_language(previous)
 

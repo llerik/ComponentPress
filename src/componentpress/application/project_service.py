@@ -1,6 +1,7 @@
 """Project use cases, independent of file and Qt adapters."""
 
 from pathlib import Path
+from collections.abc import Callable
 from functools import wraps
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
@@ -38,12 +39,18 @@ def _logged(operation: str):
 
 
 class ProjectService:
-    def __init__(self, projects: ProjectRepository, resources: ResourceRepository, write_lock: WriteLockFactory, identifiers: IdentifierGenerator | None = None):
+    def __init__(
+        self, projects: ProjectRepository, resources: ResourceRepository,
+        write_lock: WriteLockFactory, identifiers: IdentifierGenerator | None = None,
+        *, diagnostic_formatter: Callable[[Diagnostic], str],
+    ):
         self.projects = projects
         self.resources = resources
         self.write_lock = write_lock
         self.identifiers = identifiers or IdentifierGenerator()
-        self.versions = VersionService(projects, write_lock)
+        self.versions = VersionService(
+            projects, write_lock, diagnostic_formatter=diagnostic_formatter,
+        )
 
     @_logged("create")
     def create(self, root: Path, name: str) -> ProjectSnapshot:

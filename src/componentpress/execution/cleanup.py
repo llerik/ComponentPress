@@ -39,7 +39,7 @@ def cleanup_job_directory(store, job_id: str) -> tuple[Diagnostic, ...]:
                     errors.append(Diagnostic("CLEANUP_PENDING", str(exc), path, severity="warning"))
     if errors:
         try:
-            store.update(job_id, cleanup_state="cleanup_pending", cleanup_errors=[str(item) for item in errors])
+            store.update(job_id, cleanup_state="cleanup_pending", cleanup_errors=[_diagnostic_text(item) for item in errors])
         except ProjectError:
             pass
         return tuple(errors)
@@ -49,3 +49,9 @@ def cleanup_job_directory(store, job_id: str) -> tuple[Diagnostic, ...]:
     except OSError as exc:
         return (Diagnostic("CLEANUP_PENDING", str(exc), directory, severity="warning"),)
     return ()
+
+
+def _diagnostic_text(diagnostic: Diagnostic) -> str:
+    from componentpress.i18n.diagnostics import format_diagnostic
+
+    return format_diagnostic(diagnostic)

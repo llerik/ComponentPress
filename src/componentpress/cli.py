@@ -11,6 +11,7 @@ from componentpress.application.contracts import BuildRequest
 from componentpress.domain.diagnostics import ProjectError
 from componentpress.diagnostics import logging as technical_log
 from componentpress.i18n import set_language, validate_catalogs, tr
+from componentpress.i18n.diagnostics import format_diagnostic
 
 
 _ARGPARSE_PATTERNS = (
@@ -231,10 +232,10 @@ def _run_build(args, service) -> int:
     result = BuildService(service).run(session, request, on_progress=_print_build_progress)
     if result.status != "succeeded":
         for diagnostic in result.diagnostics:
-            print(diagnostic, file=sys.stderr)
+            print(format_diagnostic(diagnostic), file=sys.stderr)
         return 2
     for diagnostic in result.diagnostics:
-        print(tr("cli.warning", message=diagnostic), file=sys.stderr)
+        print(tr("cli.warning", message=format_diagnostic(diagnostic)), file=sys.stderr)
     print(tr("cli.result", path=result.output_directory))
     print(tr("cli.pdf", path=result.pdf_path))
     return 0
@@ -254,7 +255,7 @@ def _dispatch(args) -> int:
         return _run_render(args, service) if args.command == "render" else _run_build(args, service)
     except ProjectError as exc:
         technical_log.log_event("cli.failed", operation=args.command, status="failed", code=exc.diagnostic.code)
-        print(exc.diagnostic, file=sys.stderr)
+        print(format_diagnostic(exc.diagnostic), file=sys.stderr)
         return 2
 
 

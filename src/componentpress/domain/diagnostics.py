@@ -19,38 +19,10 @@ class Diagnostic:
     incident_id: str | None = None
 
     def __str__(self) -> str:
-        from componentpress.i18n import tr
-
-        location = str(self.path) if self.path else tr("ui.diagnostic_project")
-        if self.line is not None:
-            location += f":{self.line}"
-        if self.field:
-            location += f" ({self.field})"
-        details = []
-        if self.source:
-            details.append(tr("ui.diagnostic_source", value=self.source))
-        if self.sheet:
-            details.append(tr("ui.diagnostic_sheet", value=self.sheet))
-        if self.cell:
-            details.append(tr("ui.diagnostic_cell", value=self.cell))
-        if self.node_id:
-            details.append(tr("ui.diagnostic_node", value=self.node_id))
-        if details:
-            location += " [" + ", ".join(details) + "]"
-        message = self.message
-        if self.message_key:
-            message = tr(self.message_key, **(self.params or {}))
-        else:
-            from componentpress.i18n import language, tr
-
-            if language() != "ru":
-                message = tr("error.diagnostic", code=self.code)
-        if self.incident_id:
-            message = f"{message} [{tr('error.incident_id', incident_id=self.incident_id)}]"
-        return f"{location}: {self.code}: {message}"
+        return self.code
 
 
 class ProjectError(Exception):
     def __init__(self, diagnostic: Diagnostic):
         self.diagnostic = diagnostic
-        super().__init__(str(diagnostic))
+        super().__init__(diagnostic.code)

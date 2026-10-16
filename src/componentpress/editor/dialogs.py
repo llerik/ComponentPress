@@ -30,6 +30,8 @@ from PySide6.QtWidgets import (
 )
 
 from componentpress.i18n import tr
+from componentpress.i18n.diagnostics import format_diagnostic, format_project_error
+from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.project_io.files import file_hash
 from componentpress.project_io.paths import resolve_project_path
 from componentpress.resources.repository import ResourceRepository
@@ -37,6 +39,10 @@ from componentpress.rendering.fonts import available_font_families
 
 
 def format_error(error: Exception) -> str:
+    if isinstance(error, Diagnostic):
+        return format_diagnostic(error)
+    if isinstance(error, ProjectError):
+        return format_project_error(error)
     message = str(error).strip()
     return message or tr("ui.operation_failed", error=type(error).__name__)
 
@@ -192,11 +198,14 @@ class ImageManagerDialog(QDialog):
     def set_import_progress(self, completed: int, total: int, message: str = "") -> None:
         self.import_progress.setText(message or tr("ui.import_progress", completed=completed, total=total))
 
-    def finish_import(self, paths: tuple[str, ...] | None, error: Exception | None) -> None:
+    def finish_import(
+        self, paths: tuple[str, ...] | None, error: Exception | None,
+        error_message: str | None = None,
+    ) -> None:
         self.folder_button.setEnabled(True)
         if error is not None:
             self.set_import_progress(0, 0, "")
-            QMessageBox.warning(self, tr("ui.image_import_title"), format_error(error))
+            QMessageBox.warning(self, tr("ui.image_import_title"), error_message or format_error(error))
             self.refresh()
             return
         self.refresh()
