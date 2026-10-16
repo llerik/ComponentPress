@@ -1,0 +1,26 @@
+schema_version: 6
+id: lorem-ipsum-load-test
+name: "Lorem Ipsum load test"
+version: "0.1.0"
+variables: {}
+icons: {}
+data_source:
+  path: data/load-test.xlsx
+copies_columns:
+  prod: Prod
+  test: Test
+components:
+- id: componentone
+  path: components/componentone.yaml
+- id: componenttwo
+  path: components/componenttwo.yaml
+- id: componentthree
+  path: components/componentthree.yaml
+print:
+  paper: A4
+  orientation: portrait
+  margin_mm: 5.0
+  gap_mm: 3.0
+  dpi: 300
+  cut_lines: true
+  cut_line_width_mm: 0.2

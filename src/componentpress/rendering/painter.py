@@ -79,7 +79,6 @@ def paint_component(
                     painter.drawEllipse(rect)
                 painter.restore()
             elif isinstance(node, LineNode):
-                painter.save()
                 style = {"solid": Qt.PenStyle.SolidLine, "dash": Qt.PenStyle.DashLine, "dot": Qt.PenStyle.DotLine}[node.stroke_style]
                 pen = QPen(QColor(node.stroke), 0, style)
                 pen.setWidthF(node.stroke_width_mm)

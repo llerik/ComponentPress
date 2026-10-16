@@ -16,7 +16,7 @@ from componentpress.application.build_service import BuildService
 from componentpress.application.contracts import BuildRequest
 from componentpress.bootstrap import project_service
 from componentpress.build.engine import BuildEngine
-from componentpress.build.imposition import calculate_imposition
+from componentpress.build.imposition import calculate_imposition, cut_grid_lines
 from componentpress.build.input_snapshot import BuildInstance, InputSnapshotBuilder
 from componentpress.domain.diagnostics import ProjectError
 from componentpress.domain.project import PrintSettings
@@ -52,9 +52,42 @@ def test_imposition_places_ten_cards_as_nine_plus_one() -> None:
     plan = calculate_imposition(instances, PrintSettings())
     assert (plan.paper_width_mm, plan.paper_height_mm) == (210.0, 297.0)
     assert [len(page.placements) for page in plan.pages] == [9, 1]
+    assert [(page.columns, page.rows) for page in plan.pages] == [(3, 3), (3, 3)]
     assert [(item.x_mm, item.y_mm) for item in plan.pages[0].placements[:4]] == [
         (5.0, 5.0), (71.0, 5.0), (137.0, 5.0), (5.0, 96.0)
     ]
+
+
+def test_cut_grid_deduplicates_touching_cells_when_gap_is_zero() -> None:
+    snapshot = project_service().open(DEMO)
+    component = snapshot.documents["forest-card"].model
+    instance = BuildInstance(0, "forest-card", component.name, "1", None, 1, component,
+                             snapshot.documents["forest-card"].path, "0.png")
+    touching = calculate_imposition((instance,), PrintSettings(gap_mm=0)).pages[0]
+    spaced = calculate_imposition((instance,), PrintSettings(gap_mm=3)).pages[0]
+
+    assert tuple(map(len, cut_grid_lines(touching, 0))) == (touching.columns + 1, touching.rows + 1)
+    assert tuple(map(len, cut_grid_lines(spaced, 3))) == (spaced.columns * 2, spaced.rows * 2)
+
+
+def test_pdf_omits_cut_grid_when_setting_is_disabled(tmp_path: Path) -> None:
+    ensure_gui_application()
+    root = _copy_demo(tmp_path)
+    project_file = root / "project.yaml"
+    project_file.write_text(project_file.read_text(encoding="utf-8").replace(
+        "cut_lines: true", "cut_lines: false", 1
+    ), encoding="utf-8")
+    service = project_service()
+    result = BuildService(service).run(service.open_session(root), BuildRequest(max_render_workers=1))
+    assert result.status == "succeeded", result.diagnostics
+
+    pdf = QPdfDocument()
+    assert pdf.load(str(result.pdf_path)) == QPdfDocument.Error.None_
+    page = pdf.render(0, QSize(840, 1188))
+    blank = lambda color: color.alpha() == 0 or color.lightness() > 240
+    assert all(blank(page.pixelColor(x, 20)) for x in range(20))
+    assert all(blank(page.pixelColor(20, y)) for y in range(20))
+    pdf.close()
 
 
 def test_build_is_deterministic_for_one_two_and_four_workers(tmp_path: Path) -> None:
@@ -88,8 +121,11 @@ def test_build_is_deterministic_for_one_two_and_four_workers(tmp_path: Path) -> 
         assert points.width() == pytest.approx(210 / 25.4 * 72, abs=0.51)
         assert points.height() == pytest.approx(297 / 25.4 * 72, abs=0.51)
         rendered_page = pdf.render(0, QSize(840, 1188))
-        # At four pixels per millimetre the first 63 mm cut edge is y=20.
-        assert sum(rendered_page.pixelColor(x, 20).lightness() < 200 for x in range(20, 273)) > 240
+        # The dashed 5 mm grid line spans the sheet, including its margins.
+        row_ink = sum(rendered_page.pixelColor(x, 20).lightness() < 200 for x in range(rendered_page.width()))
+        column_ink = sum(rendered_page.pixelColor(20, y).lightness() < 200 for y in range(rendered_page.height()))
+        assert 100 < row_ink < rendered_page.width()
+        assert 100 < column_ink < rendered_page.height()
     assert not any((root / ".componentpress" / "jobs").iterdir())
 
 

@@ -14,10 +14,10 @@ elements:
 - id: event-title
   name: "Событие"
   type: html
-  x_mm: 13.455357400722026
-  y_mm: 4.233379462494985
-  width_mm: 40.631421025622295
-  height_mm: 24.5221576919378
+  x_mm: 7.884134379139293
+  y_mm: 6.512516153142467
+  width_mm: 49.24149296806832
+  height_mm: 20.596977835822692
   font_family: Arial
   font_size_pt: 9.0
   color: "#17365D"
@@ -26,52 +26,87 @@ elements:
     column: "Заголовок HTML"
   locked: false
   text_align: left
+  transform:
+    m11: 1.0
+    m12: 0.0
+    m21: 0.0
+    m22: 1.0
+
 - id: ellipse-ef2b8d57
   name: Эллипс
-  x_mm: 34.07380185200865
-  y_mm: 66.72265766320535
+  x_mm: 14.812929468834113
+  y_mm: 34.185072596123895
   locked: false
   type: ellipse
-  width_mm: 17.121268891916547
-  height_mm: 19.705083466114512
+  width_mm: 18.26083723724028
+  height_mm: 31.73386044453178
   fill: '#6A50FF'
   stroke: '#000000'
   stroke_width_mm: 0.2
   stroke_style: solid
-- id: ellipse-afb36509
-  name: Эллипс
-  x_mm: 0.3086040796214815
-  y_mm: 46.68562538861477
-  locked: false
-  type: ellipse
-  width_mm: 24.296535181236678
-  height_mm: 17.204573560767592
-  fill: '#FFFFFF'
-  stroke: '#000000'
-  stroke_width_mm: 0.2
-  stroke_style: solid
+  transform:
+    m11: 1.0
+    m12: 0.0
+    m21: 0.0
+    m22: 1.0
+
 - id: group-800056fd
   name: Группа
-  x_mm: 4.313216242151798
-  y_mm: 40.6920892486168
+  x_mm: 28.01258993735012
+  y_mm: 47.48958402941012
   locked: false
   type: group
-  children: []
-- id: line-e45e0823
-  name: Линия
-  x_mm: 9.577250701965502
-  y_mm: 32.23708584035298
-  locked: false
-  type: line
-  dx_mm: 24.397
-  dy_mm: 0.0
-  stroke: '#FF00FF'
-  stroke_width_mm: 0.2
-  stroke_style: solid
+  children:
+  - id: ellipse-d84ae78f
+    name: Эллипс 2
+    x_mm: -4.004612162530317
+    y_mm: 5.993536139997964
+    locked: false
+    transform:
+      m11: 1.0000000000000002
+      m12: 0.0
+      m21: 0.0
+      m22: 1.0000000000000002
+    type: ellipse
+    width_mm: 24.296535181236678
+    height_mm: 17.204573560767592
+    fill: '#FFFFFF'
+    stroke: '#000000'
+    stroke_width_mm: 0.2
+    stroke_style: solid
+
+  - id: line-e45e0823
+    name: Линия
+    x_mm: 5.264034459813705
+    y_mm: -8.45500340826382
+    locked: false
+    type: line
+    dx_mm: 24.397
+    dy_mm: 0.0
+    stroke: '#FF00FF'
+    stroke_width_mm: 0.2
+    stroke_style: solid
+    transform:
+      m11: 1.0000000000000002
+      m12: 0.0
+      m21: 0.0
+      m22: 1.0000000000000002
+
+  transform:
+    m11: 0.9999999999999998
+    m12: 0.0
+    m21: 0.0
+    m22: 0.9999999999999998
+  frame:
+    x_mm: -4.004612162530317
+    y_mm: -8.45500340826382
+    width_mm: 33.66564662234403
+    height_mm: 31.65311310902938
+
 - id: rectangle-7cfb5ee5
   name: Прямоугольник
-  x_mm: 16.226573642873824
-  y_mm: 52.32721117636847
+  x_mm: 23.36324613218517
+  y_mm: 37.60048169676574
   locked: false
   type: rectangle
   width_mm: 35.72247334754797
@@ -80,18 +115,30 @@ elements:
   stroke: '#000000'
   stroke_width_mm: 0.2
   stroke_style: solid
+  transform:
+    m11: 0.9063077870366499
+    m12: -0.42261826174069944
+    m21: 0.42261826174069944
+    m22: 0.9063077870366499
+
 - id: rectangle-83e39e63
   name: Прямоугольник
-  x_mm: 26.444735435845544
-  y_mm: 32.71793837034369
+  x_mm: 23.405886514982235
+  y_mm: 29.172614629336493
   locked: false
   type: rectangle
   width_mm: 27.054520255863537
-  height_mm: 16.41657782515992
+  height_mm: 6.793556242426107
   fill: '#FFFF00'
   stroke: '#0000ff'
   stroke_width_mm: 0.2
   stroke_style: solid
+  transform:
+    m11: 1.0
+    m12: 0.0
+    m21: 0.0
+    m22: 1.0
+
 - id: rectangle-09201a86
   name: Прямоугольник
   x_mm: 4.3028360903065925
@@ -100,14 +147,20 @@ elements:
   type: rectangle
   width_mm: 23.006340345718527
   height_mm: 18.880230290869882
-  fill: '#00FFFF'
+  fill:
   stroke: '#FF0000'
   stroke_width_mm: 0.2
   stroke_style: solid
+  transform:
+    m11: 1.0
+    m12: 0.0
+    m21: 0.0
+    m22: 1.0
+
 - id: html-f2ccff0f
   name: HTML-текст
-  x_mm: 20.8062015503876
-  y_mm: 34.6201550387597
+  x_mm: 20.964760108946155
+  y_mm: 19.715650534255193
   locked: false
   type: html
   width_mm: 40.0
@@ -119,3 +172,26 @@ elements:
   content:
     mode: manual
     html: <p>Текст</p>
+  transform:
+    m11: 1.0
+    m12: 0.0
+    m21: 0.0
+    m22: 1.0
+
+- id: rectangle-b2c689f2
+  name: Прямоугольник 2
+  x_mm: 19.119496402877694
+  y_mm: 18.11948201438849
+  locked: false
+  transform:
+    m11: 1.0
+    m12: 0.0
+    m21: 0.0
+    m22: 1.0
+  type: rectangle
+  width_mm: 16.080575539568347
+  height_mm: 9.749640287769784
+  fill: '#32318680'
+  stroke: '#000000'
+  stroke_width_mm: 0.2
+  stroke_style: solid

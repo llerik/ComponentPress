@@ -14,15 +14,22 @@ elements:
 - id: leaf-art
   name: "Иллюстрация"
   type: image
-  x_mm: 3.383
-  y_mm: 3.05
-  width_mm: 55.0
-  height_mm: 42.0
+  x_mm: 12.201
+  y_mm: 3.071
+  width_mm: 38.098
+  height_mm: 34.1
   source:
     mode: column
     column: "Изображение"
   fit: contain
   locked: false
+  transform:
+    m11: 1.0
+    m12: 0.0
+    m21: 0.0
+    m22: 1.0
+  optional: false
+
 - id: text-group
   type: group
   name: "Текст"
@@ -38,12 +45,18 @@ elements:
     height_mm: 10.0
     font_family: Arial
     font_size_pt: 14.0
-    color: "#111111"
+    color: "#35268F"
     content:
       mode: column
       column: "Заголовок HTML"
     locked: false
     text_align: left
+    transform:
+      m11: 1.0
+      m12: 0.0
+      m21: 0.0
+      m22: 1.0
+
   - id: caption
     name: "Описание"
     type: html
@@ -65,4 +78,19 @@ elements:
         </table>
     locked: false
     text_align: left
+    transform:
+      m11: 1.0
+      m12: 0.0
+      m21: 0.0
+      m22: 1.0
   locked: false
+  transform:
+    m11: 1.0
+    m12: 0.0
+    m21: 0.0
+    m22: 1.0
+  frame:
+    x_mm: 0.0
+    y_mm: 0.0
+    width_mm: 55.0
+    height_mm: 39.0

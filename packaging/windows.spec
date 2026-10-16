@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import runpy
+from PyInstaller.utils.hooks import collect_all
 from PyInstaller.utils.win32.versioninfo import (
     FixedFileInfo,
     StringFileInfo,
@@ -24,6 +25,8 @@ application_assets = root / "src" / "componentpress" / "app_assets"
 qt_translations = root / ".venv" / "Lib" / "site-packages" / "PySide6" / "translations"
 i18n_assets = root / "src" / "componentpress" / "i18n"
 windows_icon = spec_directory / "componentpress.ico"
+theme_datas, theme_binaries, theme_hiddenimports = collect_all("qdarktheme")
+detect_datas, detect_binaries, detect_hiddenimports = collect_all("darkdetect")
 version_info = VSVersionInfo(
     ffi=FixedFileInfo(
         filevers=fixed_version,
@@ -57,13 +60,15 @@ version_info = VSVersionInfo(
 analysis = Analysis(
     [str(spec_directory / "windows_entry.py")],
     pathex=[str(root / "src")],
-    binaries=[],
+    binaries=[*theme_binaries, *detect_binaries],
     datas=[
         *((str(asset), "componentpress/app_assets") for asset in application_assets.glob("*.png")),
         *((str(asset), "componentpress/i18n") for asset in i18n_assets.glob("*.json")),
         *((str(qt_translations / f"qtbase_{language}.qm"), "PySide6/translations") for language in ("ru", "en") if (qt_translations / f"qtbase_{language}.qm").is_file()),
+        *theme_datas,
+        *detect_datas,
     ],
-    hiddenimports=[],
+    hiddenimports=[*theme_hiddenimports, *detect_hiddenimports],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

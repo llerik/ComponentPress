@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Iterable
+from typing import Callable, Iterable
 
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, LineNode, Node, ShapeNode
@@ -256,6 +256,43 @@ def remove_nodes(component: ComponentDefinition, node_ids: Iterable[str]) -> Com
     remove = {item.node.id for item in selected}
     children = tuple(node for node in parent_nodes(component, parent_id) if node.id not in remove)
     return _replace_children(component, parent_id, children)
+
+
+def duplicate_nodes(
+    component: ComponentDefinition,
+    node_ids: Iterable[str],
+    new_id: Callable[[Node, str], str],
+    new_default_name: Callable[[Node], str | None],
+) -> ComponentDefinition:
+    """Copy selected subtrees at the front of each original parent's layer list."""
+    selected, _ = _selection(component, node_ids, same_parent=False)
+    _ensure_unlocked_selection(component, (item.node.id for item in selected), "дублировать")
+    _ensure_unprotected_subtrees(component, (item.node.id for item in selected), "дублировать")
+    generated_ids = set(locations(component))
+
+    def clone(node: Node) -> Node:
+        name = new_default_name(node) or node.name
+        node_id = new_id(node, name)
+        if not node_id or node_id in generated_ids:
+            raise TreeOperationError("для копии нужен новый уникальный ID")
+        generated_ids.add(node_id)
+        changes = {"id": node_id, "name": name}
+        if isinstance(node, GroupNode):
+            changes["children"] = tuple(clone(child) for child in node.children)
+        return type(node).model_validate(node.model_copy(update=changes).model_dump(mode="python"))
+
+    clones = {item.node.id: clone(item.node) for item in selected}
+    parents = dict.fromkeys(item.parent_id for item in selected)
+    result = component
+    for parent_id in parents:
+        chosen = {item.node.id for item in selected if item.parent_id == parent_id}
+        siblings = parent_nodes(result, parent_id)
+        inserted = []
+        for node in siblings:
+            if node.id in chosen:
+                inserted.append(clones[node.id])
+        result = _replace_children(result, parent_id, (*siblings, *inserted))
+    return _refresh_frames(result)
 
 
 def reorder_nodes(component: ComponentDefinition, node_ids: Iterable[str], direction: int) -> ComponentDefinition:

@@ -7,8 +7,9 @@ import shutil
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QPointF
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtTest import QTest
 from pydantic import ValidationError
 
 from componentpress.application.contracts import DocumentSnapshot, ProjectSnapshot
@@ -24,6 +25,9 @@ from componentpress.project_io.repository import FileProjectRepository
 from componentpress.project_io.schema_checks import preflight_project_schemas
 from componentpress.project_io.yaml_codec import parse_component
 from componentpress.rendering.exporter import ensure_gui_application, render_component_image
+from componentpress.rendering.painter import paint_component
+from componentpress.rendering.resources import ProjectResourceLoader
+from componentpress.editor.canvas import ComponentCanvas
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -171,6 +175,63 @@ def test_shape_and_signed_line_bounds_move_resize_and_render_consistently(tmp_pa
     assert rendered.pixelColor(round(5 * 96 / 25.4), round(5 * 96 / 25.4)).red() > 240
     assert rendered.pixelColor(round(15 * 96 / 25.4), round(5 * 96 / 25.4)).green() > 230
     assert rendered.pixelColor(round(16 * 96 / 25.4), round(11 * 96 / 25.4)).blue() > 180
+
+
+def test_lines_do_not_shift_later_shapes_or_their_canvas_hit_targets(tmp_path: Path, qtbot) -> None:
+    ensure_gui_application()
+    project, component = _models([
+        {"type": "line", "id": "line", "name": "Line", "x_mm": 10, "y_mm": 10,
+         "dx_mm": 5, "dy_mm": 0, "stroke": "#FF00FF",
+         "transform": {"m11": 1, "m12": 0.3, "m21": 0.2, "m22": 1}},
+        {"type": "rectangle", "id": "yellow", "name": "Yellow", "x_mm": 30, "y_mm": 10,
+         "width_mm": 10, "height_mm": 10, "fill": "#FFFF00"},
+        {"type": "group", "id": "group", "name": "Group", "x_mm": 5, "y_mm": 50,
+         "children": [
+             {"type": "line", "id": "nested-line", "name": "Nested line", "x_mm": 2, "y_mm": 2,
+              "dx_mm": 8, "dy_mm": 0, "stroke": "#FF00FF",
+              "transform": {"m11": 1, "m12": 0.2, "m21": 0.1, "m22": 1}},
+             {"type": "rectangle", "id": "nested-yellow", "name": "Nested yellow", "x_mm": 15, "y_mm": 2,
+              "width_mm": 5, "height_mm": 5, "fill": "#FFFF00"},
+         ]},
+        {"type": "rectangle", "id": "green", "name": "Green", "x_mm": 50, "y_mm": 10,
+         "width_mm": 5, "height_mm": 5, "fill": "#00FF00"},
+    ])
+    component = component.model_copy(update={"size_mm": SizeMM(width=100, height=100)})
+    image = render_component_image(
+        ProjectSnapshot(tmp_path, "", "", project, {
+            "card": DocumentSnapshot(tmp_path / "card.yaml", "", "", component),
+        }),
+        "card", component=component, dpi=96, bindings_resolved=True, register_fonts=False,
+    )
+    scale = 96 / 25.4
+    assert image.pixelColor(round(35 * scale), round(15 * scale)) == QColor("#FFFF00")
+    assert image.pixelColor(round(45 * scale), round(25 * scale)) != QColor("#FFFF00")
+    assert image.pixelColor(round(21 * scale), round(54 * scale)) == QColor("#FFFF00")
+    assert image.pixelColor(round(26 * scale), round(58 * scale)) != QColor("#FFFF00")
+    assert image.pixelColor(round(52 * scale), round(12 * scale)) == QColor("#00FF00")
+
+    canvas = ComponentCanvas()
+    qtbot.addWidget(canvas)
+    canvas.resize(700, 700)
+    canvas.set_document(image, component)
+    canvas.show()
+    qtbot.waitExposed(canvas)
+    click = canvas.mapFromScene(QPointF(35 * scale, 15 * scale))
+    QTest.mouseClick(canvas.viewport(), Qt.MouseButton.LeftButton, pos=click)
+    assert "yellow" in canvas.selected_ids
+
+    caller_image = QImage(400, 400, QImage.Format.Format_ARGB32_Premultiplied)
+    painter = QPainter(caller_image)
+    baseline = painter.worldTransform()
+    painter.save()
+    painter.translate(3, 4)
+    paint_component(
+        painter, component, ProjectResourceLoader(tmp_path), tmp_path / "card.yaml", {},
+        bindings_resolved=True,
+    )
+    painter.restore()
+    assert painter.worldTransform() == baseline
+    painter.end()
 
 
 def test_schema_preflight_rejects_old_referenced_and_journal_documents_without_writes(tmp_path: Path) -> None:

@@ -1,6 +1,6 @@
 """One component tab with synchronized layout and YAML views."""
 
-from PySide6.QtCore import QRegularExpression, QSize, QTimer, Signal
+from PySide6.QtCore import QEvent, QRegularExpression, QSize, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat, QUndoStack
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -19,7 +19,7 @@ from componentpress.domain.diagnostics import ProjectError
 from componentpress.rendering import render_component_image
 from componentpress.rendering.geometry import MM_PER_INCH
 from componentpress.domain.component import ComponentDefinition
-from componentpress.app_assets import load_icon
+from componentpress.app_assets import set_themed_icon
 
 from .canvas import ComponentCanvas
 
@@ -30,17 +30,24 @@ class YamlHighlighter(QSyntaxHighlighter):
     def __init__(self, document) -> None:
         super().__init__(document)
         key = QTextCharFormat()
-        key.setForeground(QColor("#235A97"))
         key.setFontWeight(QFont.Weight.Bold)
         comment = QTextCharFormat()
-        comment.setForeground(QColor("#6A737D"))
         string = QTextCharFormat()
-        string.setForeground(QColor("#8A3B12"))
+        self._formats = (key, comment, string)
         self._rules = (
             (QRegularExpression(r"^\s*[A-Za-z_][A-Za-z0-9_-]*(?=\s*:)") , key),
             (QRegularExpression(r"#.*$"), comment),
             (QRegularExpression(r"(?:\"[^\"]*\"|'[^']*')"), string),
         )
+        self.update_theme()
+
+    def update_theme(self) -> None:
+        from .theme import is_dark_theme
+
+        dark = is_dark_theme()
+        for style, color in zip(self._formats, ("#8AB4F8" if dark else "#235A97", "#9AA0A6" if dark else "#6A737D", "#F9AB79" if dark else "#8A3B12")):
+            style.setForeground(QColor(color))
+        self.rehighlight()
 
     def highlightBlock(self, text: str) -> None:
         for expression, style in self._rules:
@@ -87,7 +94,7 @@ class DocumentTab(QWidget):
             button.setToolTip(tr("ui.drag") if button is self.layout_mode else tr("ui.text"))
             button.setAccessibleName(button.toolTip())
             button.setText("")
-            button.setIcon(load_icon("brick.png" if button is self.layout_mode else "code.png"))
+            set_themed_icon(button, "brick.png" if button is self.layout_mode else "code.png")
             button.setIconSize(QSize(22, 22))
             controls.addWidget(button)
         self.layout_mode.setChecked(True)
@@ -101,32 +108,41 @@ class DocumentTab(QWidget):
             (self.preview_next, "right.png", tr("ui.preview_next")),
             (self.preview_last, "end.png", tr("ui.preview_last")),
         ):
-            button.setIcon(load_icon(icon))
+            set_themed_icon(button, icon)
             button.setIconSize(QSize(22, 22))
             button.setFixedSize(34, 34)
             button.setToolTip(label)
             button.setAccessibleName(label)
             button.setEnabled(False)
             controls.addWidget(button)
-        self.instance_controls = (self.preview_first, self.preview_previous, self.preview_next, self.preview_last)
+        self.instance_position = QLabel("—")
+        self.instance_position.setObjectName("instancePosition")
+        self.instance_position.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.instance_position.setMinimumWidth(48)
+        self.instance_position.setAccessibleName(tr("ui.instance_position_empty"))
+        controls.insertWidget(4, self.instance_position)
+        self.instance_controls = (
+            self.preview_first, self.preview_previous, self.instance_position,
+            self.preview_next, self.preview_last,
+        )
         controls.addStretch()
         minus = QPushButton()
         minus.setObjectName("zoomOut")
-        minus.setIcon(load_icon("zoom_out.png"))
+        set_themed_icon(minus, "zoom_out.png")
         minus.setIconSize(QSize(22, 22))
         minus.setToolTip(tr("ui.preview_zoom_out"))
         minus.setAccessibleName(minus.toolTip())
         minus.setFixedSize(34, 34)
         plus = QPushButton()
         plus.setObjectName("zoomIn")
-        plus.setIcon(load_icon("zoom_in.png"))
+        set_themed_icon(plus, "zoom_in.png")
         plus.setIconSize(QSize(22, 22))
         plus.setToolTip(tr("ui.preview_zoom_in"))
         plus.setAccessibleName(plus.toolTip())
         plus.setFixedSize(34, 34)
         fit = QPushButton(tr("ui.fit"))
         fit.setObjectName("zoomFit")
-        fit.setIcon(load_icon("by_screen.png"))
+        set_themed_icon(fit, "by_screen.png")
         fit.setIconSize(QSize(22, 22))
         fit.setText("")
         fit.setToolTip(tr("ui.fit"))
@@ -134,7 +150,7 @@ class DocumentTab(QWidget):
         fit.setFixedSize(34, 34)
         actual = QPushButton()
         actual.setObjectName("zoomActual")
-        actual.setIcon(load_icon("real_size.png"))
+        set_themed_icon(actual, "real_size.png")
         actual.setIconSize(QSize(22, 22))
         actual.setToolTip(tr("ui.zoom_actual"))
         actual.setAccessibleName(actual.toolTip())
@@ -160,7 +176,7 @@ class DocumentTab(QWidget):
         self.diagnostic = QLabel()
         self.diagnostic.setObjectName("yamlDiagnostic")
         self.diagnostic.setWordWrap(True)
-        self.diagnostic.setStyleSheet("color: #A00000; padding: 4px")
+        self.diagnostic.setStyleSheet("padding: 4px")
         text_page = QWidget()
         text_layout = QVBoxLayout(text_page)
         text_layout.setContentsMargins(0, 0, 0, 0)
@@ -201,7 +217,19 @@ class DocumentTab(QWidget):
 
     def show_diagnostic(self, message: str = "") -> None:
         self.diagnostic.setText(message)
+        from .theme import style_warning
+
+        style_warning(self.diagnostic, bool(message))
         self.diagnostic.setVisible(bool(message))
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if hasattr(self, "highlighter") and event.type() in (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange):
+            blocked = self.text_editor.blockSignals(True)
+            try:
+                self.highlighter.update_theme()
+            finally:
+                self.text_editor.blockSignals(blocked)
 
     def _zoom_changed(self, percent: int) -> None:
         self.zoom_label.setText(f"{percent}%")

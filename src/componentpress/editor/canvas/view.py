@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QImage, QKeyEvent, QMouseEvent, QPainter, QPen, QPixmap, QTransform, QWheelEvent
 from PySide6.QtWidgets import QFrame, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsScene, QGraphicsView, QGraphicsLineItem
 
@@ -12,6 +12,7 @@ from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.nodes import GroupNode, LineNode, Node
 from componentpress.domain.geometry import Affine, local_bounds
 from componentpress.domain.tree import effectively_locked_ids, locations
+from componentpress.editor.theme import is_dark_theme, theme_palette
 
 
 def _component_rect(width_mm: float, height_mm: float) -> QRectF:
@@ -51,7 +52,9 @@ class NodeOverlay(QGraphicsRectItem):
         self.update_pen()
 
     def update_pen(self) -> None:
-        color = QColor("#B3261E") if self.locked else QColor("#0B78D0") if self.isSelected() else QColor(30, 30, 30, 150)
+        palette = theme_palette()
+        dark = is_dark_theme()
+        color = QColor("#F28B82" if dark else "#B3261E") if self.locked else palette.highlight().color() if self.isSelected() else palette.color(palette.ColorRole.Mid)
         pen = QPen(color, 0)
         if self.is_group:
             pen.setStyle(Qt.PenStyle.DashLine)
@@ -76,6 +79,7 @@ class ComponentCanvas(QGraphicsView):
     zoomChanged = Signal(int)
     visualGestureFinished = Signal()
     selectionChanged = Signal(object)
+    nodeContextMenuRequested = Signal(str, QPoint)
     moveRequested = Signal(object, float, float)
     resizeRequested = Signal(str, float, float, float, float)
     lineResizeRequested = Signal(str, float, float)
@@ -89,7 +93,8 @@ class ComponentCanvas(QGraphicsView):
         super().__init__(parent)
         self.setObjectName("componentCanvas")
         self.setScene(QGraphicsScene(self))
-        self.setBackgroundBrush(Qt.GlobalColor.lightGray)
+        palette = theme_palette()
+        self.setBackgroundBrush(palette.color(palette.ColorRole.Dark))
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
@@ -123,6 +128,14 @@ class ComponentCanvas(QGraphicsView):
         self._world_per_mm_x = 96.0 / 25.4
         self._world_per_mm_y = 96.0 / 25.4
         self.scene().selectionChanged.connect(self._scene_selection_changed)
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if hasattr(self, "_overlays") and event.type() in (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange):
+            palette = theme_palette()
+            self.setBackgroundBrush(palette.color(palette.ColorRole.Dark))
+            for overlay in self._overlays.values():
+                overlay.update_pen()
 
     @property
     def zoom_percent(self) -> int:
@@ -448,6 +461,18 @@ class ComponentCanvas(QGraphicsView):
     def mousePressEvent(self, event: QMouseEvent) -> None:
         point = self.mapToScene(event.position().toPoint())
         viewport_point = event.position()
+        if event.button() == Qt.MouseButton.RightButton:
+            item = self._overlay_at(point)
+            if item is not None:
+                if not item.isSelected():
+                    self._syncing_selection = True
+                    self.scene().clearSelection()
+                    item.setSelected(True)
+                    self._syncing_selection = False
+                    self.selectionChanged.emit(self.selected_ids)
+                self.nodeContextMenuRequested.emit(item.node_id, viewport_point.toPoint())
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton and self._tool is not None:
             tool = self._tool
             if not self._page_contains(point) or self._component is None or self._pixmap_item is None:

@@ -124,20 +124,12 @@ def test_add_empty_component_and_discard_unsaved_close(tmp_path: Path, qtbot, mo
     assert window.active_tab.component_id == "token"
     window.properties.name_edit.setText("Несохранённое имя")
     window.properties.name_edit.editingFinished.emit()
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Cancel),
-    )
+    monkeypatch.setattr(window, "_ask_unsaved_choice", lambda *_args: QMessageBox.StandardButton.Cancel)
     index = window.tabs.currentIndex()
     assert not window.close_tab(index)
     assert window.tabs.currentIndex() == index
     assert window.session.documents["token"].dirty
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Discard),
-    )
+    monkeypatch.setattr(window, "_ask_unsaved_choice", lambda *_args: QMessageBox.StandardButton.Discard)
     assert window.close_tab(index)
     assert not window.session.documents["token"].dirty
     reopened = window.open_component("token")
@@ -168,11 +160,15 @@ def test_module_without_arguments_dispatches_to_gui(monkeypatch) -> None:
     assert called == [True]
 
 
-def test_release_smoke_exercises_saved_gui_workflow(tmp_path: Path, qtbot) -> None:
+def test_release_smoke_exercises_saved_gui_workflow(tmp_path: Path, qtbot, monkeypatch) -> None:
     root = demo(tmp_path)
     window = MainWindow(ProjectController(project_service()))
     qtbot.addWidget(window)
-    assert _run_release_smoke(window, root)
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args: warnings.append(args)))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Discard))
+    monkeypatch.setattr(window, "_ask_unsaved_choice", lambda *_args: QMessageBox.StandardButton.Discard)
+    assert _run_release_smoke(window, root), warnings
     reopened = FileProjectRepository().open(root)
     component = reopened.documents["release-smoke"].model
     assert component.size_mm == component.size_mm.model_copy(update={"width": 70.0, "height": 90.0})

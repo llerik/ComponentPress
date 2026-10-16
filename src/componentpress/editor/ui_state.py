@@ -13,6 +13,7 @@ class UiState:
         settings.beginGroup("mainWindow")
         settings.setValue("geometry", window.saveGeometry())
         settings.setValue("rightTab", window.right_tabs.currentIndex())
+        settings.setValue("rightSplitterSizes", window.right_splitter.sizes())
         if window.session is not None:
             settings.setValue("state", window.saveState())
             for dock in window.docks:
@@ -36,6 +37,11 @@ class UiState:
                 window.move(screen.availableGeometry().center() - window.rect().center())
         if state is not None:
             window.restoreState(state)
+        splitter_sizes = settings.value("rightSplitterSizes")
+        if isinstance(splitter_sizes, (list, tuple)) and len(splitter_sizes) == 2:
+            sizes = [int(size) for size in splitter_sizes]
+            if any(sizes):
+                window.right_splitter.setSizes(sizes)
         window._saved_dock_visibility = {
             dock.objectName(): settings.value(f"docks/{dock.objectName()}", True, type=bool)
             for dock in window.docks

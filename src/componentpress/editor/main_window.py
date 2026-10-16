@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from uuid import uuid4
 from types import MappingProxyType
 import hashlib
 
 from pydantic import ValidationError
 from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QSignalBlocker, QSize, QThreadPool, QTimer, Qt
-from PySide6.QtGui import QAction, QColor, QCloseEvent, QKeySequence, QUndoGroup
+from PySide6.QtGui import QAction, QActionGroup, QColor, QCloseEvent, QKeySequence, QUndoGroup
 from PySide6.QtWidgets import (
     QApplication,
     QColorDialog,
@@ -35,13 +36,12 @@ from PySide6.QtWidgets import (
     QToolButton,
     QMenu,
     QScrollArea,
-    QStyle,
     QTreeView,
     QVBoxLayout,
     QWidget,
 )
 
-from componentpress.i18n import tr
+from componentpress.i18n import catalogs, tr
 from componentpress.application.sessions import ProjectSession
 from componentpress.application.contracts import BuildRequest, BuildResult, BuildProgress
 from componentpress.domain.component import ComponentDefinition, SizeMM
@@ -55,13 +55,14 @@ from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNod
 from componentpress.rendering.fonts import ProjectFonts
 from componentpress.rendering.fonts import available_font_families
 from componentpress.platforms.services import PlatformServices
-from componentpress.app_assets import load_icon
+from componentpress.app_assets import set_themed_icon
 from componentpress.domain.tree import (
     TreeOperationError,
     align_nodes,
     effectively_locked_ids,
     add_node,
     drop_nodes,
+    duplicate_nodes,
     group_nodes,
     locations,
     move_nodes,
@@ -88,6 +89,7 @@ from .component_dialog import ComponentDialog
 from .ui_state import UiState
 from .project_settings_dialog import ProjectSettingsDialog
 from .copy_mode_switch import CopyModeSwitch
+from .theme import THEMES, apply_theme, saved_theme, theme_settings
 from componentpress.i18n import language, set_language, tr
 from componentpress.diagnostics import logging as technical_log
 import zipfile
@@ -121,6 +123,9 @@ class MainWindow(QMainWindow):
         self._component_history: list[dict] = []
         self._component_history_index = 0
         self._project_history_focus = False
+        self._theme_settings = theme_settings()
+        self._theme = saved_theme(self._theme_settings)
+        apply_theme(self._theme)
         self.ui_state = UiState()
         self.setObjectName("mainWindow")
         application = QApplication.instance()
@@ -151,6 +156,22 @@ class MainWindow(QMainWindow):
             action.setShortcut(shortcut)
         return action
 
+    @staticmethod
+    def _set_action_text(action: QAction, text: str) -> None:
+        action.setText(text)
+        action.setToolTip(text)
+        action.setProperty("accessibleName", text)
+
+    def _toolbar_button(self, action: QAction, icon: str) -> QToolButton:
+        set_themed_icon(action, icon)
+        self._set_action_text(action, action.text())
+        button = QToolButton()
+        button.setDefaultAction(action)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        button.setToolTip(action.text())
+        button.setAccessibleName(action.text())
+        return button
+
     def _build_actions(self) -> None:
         self.new_action = self._action(tr("action.new"), QKeySequence.StandardKey.New)
         self.open_action = self._action(tr("action.open"), QKeySequence.StandardKey.Open)
@@ -175,6 +196,7 @@ class MainWindow(QMainWindow):
         self.zoom_out_action = self._action(tr("action.zoom_out"), QKeySequence.StandardKey.ZoomOut)
         self.fit_action = self._action(tr("action.fit"), "Ctrl+0")
         self.actual_size_action = self._action(tr("ui.zoom_actual"), "Ctrl+1")
+        self.addAction(self.actual_size_action)
         self.build_all_action = self._action(tr("action.build_all"), "Ctrl+B")
         self.build_active_action = self._action(tr("action.build_active"), "Ctrl+Shift+B")
         self.cancel_build_action = self._action(tr("action.cancel_build"))
@@ -183,6 +205,21 @@ class MainWindow(QMainWindow):
         self.validate_active_action = self._action(tr("action.validate_active"))
         self.validate_all_action = self._action(tr("action.validate_all"))
         self.file_menu = self.menuBar().addMenu(tr("menu.file"))
+        self.theme_menu = self.file_menu.addMenu(tr("ui.theme"))
+        self.theme_actions = {}
+        self.theme_action_group = QActionGroup(self)
+        self.theme_action_group.setExclusive(True)
+        for mode in THEMES:
+            action = QAction(tr(f"ui.theme.{mode}"), self)
+            action.setCheckable(True)
+            action.setData(mode)
+            action.setChecked(mode == self._theme)
+            action.triggered.connect(
+                lambda checked, selected=mode: self._select_theme(selected) if checked else None
+            )
+            self.theme_action_group.addAction(action)
+            self.theme_menu.addAction(action)
+            self.theme_actions[mode] = action
         self.file_menu.addActions([self.new_action, self.open_action])
         self.file_menu.addSeparator()
         self.import_menu = self.file_menu.addMenu(tr("menu.import"))
@@ -210,6 +247,16 @@ class MainWindow(QMainWindow):
         ])
         self.about_menu = self.menuBar().addMenu(tr("menu.about"))
         self.about_menu.addAction(self.about_action)
+
+    def _select_theme(self, mode: str) -> None:
+        if mode not in THEMES:
+            return
+        self._theme = mode
+        self._theme_settings.setValue("theme", mode)
+        self._theme_settings.sync()
+        apply_theme(mode)
+        for value, action in self.theme_actions.items():
+            action.setChecked(value == mode)
 
     def _build_ui(self) -> None:
         self.data_mode = CopyModeSwitch()
@@ -248,8 +295,15 @@ class MainWindow(QMainWindow):
         for action in (self.add_component_action, self.project_settings_action, self.save_action, self.undo_action, self.redo_action):
             self.quick_toolbar.addAction(action)
         self.quick_toolbar.addSeparator()
-        for action in (self.validate_active_action, self.validate_all_action, self.build_active_action, self.build_all_action, self.cancel_build_action):
-            self.quick_toolbar.addAction(action)
+        self.validate_all_button = self._toolbar_button(self.validate_all_action, "validate.png")
+        self.quick_toolbar.addWidget(self.validate_all_button)
+        self.build_active_button = self._toolbar_button(self.build_active_action, "build.png")
+        self.build_all_button = self._toolbar_button(self.build_all_action, "build_all.png")
+        self.cancel_build_button = self._toolbar_button(self.cancel_build_action, "stop.png")
+        self.build_active_widget_action = self.quick_toolbar.addWidget(self.build_active_button)
+        self.build_all_widget_action = self.quick_toolbar.addWidget(self.build_all_button)
+        self.cancel_build_widget_action = self.quick_toolbar.addWidget(self.cancel_build_button)
+        self.cancel_build_widget_action.setVisible(False)
         quick_icons = {
             self.add_component_action: "add.png",
             self.project_settings_action: "settings.png",
@@ -258,20 +312,22 @@ class MainWindow(QMainWindow):
             self.redo_action: "redo.png",
         }
         for action, filename in quick_icons.items():
-            action.setIcon(load_icon(filename))
+            set_themed_icon(action, filename)
             action.setToolTip(action.text())
             action.setProperty("accessibleName", action.text())
-        quick_icons = {
-            self.validate_active_action: QStyle.StandardPixmap.SP_DialogApplyButton,
-            self.validate_all_action: QStyle.StandardPixmap.SP_DialogYesButton,
-            self.build_active_action: QStyle.StandardPixmap.SP_MediaPlay,
-            self.build_all_action: QStyle.StandardPixmap.SP_DialogSaveButton,
-            self.cancel_build_action: QStyle.StandardPixmap.SP_DialogCancelButton,
-        }
-        for action, icon in quick_icons.items():
-            action.setIcon(self.style().standardIcon(icon))
-            action.setToolTip(action.text())
-            action.setProperty("accessibleName", action.text())
+        self._set_action_text(self.validate_all_action, tr("action.validate_all"))
+        self.validate_all_button.setToolTip(self.validate_all_action.text())
+        self.validate_all_button.setAccessibleName(self.validate_all_action.text())
+        self._update_build_toolbar()
+        self.theme_button = QToolButton()
+        self.theme_button.setObjectName("themeButton")
+        self.theme_button.setText(tr("ui.theme"))
+        self.theme_button.setToolTip(tr("ui.theme"))
+        self.theme_button.setAccessibleName(tr("ui.theme"))
+        self.theme_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.theme_button.setMenu(self.theme_menu)
+        self.quick_toolbar.addSeparator()
+        self.quick_toolbar.addWidget(self.theme_button)
         self._build_icon_toolbar()
         self.status_project = QLabel(tr("ui.project_closed"))
         self.status_zoom = QLabel("")
@@ -293,6 +349,7 @@ class MainWindow(QMainWindow):
 
     def _left_panel(self) -> QWidget:
         panel = QWidget(self)
+        panel.hide()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(3, 5, 3, 5)
         # Kept as a child for compatibility with existing data-selection handlers;
@@ -364,19 +421,19 @@ class MainWindow(QMainWindow):
             button.setEnabled(False)
             button.setToolTip(button.text())
             button.setAccessibleName(button.text())
-            button.setIcon(load_icon(tool_icons[button]))
+            set_themed_icon(button, tool_icons[button])
             button.setText("")
             button.setFixedSize(34, 34)
         for button, icon in ((self.layer_up, "up.png"), (self.layer_down, "down.png")):
             button.setAccessibleName(button.text())
             button.setToolTip(button.text())
             button.setText("")
-            button.setIcon(load_icon(icon))
-        layer_icons = {self.group_button: "group.png", self.ungroup_button: "ungroup.png", self.reparent_button: "move.png"}
+            set_themed_icon(button, icon)
+        layer_icons = {self.group_button: "group.png", self.ungroup_button: "ungroup.png"}
         for button, icon in layer_icons.items():
             button.setAccessibleName(button.text())
             button.setToolTip(button.text())
-            button.setIcon(load_icon(icon))
+            set_themed_icon(button, icon)
             button.setText("")
         for button in (self.layer_up, self.layer_down, *layer_icons):
             button.setFixedSize(34, 34)
@@ -391,7 +448,7 @@ class MainWindow(QMainWindow):
         self.event_search.setPlaceholderText(tr("event.search"))
         self.event_list = QListWidget()
         self.clear_events = QPushButton(tr("event.clear"))
-        self.clear_events.setIcon(load_icon("delete.png"))
+        set_themed_icon(self.clear_events, "delete.png")
         self.clear_events.clicked.connect(self.event_list.clear)
         events_layout.addWidget(self.event_search)
         events_layout.addWidget(self.event_list, 1)
@@ -407,19 +464,25 @@ class MainWindow(QMainWindow):
         for button in self.drawing_tools.values():
             self.icon_toolbar.addWidget(button)
         self.icon_toolbar.addSeparator()
-        for button in (self.layer_up, self.layer_down, self.group_button, self.ungroup_button, self.reparent_button):
+        for button in (self.layer_up, self.layer_down, self.group_button, self.ungroup_button):
             self.icon_toolbar.addWidget(button)
         self.icon_toolbar.addSeparator()
-        for action, icon in ((self.delete_action, "remove.png"), (self.actual_size_action, "real_size.png")):
-            action.setIcon(load_icon(icon))
+        for action, icon in ((self.delete_action, "remove.png"),):
+            set_themed_icon(action, icon)
             action.setToolTip(action.text())
             action.setProperty("accessibleName", action.text())
-            self.icon_toolbar.addAction(action)
+        self.delete_button = self._toolbar_button(self.delete_action, "remove.png")
+        self.delete_widget_action = self.icon_toolbar.addWidget(self.delete_button)
+        self.delete_widget_action.setVisible(False)
+
+    def _update_build_toolbar(self) -> None:
+        running = self._active_build_job is not None
+        self.build_active_widget_action.setVisible(not running)
+        self.build_all_widget_action.setVisible(not running)
+        self.cancel_build_widget_action.setVisible(running)
 
 
     def _right_panel(self) -> QWidget:
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
         self.right_tabs = QTabWidget()
         self.right_tabs.setObjectName("rightPanelTabs")
         components = QWidget()
@@ -430,7 +493,7 @@ class MainWindow(QMainWindow):
         self.add_component_button.setText("+")
         self.add_component_button.setToolTip(tr("ui.add_component"))
         self.add_component_button.setAccessibleName(tr("ui.add_component"))
-        self.add_component_button.setIcon(load_icon("add.png"))
+        set_themed_icon(self.add_component_button, "add.png")
         self.add_component_button.setText("")
         self.add_component_button.clicked.connect(self.add_component_dialog)
         component_header.addWidget(self.add_component_button)
@@ -446,6 +509,7 @@ class MainWindow(QMainWindow):
         element_layout = QVBoxLayout(elements)
         self.element_tree = LayerTreeView()
         self.element_tree.setObjectName("elementTree")
+        self.element_tree.nodeContextMenuRequested.connect(self._element_tree_context_menu)
         element_layout.addWidget(self.element_tree)
         self.layer_up = QPushButton(tr("ui.layer_up"))
         self.layer_up.setObjectName("layerUp")
@@ -453,9 +517,7 @@ class MainWindow(QMainWindow):
         self.layer_down.setObjectName("layerDown")
         self.group_button = QPushButton(tr("ui.group_create"))
         self.ungroup_button = QPushButton(tr("ui.ungroup"))
-        self.reparent_button = QPushButton(tr("ui.reparent"))
         self.right_tabs.addTab(elements, tr("panel.elements"))
-        layout.addWidget(self.right_tabs, 2)
         self.multi_properties_group = QGroupBox(tr("ui.align_group"))
         multi_layout = QHBoxLayout(self.multi_properties_group)
         self.align_buttons: dict[str, QPushButton] = {}
@@ -466,25 +528,39 @@ class MainWindow(QMainWindow):
             self.align_buttons[edge] = button
             multi_layout.addWidget(button)
         self.multi_properties_group.hide()
-        layout.addWidget(self.multi_properties_group)
         self.component_properties_group = QGroupBox(tr("ui.component_properties"))
         property_layout = QVBoxLayout(self.component_properties_group)
         self.properties = ComponentProperties()
         self.properties.sheetChanged.connect(self._component_property_sheet_changed)
         property_layout.addWidget(self.properties)
-        layout.addWidget(self.component_properties_group, 1)
         self.element_properties_group = QGroupBox(tr("ui.element_properties"))
         element_property_layout = QVBoxLayout(self.element_properties_group)
         self.element_properties = ElementProperties()
         element_property_layout.addWidget(self.element_properties)
         self.element_properties_group.hide()
-        layout.addWidget(self.element_properties_group, 2)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setWidget(panel)
-        scroll.setMinimumWidth(180)
-        return scroll
+        property_panel = QWidget()
+        property_layout = QVBoxLayout(property_panel)
+        property_layout.setContentsMargins(0, 0, 0, 0)
+        property_layout.addWidget(self.multi_properties_group)
+        property_layout.addWidget(self.component_properties_group)
+        property_layout.addWidget(self.element_properties_group)
+        property_layout.addStretch(1)
+        self.properties_scroll = QScrollArea()
+        self.properties_scroll.setObjectName("propertiesScroll")
+        self.properties_scroll.setWidgetResizable(True)
+        self.properties_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.properties_scroll.setWidget(property_panel)
+        self.properties_scroll.setMinimumHeight(100)
+        self.right_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.right_splitter.setObjectName("elementsPropertiesSplitter")
+        self.right_splitter.setChildrenCollapsible(False)
+        self.right_splitter.addWidget(self.right_tabs)
+        self.right_splitter.addWidget(self.properties_scroll)
+        self.right_splitter.setStretchFactor(0, 3)
+        self.right_splitter.setStretchFactor(1, 2)
+        self.right_splitter.setSizes([480, 320])
+        self.right_splitter.setMinimumWidth(180)
+        return self.right_splitter
 
     def _update_project_visibility(self) -> None:
         has_project = self.session is not None
@@ -581,6 +657,7 @@ class MainWindow(QMainWindow):
             "pydantic": ("pydantic", "MIT"),
             "Jinja2": ("jinja2", "BSD-3-Clause"),
             "PySide6": ("PySide6", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
+            "PyQtDarkTheme-fork": ("qdarktheme", "MIT"),
         }
         for package, (module_name, fallback_license) in packages.items():
             try:
@@ -599,6 +676,7 @@ class MainWindow(QMainWindow):
         dependency_label.setWordWrap(True)
         details.addRow(dependency_label)
         details.addRow(QLabel(tr("about.license")))
+        details.addRow(QLabel(tr("about.theme_licenses")))
         layout.addLayout(details)
 
         language_row = QHBoxLayout()
@@ -616,7 +694,8 @@ class MainWindow(QMainWindow):
         actions = QDialogButtonBox()
         open_logs = actions.addButton(tr("about.open_logs"), QDialogButtonBox.ButtonRole.ActionRole)
         report = actions.addButton(tr("about.create_report"), QDialogButtonBox.ButtonRole.ActionRole)
-        actions.addButton(QDialogButtonBox.StandardButton.Close)
+        close_button = actions.addButton(QDialogButtonBox.StandardButton.Close)
+        close_button.setText(tr("ui.close"))
         layout.addWidget(actions)
 
         def save_language(index: int) -> None:
@@ -683,7 +762,7 @@ class MainWindow(QMainWindow):
         self.image_manager_action.triggered.connect(self.open_image_manager)
         self.about_action.triggered.connect(self._show_about)
         self.validate_active_action.triggered.connect(self._validate_active)
-        self.validate_all_action.triggered.connect(self._validate_all)
+        self.validate_all_action.triggered.connect(lambda: self._validate_all(force_read=True))
         self.build_all_action.triggered.connect(lambda: self._start_build(False))
         self.build_active_action.triggered.connect(lambda: self._start_build(True))
         self.cancel_build_action.triggered.connect(self._cancel_build)
@@ -720,7 +799,6 @@ class MainWindow(QMainWindow):
         self.layer_down.clicked.connect(lambda: self.reorder_selected(-1))
         self.group_button.clicked.connect(lambda: self.group_selected())
         self.ungroup_button.clicked.connect(lambda: self.ungroup_selected())
-        self.reparent_button.clicked.connect(self.reparent_selected_dialog)
         self.element_tree.layerDropRequested.connect(self._layer_drop)
         self.element_tree.lockToggleRequested.connect(self._toggle_element_lock)
         self.element_properties.nodeChanged.connect(self._edit_selected_node)
@@ -1326,8 +1404,8 @@ class MainWindow(QMainWindow):
         tab.preview_last.clicked.connect(lambda: self._step_preview(1, endpoint="last"))
         tab.previewError.connect(lambda message: (self.statusBar().showMessage(message, 7000), self._add_events((Diagnostic("PREVIEW_ERROR", message),))))
         tab.modeRequested.connect(lambda mode, item=tab: self._request_mode(item, mode))
-        tab.draftChanged.connect(lambda text, item=tab: self._draft_changed(item, text))
         tab.canvas.selectionChanged.connect(self._canvas_selection_changed)
+        tab.canvas.nodeContextMenuRequested.connect(self._canvas_context_menu)
         tab.canvas.moveRequested.connect(self._move_selected)
         tab.canvas.nudgeRequested.connect(self._move_selected)
         tab.canvas.resizeRequested.connect(self._resize_selected)
@@ -1338,10 +1416,13 @@ class MainWindow(QMainWindow):
         tab.canvas.deleteRequested.connect(self.delete_selected)
         self.undo_group.addStack(tab.undo_stack)
         self._tabs[component_id] = tab
+        # Seed the editor before adding it to the tab widget: palette events can
+        # rehighlight it synchronously, and must not turn an empty editor into a draft.
+        tab.set_text(self.session.documents[component_id].current_text)
+        tab.draftChanged.connect(lambda text, item=tab: self._draft_changed(item, text))
         index = self.tabs.addTab(tab, "")
         self._update_tab_title(component_id)
         self.tabs.setCurrentIndex(index)
-        tab.set_text(self.session.documents[component_id].current_text)
         self._refresh_preview(tab, fit=True)
         return tab
 
@@ -1654,16 +1735,24 @@ class MainWindow(QMainWindow):
 
     def _update_preview_navigation(self, tab: DocumentTab | None = None) -> None:
         tab = tab or self.active_tab
+        if tab is None or self.session is None:
+            return
+        document = self.session.documents.get(tab.component_id)
         data = None
-        if self.session is not None and tab is not None and self.controller.preview is not None:
+        if self.controller.preview is not None:
             data = self.controller.preview.cached_data(self.session.snapshot, tab.component_id)
-        if data is None or tab is None or tab.resolved_component is None:
-            if tab is not None:
-                for button in (tab.preview_first, tab.preview_previous, tab.preview_next, tab.preview_last):
-                    button.setEnabled(False)
+        if data is None:
+            position = tr("ui.instance_position", current=1, total=1) if document and document.model.data is None else tr("ui.instance_position_empty")
+            tab.instance_position.setText(position)
+            tab.instance_position.setAccessibleName(position)
+            for button in (tab.preview_first, tab.preview_previous, tab.preview_next, tab.preview_last):
+                button.setEnabled(False)
             return
         eligible = [row for row in data.rows if copies_for_mode(row, self.data_mode.mode) > 0]
         index = next((i for i, row in enumerate(eligible) if row.row_number == tab.preview_row_number), -1)
+        position = tr("ui.instance_position", current=index + 1, total=len(eligible)) if index >= 0 else tr("ui.instance_position_empty")
+        tab.instance_position.setText(position)
+        tab.instance_position.setAccessibleName(position)
         tab.preview_previous.setEnabled(index > 0)
         tab.preview_next.setEnabled(0 <= index < len(eligible) - 1)
         tab.preview_first.setEnabled(index > 0)
@@ -2008,6 +2097,7 @@ class MainWindow(QMainWindow):
             self._build_progress = None
         self._active_build_job = None
         self._last_build_result = result if result.status == "succeeded" else self._last_build_result
+        self._update_actions()
         if result.status == "succeeded":
             suffix = " (очистка будет повторена)" if result.cleanup_state == "cleanup_pending" else ""
             warning = f"; предупреждения: {'; '.join(str(item) for item in result.diagnostics)}" if result.diagnostics else ""
@@ -2015,7 +2105,6 @@ class MainWindow(QMainWindow):
         else:
             message = "\n".join(str(item) for item in result.diagnostics) or f"Сборка: {result.status}"
             QMessageBox.warning(self, "Сборка не завершена", format_error(ValueError(message)))
-        self._update_actions()
         if self.active_tab is not None and self.active_tab.canvas._pixmap_item is None:
             self._refresh_preview(self.active_tab)
         if self.active_tab is not None and self.active_tab.preview_deferred:
@@ -2241,7 +2330,7 @@ class MainWindow(QMainWindow):
         if self.session is None or self.active_tab is None:
             return
         current = self.session.documents[self.active_tab.component_id].model.background
-        color = QColorDialog.getColor(QColor(current), self, "Цвет фона компонента")
+        color = QColorDialog.getColor(QColor(current), self, tr("ui.dialog_background_color"))
         if color.isValid():
             self._edit_active(background=color.name(QColor.NameFormat.HexRgb).upper())
 
@@ -2253,7 +2342,8 @@ class MainWindow(QMainWindow):
         initial = QColor(value or "#FFFFFF")
         if not initial.isValid():
             initial = QColor("#111111")
-        color = QColorDialog.getColor(initial, self, "Цвет текста" if field == "color" else "Цвет заливки" if field == "fill" else "Цвет контура", QColorDialog.ColorDialogOption.ShowAlphaChannel)
+        title = tr("ui.dialog_text_color") if field == "color" else tr("ui.dialog_fill_color") if field == "fill" else tr("ui.dialog_stroke_color")
+        color = QColorDialog.getColor(initial, self, title, QColorDialog.ColorDialogOption.ShowAlphaChannel)
         if color.isValid():
             self._edit_selected_node({field: color.name(QColor.NameFormat.HexArgb).upper() if color.alpha() < 255 else color.name(QColor.NameFormat.HexRgb).upper()})
 
@@ -2362,13 +2452,121 @@ class MainWindow(QMainWindow):
         try:
             updated = operation(self.session.documents[tab.component_id].model, *args, **kwargs)
         except (TreeOperationError, ValidationError, ValueError) as exc:
-            QMessageBox.warning(self, "Операция недоступна", format_error(exc))
+            QMessageBox.warning(self, tr("ui.operation_unavailable"), format_error(exc))
             return False
+        if callable(selected):
+            selected = selected()
         return self._commit_component(label, updated, selected=selected)
 
     def _move_selected(self, ids: object, dx_mm: float, dy_mm: float) -> None:
         selected = tuple(ids)
         self._apply_tree("Переместить элементы", move_nodes, selected, dx_mm, dy_mm, selected=selected)
+
+    @staticmethod
+    def _default_name_key(node_type: str) -> str | None:
+        return {
+            "image": "ui.image",
+            "html": "ui.html_text",
+            "rectangle": "ui.rectangle",
+            "ellipse": "ui.ellipse",
+            "line": "ui.line",
+            "group": "ui.group_name",
+            "conditional_group": "ui.conditional_group",
+        }.get(node_type)
+
+    def _next_default_name(self, node_type: str, occupied: set[str] | None = None) -> str:
+        key = self._default_name_key(node_type)
+        base = tr(key) if key else tr("ui.element")
+        if occupied is None:
+            occupied = {item.node.name for item in locations(self.session.documents[self.active_tab.component_id].model).values()} if self.session and self.active_tab else set()
+        used = set()
+        for name in occupied:
+            match = re.fullmatch(re.escape(base) + r" ([1-9]\d*)", name)
+            if name == base:
+                used.add(1)
+            elif match:
+                used.add(int(match.group(1)))
+        number = 1
+        while number in used:
+            number += 1
+        name = f"{base} {number}"
+        occupied.add(name)
+        return name
+
+    @classmethod
+    def _is_default_name(cls, node: Node) -> bool:
+        key = cls._default_name_key(node.type)
+        if key is None:
+            return False
+        bases = {value[key] for value in catalogs().values()}
+        if node.type == "group":
+            bases.update(value["ui.component_type_group"] for value in catalogs().values())
+        return any(node.name == base or re.fullmatch(re.escape(base) + r" [1-9]\d*", node.name) for base in bases)
+
+    def duplicate_selected(self) -> bool:
+        if self.session is None or self.active_tab is None:
+            return False
+        component_id = self.active_tab.component_id
+        component = self.session.documents[component_id].model
+        selected = self._selected_ids()
+        if not selected:
+            return False
+        used_ids = set(locations(component))
+        used_names = {item.node.name for item in locations(component).values()}
+        created_ids: dict[str, str] = {}
+
+        def new_id(node: Node, name: str) -> str:
+            candidate = self.controller.node_id(component_id, name, node.type)
+            while candidate in used_ids:
+                candidate = self.controller.node_id(component_id, name, node.type)
+            used_ids.add(candidate)
+            created_ids[node.id] = candidate
+            return candidate
+
+        def new_name(node: Node) -> str | None:
+            return self._next_default_name(node.type, used_names) if self._is_default_name(node) else None
+
+        return self._apply_tree(
+            tr("ui.duplicate"), duplicate_nodes, selected, new_id, new_name,
+            selected=lambda: tuple(created_ids[node_id] for node_id in selected),
+        )
+
+    def _canvas_context_menu(self, _node_id: str, point) -> None:
+        if self.active_tab is not None:
+            self._show_element_context_menu(self.active_tab.canvas.mapToGlobal(point))
+
+    def _element_tree_context_menu(self, _node_id: str, point) -> None:
+        self._show_element_context_menu(self.element_tree.viewport().mapToGlobal(point))
+
+    def _show_element_context_menu(self, global_point) -> None:
+        ids = self._selected_ids()
+        if not ids or self.active_tab is None or self.session is None:
+            return
+        index = locations(self.session.documents[self.active_tab.component_id].model)
+        locked = effectively_locked_ids(self.session.documents[self.active_tab.component_id].model)
+        selected = [index[node_id].node for node_id in ids]
+        def contains_lock(node: Node) -> bool:
+            return node.locked or isinstance(node, GroupNode) and any(contains_lock(child) for child in node.children)
+
+        safe = not any(node_id in locked for node_id in ids) and not any(contains_lock(node) for node in selected)
+        visual = self.active_tab.mode == "layout" and self._active_build_job is None and self._version_task is None
+        menu = QMenu(self)
+        duplicate = menu.addAction(tr("ui.duplicate"))
+        duplicate.setEnabled(visual and safe)
+        duplicate.triggered.connect(lambda: self.duplicate_selected())
+        delete = menu.addAction(tr("ui.context_delete"))
+        delete.setEnabled(visual and safe)
+        delete.triggered.connect(lambda: self.delete_selected())
+        if len(ids) > 1:
+            group = menu.addAction(tr("ui.group_create"))
+            groupable = safe and len({index[node_id].parent_id for node_id in ids}) == 1
+            group.setEnabled(visual and groupable)
+            group.triggered.connect(lambda: self.group_selected())
+        elif isinstance(selected[0], GroupNode):
+            ungroup = menu.addAction(tr("ui.ungroup"))
+            ungroup.setEnabled(visual and safe)
+            ungroup.triggered.connect(lambda: self.ungroup_selected())
+        menu.exec(global_point)
 
     def _resize_selected(self, node_id: str, width_mm: float, height_mm: float, anchor_x: float = 0.0, anchor_y: float = 0.0) -> None:
         self._apply_tree("Изменить размер элемента", resize_node, node_id, width_mm, height_mm, (anchor_x, anchor_y), selected=(node_id,))
@@ -2406,7 +2604,20 @@ class MainWindow(QMainWindow):
         ids = self._selected_ids()
         if not ids:
             return False
-        return self._apply_tree("Удалить элементы", remove_nodes, ids, selected=())
+        if self.active_tab is None or self.session is None:
+            return False
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(tr("ui.delete_confirm_title"))
+        box.setText(tr("ui.delete_confirm_message", count=len(ids)))
+        delete_button = box.addButton(tr("ui.delete_confirm_yes"), QMessageBox.ButtonRole.AcceptRole)
+        cancel_button = box.addButton(tr("ui.cancel"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel_button)
+        box.setEscapeButton(cancel_button)
+        box.exec()
+        if box.clickedButton() is not delete_button:
+            return False
+        return self._apply_tree(tr("action.delete"), remove_nodes, ids, selected=())
 
     def reorder_selected(self, direction: int) -> bool:
         ids = self._selected_ids()
@@ -2451,17 +2662,17 @@ class MainWindow(QMainWindow):
 
     def group_selected(self, group_id: str | None = None, name: str | None = None) -> bool:
         ids = self._selected_ids()
-        if not ids or self.session is None or self.active_tab is None:
+        if len(ids) < 2 or self.session is None or self.active_tab is None:
             return False
         component = self.session.documents[self.active_tab.component_id].model
         if name is None:
-            name, accepted = QInputDialog.getText(self, "Новая группа", tr("ui.name"), text="Группа")
+            name, accepted = QInputDialog.getText(self, tr("ui.group_create"), tr("ui.name"), text=self._next_default_name("group"))
             if not accepted:
                 return False
         if not name.strip():
             return False
         group_id = group_id or self.controller.node_id(self.active_tab.component_id, name, "group")
-        return self._apply_tree("Сгруппировать элементы", group_nodes, ids, group_id, name, selected=(group_id,))
+        return self._apply_tree(tr("ui.group_create"), group_nodes, ids, group_id, name, selected=(group_id,))
 
     def ungroup_selected(self) -> bool:
         ids = self._selected_ids()
@@ -2472,24 +2683,6 @@ class MainWindow(QMainWindow):
             return False
         children = tuple(child.id for child in found.node.children)
         return self._apply_tree(tr("ui.ungroup"), ungroup_node, ids[0], selected=children)
-
-    def reparent_selected_dialog(self) -> None:
-        ids = self._selected_ids()
-        if not ids or self.session is None or self.active_tab is None:
-            return
-        component = self.session.documents[self.active_tab.component_id].model
-        create_label = "Создать новую группу…"
-        root_label = "Корень (без группы)"
-        choices = [create_label, root_label] + [
-            item.node.id for item in locations(component).values()
-            if isinstance(item.node, GroupNode) and item.node.id not in ids
-        ]
-        choice, accepted = QInputDialog.getItem(self, "Перемещение элементов", "Новый родитель", choices, 0, False)
-        if accepted:
-            if choice == create_label:
-                self.group_selected()
-            else:
-                self.reparent_selected(None if choice == root_label else choice)
 
     def reparent_selected(self, parent_id: str | None) -> bool:
         ids = self._selected_ids()
@@ -2553,16 +2746,17 @@ class MainWindow(QMainWindow):
                 self._show_error(ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", "сначала задайте лист Excel и проверьте его заголовки")))
                 accepted = False
             else:
-                name, accepted = QInputDialog.getText(self, tr("ui.conditional_group"), tr("ui.name"), text=tr("ui.conditional_group"))
+                name, accepted = QInputDialog.getText(self, tr("ui.conditional_group"), tr("ui.name"), text=self._next_default_name("conditional_group"))
                 if accepted and name.strip():
                     component_id = self.active_tab.component_id
                     node_id = self.controller.node_id(component_id, name, "condition")
                     node = ConditionalGroupNode(id=node_id, type="conditional_group", name=name,
                         x_mm=x_mm, y_mm=y_mm, children=(), condition_column=columns[0], condition_value="")
-                    self._apply_tree("Добавить условную группу", add_node, node, selected=(node_id,))
+                    self._apply_tree(tr("ui.add_conditional_group_action"), add_node, node, selected=(node_id,))
         elif tool == "image":
             columns = self._cached_columns()
             dialog = ImageAddDialog(root, self._import_image, self, columns=columns)
+            dialog.name.setText(self._next_default_name("image"))
             accepted = dialog.exec() == dialog.DialogCode.Accepted
             if accepted:
                 self.add_image(
@@ -2574,6 +2768,7 @@ class MainWindow(QMainWindow):
         elif tool == "html":
             try:
                 dialog = HtmlAddDialog(root, self._import_image, self, columns=self._cached_columns())
+                dialog.name.setText(self._next_default_name("html"))
             except ProjectError as exc:
                 self._show_error(exc)
                 accepted = False
@@ -2600,7 +2795,7 @@ class MainWindow(QMainWindow):
             dx, dy = x2 - x1, y2 - y1
             if abs(dx) < 0.01 and abs(dy) < 0.01:
                 return
-            name = tr("ui.line")
+            name = self._next_default_name("line")
             node_id = self.controller.node_id(component_id, name, "line")
             node = LineNode(id=node_id, type="line", name=name, x_mm=x1, y_mm=y1, dx_mm=dx, dy_mm=dy)
         elif tool in ("rectangle", "ellipse"):
@@ -2608,12 +2803,12 @@ class MainWindow(QMainWindow):
             width, height = abs(x2 - x1), abs(y2 - y1)
             if min(width, height) < 0.01:
                 return
-            name = tr("ui.rectangle") if tool == "rectangle" else tr("ui.ellipse")
+            name = self._next_default_name(tool)
             node_id = self.controller.node_id(component_id, name, tool)
             node = ShapeNode(id=node_id, type=tool, name=name, x_mm=x, y_mm=y, width_mm=width, height_mm=height)
         else:
             return
-        self._apply_tree("Нарисовать элемент", add_node, node, selected=(node_id,))
+        self._apply_tree(tr("ui.draw_element"), add_node, node, selected=(node_id,))
 
     def add_image(
         self,
@@ -2621,7 +2816,7 @@ class MainWindow(QMainWindow):
         x_mm: float,
         y_mm: float,
         *,
-        name: str = tr("ui.image"),
+        name: str | None = None,
         fit: str = "contain",
         source_mode: str = "manual",
         source_column: str | None = None,
@@ -2630,6 +2825,7 @@ class MainWindow(QMainWindow):
         if self.session is None or self.active_tab is None:
             return False
         component = self.session.documents[self.active_tab.component_id].model
+        name = name or self._next_default_name("image")
         node_id = node_id or self.controller.node_id(self.active_tab.component_id, name, "image")
         width = max(0.001, min(30.0, component.size_mm.width - x_mm))
         height = max(0.001, min(30.0, component.size_mm.height - y_mm))
@@ -2646,7 +2842,7 @@ class MainWindow(QMainWindow):
         x_mm: float,
         y_mm: float,
         *,
-        name: str = tr("ui.html_text"),
+        name: str | None = None,
         font_family: str = "Arial",
         font_size_pt: float = 10.0,
         color: str = "#111111",
@@ -2657,6 +2853,7 @@ class MainWindow(QMainWindow):
         if self.session is None or self.active_tab is None:
             return False
         component = self.session.documents[self.active_tab.component_id].model
+        name = name or self._next_default_name("html")
         node_id = node_id or self.controller.node_id(self.active_tab.component_id, name, "html")
         width = max(0.001, min(40.0, component.size_mm.width - x_mm))
         height = max(0.001, min(15.0, component.size_mm.height - y_mm))
@@ -2670,7 +2867,7 @@ class MainWindow(QMainWindow):
         except ValidationError as exc:
             self._show_error(exc)
             return False
-        return self._apply_tree("Добавить HTML-текст", add_node, node, selected=(node_id,))
+        return self._apply_tree(tr("ui.html_text"), add_node, node, selected=(node_id,))
 
     def insert_html_image(self) -> None:
         ids = self._selected_ids()
@@ -2761,15 +2958,7 @@ class MainWindow(QMainWindow):
         if self.session is None or not self.session.documents[component_id].dirty:
             return True
         name = self.session.documents[component_id].model.name
-        choice = QMessageBox.question(
-            self,
-            "Несохранённые изменения",
-            f"Сохранить изменения компонента «{name}»?",
-            QMessageBox.StandardButton.Save
-            | QMessageBox.StandardButton.Discard
-            | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Save,
-        )
+        choice = self._ask_unsaved_choice(tr("ui.unsaved_component_message", name=name))
         if choice == QMessageBox.StandardButton.Cancel:
             return False
         if choice == QMessageBox.StandardButton.Save:
@@ -2780,15 +2969,7 @@ class MainWindow(QMainWindow):
     def _confirm_all_dirty(self) -> bool:
         if self.session is None or not self.session.dirty:
             return True
-        choice = QMessageBox.question(
-            self,
-            "Несохранённые изменения",
-            "Сохранить изменения открытого проекта?",
-            QMessageBox.StandardButton.Save
-            | QMessageBox.StandardButton.Discard
-            | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Save,
-        )
+        choice = self._ask_unsaved_choice(tr("ui.unsaved_project_message"))
         if choice == QMessageBox.StandardButton.Cancel:
             return False
         if choice == QMessageBox.StandardButton.Save:
@@ -2796,6 +2977,21 @@ class MainWindow(QMainWindow):
         for component_id in tuple(self.session.documents):
             self.controller.revert_document(component_id)
         return True
+
+    def _ask_unsaved_choice(self, message: str) -> QMessageBox.StandardButton:
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("ui.unsaved_title"))
+        box.setText(message)
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel
+        )
+        box.button(QMessageBox.StandardButton.Save).setText(tr("ui.save"))
+        box.button(QMessageBox.StandardButton.Discard).setText(tr("ui.discard"))
+        box.button(QMessageBox.StandardButton.Cancel).setText(tr("ui.cancel"))
+        box.setDefaultButton(QMessageBox.StandardButton.Save)
+        return QMessageBox.StandardButton(box.exec())
 
     def _clear_tabs(self, *, discard: bool = False) -> None:
         for entry in self._component_history:
@@ -2892,7 +3088,10 @@ class MainWindow(QMainWindow):
         self.validate_active_action.setEnabled(has_tab and idle)
         self.data_validate_all.setEnabled(has_project and idle)
         self.data_validate.setEnabled(has_tab and idle)
-        self.cancel_build_action.setEnabled(not idle)
+        build_running = self._active_build_job is not None
+        self.cancel_build_action.setEnabled(build_running)
+        self.delete_widget_action.setVisible(bool(visual and self._selected_ids()))
+        self._update_build_toolbar()
         ready = self._last_build_result is not None
         self.open_build_action.setEnabled(ready)
         self.open_pdf_action.setEnabled(ready)
@@ -2921,22 +3120,25 @@ class MainWindow(QMainWindow):
         # operations that target the selected locked node are disabled.
         for widget in (self.layer_up, self.layer_down):
             widget.setEnabled(visual and has_selection)
-        self.reparent_button.setEnabled(visual and has_selection and not locked_selection)
         for button in self.align_buttons.values():
             button.setEnabled(visual and len(selected) >= 2 and not locked_selection)
         self.element_tree.setEnabled(bool(visual))
         self.properties.setEnabled(bool(visual))
         self.element_properties.setEnabled(bool(visual and has_selection))
-        self.delete_action.setEnabled(visual and has_selection and not locked_selection)
-        self.group_action.setEnabled(visual and has_selection and not locked_selection)
-        self.group_button.setEnabled(visual and has_selection and not locked_selection)
+        self.delete_action.setEnabled(visual and idle and has_selection and not locked_selection)
+        groupable = len(selected) > 1 and not locked_selection
+        if groupable and self.session is not None and self.active_tab is not None:
+            index = locations(self.session.documents[self.active_tab.component_id].model)
+            groupable = len({index[node_id].parent_id for node_id in selected}) == 1
+        self.group_action.setEnabled(bool(visual and idle and groupable))
+        self.group_button.setEnabled(bool(visual and idle and groupable))
         can_ungroup = False
         if has_tab and len(selected) == 1 and self.session is not None:
             node = locations(self.session.documents[self.active_tab.component_id].model).get(selected[0])
             can_ungroup = bool(node and isinstance(node.node, GroupNode))
         can_ungroup = can_ungroup and not locked_selection
-        self.ungroup_action.setEnabled(bool(visual and can_ungroup))
-        self.ungroup_button.setEnabled(bool(visual and can_ungroup))
+        self.ungroup_action.setEnabled(bool(visual and idle and can_ungroup))
+        self.ungroup_button.setEnabled(bool(visual and idle and can_ungroup))
         self._sync_tool_buttons()
 
     def _show_error(self, error: Exception) -> None:

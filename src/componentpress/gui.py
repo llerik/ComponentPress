@@ -36,6 +36,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     """Exercise stage-six Excel preview plus the preceding editing workflow."""
     from componentpress.editor.dialogs import format_error
     from componentpress.editor.qt_models import ID_ROLE
+    from componentpress.domain.tree import locations
     from componentpress.diagnostics import logging as technical_log
     from componentpress.i18n import set_language, tr, validate_catalogs
 
@@ -261,6 +262,18 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     if "smoke-group" in {node.id for node in window.session.documents[smoke_id].model.elements}:
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     window.undo_group.redo()
+    window._set_selection(("smoke-group",), source="tree")
+    if not window.duplicate_selected():
+        return _smoke_failure(root, inspect.currentframe().f_lineno)
+    copied_group_id = window._selected_ids()[0]
+    copied_group = locations(window.session.documents[smoke_id].model)[copied_group_id].node
+    copied_ids = (copied_group_id, *(child.id for child in copied_group.children))
+    if copied_group.name != "Проверка группы" or [child.name for child in copied_group.children] != ["HTML-текст 2", "Изображение 2"]:
+        return _smoke_failure(root, inspect.currentframe().f_lineno)
+    window.undo_group.undo()
+    window.undo_group.redo()
+    if tuple(node_id for node_id in locations(window.session.documents[smoke_id].model) if node_id in copied_ids) != copied_ids:
+        return _smoke_failure(root, inspect.currentframe().f_lineno)
     window._request_mode(smoke_tab, "text")
     yaml_text = smoke_tab.text_editor.toPlainText()
     yaml_text = yaml_text.replace("#E8F0FF", "#DDEEFF") + "# Проверка текстового режима\n"

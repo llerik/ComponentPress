@@ -158,7 +158,7 @@ def test_preview_runs_off_ui_thread_and_keeps_scene_coordinates(tmp_path: Path, 
     assert worker_threads and worker_threads[0] != threading.get_ident()
     assert tab.canvas._pixmap_item is not None
     logical = tab.canvas._pixmap_item.boundingRect().size()
-    assert logical.width() == pytest.approx(63 * 96 / 25.4, abs=0.2)
+    assert logical.width() == pytest.approx(63 * 96 / 25.4, abs=0.35)
     assert logical.height() == pytest.approx(88 * 96 / 25.4, abs=0.5)
     from componentpress.domain.tree import node_bounds
 

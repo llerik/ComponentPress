@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, QTimer
-from PySide6.QtWidgets import QApplication, QComboBox, QLabel
+from PySide6.QtWidgets import QApplication, QComboBox, QDialogButtonBox, QLabel, QMessageBox
 
 from componentpress.domain.diagnostics import Diagnostic
 from componentpress.domain.schema import SCHEMA_VERSION
@@ -21,6 +21,51 @@ def test_catalogs_have_matching_keys_and_placeholders() -> None:
     validate_catalogs()
     assert catalogs()["ru"].keys() == catalogs()["en"].keys()
     set_language("ru")
+
+
+def test_unsaved_alert_and_about_close_buttons_use_both_catalogs(tmp_path: Path, qtbot) -> None:
+    from test_stage14_ui import make_window
+
+    expected = {
+        "ru": ("Сохранить", "Не сохранять", "Отмена", "Закрыть", "Несохранённые изменения"),
+        "en": ("Save", "Discard", "Cancel", "Close", "Unsaved changes"),
+    }
+    previous = language()
+    try:
+        for locale, labels in expected.items():
+            set_language(locale)
+            (tmp_path / locale).mkdir()
+            _root, window, _service = make_window(tmp_path / locale, qtbot)
+            document = window.session.documents["forest-card"]
+            document.set_draft(document.current_text + "\n# unsaved")
+
+            def cancel_prompt() -> None:
+                dialog = QApplication.activeModalWidget()
+                assert dialog is not None
+                assert dialog.windowTitle() == labels[4]
+                assert [dialog.button(button).text() for button in (
+                    QMessageBox.StandardButton.Save,
+                    QMessageBox.StandardButton.Discard,
+                    QMessageBox.StandardButton.Cancel,
+                )] == list(labels[:3])
+                dialog.button(QMessageBox.StandardButton.Cancel).click()
+
+            QTimer.singleShot(0, cancel_prompt)
+            assert not window._confirm_all_dirty()
+            assert document.draft_text is not None
+
+            def close_about() -> None:
+                dialog = QApplication.activeModalWidget()
+                box = dialog.findChild(QDialogButtonBox)
+                assert box is not None
+                assert box.button(QDialogButtonBox.StandardButton.Close).text() == labels[3]
+                box.button(QDialogButtonBox.StandardButton.Close).click()
+
+            QTimer.singleShot(0, close_about)
+            window._show_about()
+            window.controller.revert_document("forest-card")
+    finally:
+        set_language(previous)
     assert tr("about.schema", version=SCHEMA_VERSION).endswith(str(SCHEMA_VERSION))
     set_language("en")
     assert tr("about.schema", version=SCHEMA_VERSION).startswith("Supported")
@@ -78,6 +123,9 @@ def test_editor_panels_and_dynamic_controls_use_english_catalog(tmp_path: Path, 
         assert window.add_component_button.accessibleName() == "Add component"
         assert window.undo_action.text() == "Undo"
         assert window.redo_action.text() == "Redo"
+        assert window.validate_all_action.text() == "Refresh data and validate project"
+        assert window.validate_all_button.accessibleName() == "Refresh data and validate project"
+        assert window.validate_all_button.toolTip() == "Refresh data and validate project"
         window._update_actions()
         assert window.undo_action.text() == "Undo"
         assert window.redo_action.text() == "Redo"
@@ -110,6 +158,7 @@ def test_editor_panels_and_dynamic_controls_use_english_catalog(tmp_path: Path, 
         changes = []
         properties.nodeChanged.connect(changes.append)
         properties.show_node(html, font_families=("Arial",))
+        assert properties.color_swatch.accessibleName() == "Choose text color"
         assert properties.font_combo.currentText() == "Unavailable Test Font (unavailable)"
         assert properties.font_combo.currentData() == "Unavailable Test Font"
         assert not changes
@@ -126,5 +175,28 @@ def test_editor_panels_and_dynamic_controls_use_english_catalog(tmp_path: Path, 
         assert "source main" in rendered and "sheet Cards" in rendered and "element node" in rendered
         assert "Image assets/icon.png: 80×60 px" in rendered
         assert "effective resolution 101.6×101.6 dpi" in rendered
+    finally:
+        set_language(previous)
+
+
+def test_new_default_element_names_use_english_catalog(tmp_path: Path, qtbot, monkeypatch) -> None:
+    from test_stage14_ui import make_window
+
+    previous = language()
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Discard))
+    set_language("en")
+    try:
+        _root, window, _service = make_window(tmp_path, qtbot)
+        monkeypatch.setattr(window, "_ask_unsaved_choice", lambda *_args: QMessageBox.StandardButton.Discard)
+        window.open_component("forest-card")
+        window._draw_element("rectangle", 1, 1, 8, 6)
+        assert window.add_html("<p>English</p>", 2, 3)
+        assert window.add_image("assets/images/animals/enemy/leaf.png", 8, 8)
+        names = {node.type: node.name for node in window.session.documents["forest-card"].model.elements if node.type in {"rectangle", "html", "image"}}
+        assert names == {"rectangle": "Rectangle 1", "html": "HTML text 1", "image": "Image 1"}
+        window._set_selection((next(node.id for node in window.session.documents["forest-card"].model.elements if node.type == "rectangle"),), source="tree")
+        assert window.duplicate_selected()
+        duplicates = [node.name for node in window.session.documents["forest-card"].model.elements if node.type == "rectangle"]
+        assert duplicates == ["Rectangle 1", "Rectangle 2"]
     finally:
         set_language(previous)

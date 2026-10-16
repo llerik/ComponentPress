@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from componentpress.i18n import tr
+from componentpress.app_assets import set_themed_icon
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, LineNode, Node, ShapeNode
 
@@ -46,8 +47,13 @@ class ComponentProperties(QWidget):
         self.background_edit = QLineEdit()
         self.background_edit.setObjectName("componentBackground")
         self.background_edit.setPlaceholderText("#FFFFFF")
-        self.background_button = QPushButton(tr("ui.select_color"))
+        self.background_edit.setMaxLength(7)
+        self.background_edit.setFixedWidth(self.background_edit.fontMetrics().horizontalAdvance("#FFFFFF") + 18)
+        self.background_button = QPushButton()
         self.background_button.setObjectName("componentBackgroundPicker")
+        self.background_button.setFixedSize(28, 28)
+        self.background_button.setAccessibleName(tr("ui.select_background_color"))
+        self.background_button.setToolTip(self.background_button.accessibleName())
         self.sheet = QComboBox()
         self.sheet.setObjectName("componentPropertySheet")
         self.sheet.addItem(tr("ui.no_sheet"), None)
@@ -62,7 +68,7 @@ class ComponentProperties(QWidget):
         layout.addRow(tr("ui.component_background"), background_row)
         layout.addRow(tr("ui.component_sheet"), self.sheet)
         self.name_edit.editingFinished.connect(lambda: self.nameChanged.emit(self.name_edit.text()))
-        self.background_edit.editingFinished.connect(lambda: self.backgroundChanged.emit(self.background_edit.text()))
+        self.background_edit.editingFinished.connect(self._commit_background)
         self.width_spin.editingFinished.connect(self._emit_size)
         self.height_spin.editingFinished.connect(self._emit_size)
         self.background_button.clicked.connect(self.backgroundColorRequested)
@@ -84,6 +90,16 @@ class ComponentProperties(QWidget):
     def _emit_size(self) -> None:
         self.sizeChanged.emit(self.width_spin.value(), self.height_spin.value())
 
+    def _commit_background(self) -> None:
+        value = self.background_edit.text().upper()
+        if not re.fullmatch(r"#[0-9A-F]{6}", value):
+            value = getattr(self, "_background", "#FFFFFF")
+        self._background = value
+        self.background_edit.setText(value)
+        ElementProperties.update_color_swatch(self.background_button, value)
+        if value != getattr(self, "_background_model", value):
+            self.backgroundChanged.emit(value)
+
     def show_component(self, component: ComponentDefinition | None) -> None:
         self.setEnabled(component is not None)
         if component is None:
@@ -100,6 +116,8 @@ class ComponentProperties(QWidget):
         self.width_spin.setValue(component.size_mm.width)
         self.height_spin.setValue(component.size_mm.height)
         self.background_edit.setText(component.background)
+        self._background = self._background_model = component.background.upper()
+        ElementProperties.update_color_swatch(self.background_button, self._background)
         current_sheet = component.data.sheet if component.data else None
         self.sheet.clear()
         self.sheet.addItem(tr("ui.no_sheet"), None)
@@ -162,12 +180,8 @@ class ElementProperties(QWidget):
         self.condition_value.setObjectName("conditionValue")
         self.condition_state = QLabel()
         self.condition_state.setObjectName("conditionState")
-        self.stroke_color = QLineEdit()
-        self.stroke_color.setObjectName("shapeStroke")
-        self.stroke_color.setReadOnly(True)
-        self.fill_color = QLineEdit()
-        self.fill_color.setObjectName("shapeFill")
-        self.fill_color.setReadOnly(True)
+        self.stroke_color = self._color_edit("shapeStroke")
+        self.fill_color = self._color_edit("shapeFill")
         self.stroke_width = self._number("shapeStrokeWidth", 0.001, 1000.0)
         self.stroke_style = QComboBox()
         self.stroke_style.setObjectName("shapeStrokeStyle")
@@ -181,15 +195,8 @@ class ElementProperties(QWidget):
         self.font_spin = self._number("htmlFontSize", 0.1, 1000.0)
         self.font_spin.setDecimals(1)
         self.font_spin.setSingleStep(1.0)
-        self.color_edit = QLineEdit()
-        self.color_edit.setObjectName("htmlColor")
-        self.color_edit.setMaxLength(9)
-        self.color_edit.setFixedWidth(self.color_edit.fontMetrics().horizontalAdvance("#AARRGGBB") + 18)
-        self.color_swatch = QPushButton()
-        self.color_swatch.setObjectName("htmlColorPicker")
-        self.color_swatch.setFixedSize(28, 28)
-        self.color_swatch.setAccessibleName(tr("ui.select_text_color"))
-        self.color_swatch.setToolTip(tr("ui.select_text_color"))
+        self.color_edit = self._color_edit("htmlColor")
+        self.color_swatch = self._color_swatch("htmlColorPicker", tr("ui.select_text_color"))
         self.color_widget = QWidget()
         color_row = QHBoxLayout(self.color_widget)
         color_row.setContentsMargins(0, 0, 0, 0)
@@ -202,14 +209,12 @@ class ElementProperties(QWidget):
         alignment_widget = QWidget()
         alignment_row = QHBoxLayout(alignment_widget)
         alignment_row.setContentsMargins(0, 0, 0, 0)
-        from componentpress.app_assets import load_icon
-
         for value, label, icon in (("left", tr("ui.text_align_left"), "format_align_left.png"), ("center", tr("ui.text_align_center"), "format_align_center.png"), ("right", tr("ui.text_align_right"), "format_align_right.png")):
             button = QPushButton()
             button.setObjectName(f"htmlAlign{value.title()}")
             button.setCheckable(True)
             button.setProperty("alignment", value)
-            button.setIcon(load_icon(icon))
+            set_themed_icon(button, icon)
             button.setIconSize(QSize(20, 20))
             button.setFixedSize(32, 32)
             button.setToolTip(label)
@@ -221,10 +226,8 @@ class ElementProperties(QWidget):
         self.lock_button.setObjectName("elementLocked")
         self.lock_button.setCheckable(True)
         self.lock_button.setFixedSize(34, 34)
-        self.fill_button = QPushButton(tr("ui.select_color"))
-        self.fill_button.setObjectName("shapeFillPicker")
-        self.stroke_button = QPushButton(tr("ui.select_color"))
-        self.stroke_button.setObjectName("shapeStrokePicker")
+        self.fill_button = self._color_swatch("shapeFillPicker", tr("ui.select_fill_color"))
+        self.stroke_button = self._color_swatch("shapeStrokePicker", tr("ui.select_stroke_color"))
         self.no_fill_button = QPushButton(tr("ui.no_fill"))
         self.no_fill_button.setObjectName("shapeNoFill")
         fill_row = QWidget()
@@ -232,7 +235,13 @@ class ElementProperties(QWidget):
         fill_layout = QHBoxLayout(fill_row)
         fill_layout.setContentsMargins(0, 0, 0, 0)
         fill_layout.addWidget(self.fill_button)
+        fill_layout.addWidget(self.fill_color)
         fill_layout.addWidget(self.no_fill_button)
+        self.stroke_widget = QWidget()
+        stroke_layout = QHBoxLayout(self.stroke_widget)
+        stroke_layout.setContentsMargins(0, 0, 0, 0)
+        stroke_layout.addWidget(self.stroke_button)
+        stroke_layout.addWidget(self.stroke_color)
         self.group_bounds = QLabel()
         self.group_bounds.setObjectName("groupBounds")
         self.quality_label = QLabel()
@@ -257,7 +266,7 @@ class ElementProperties(QWidget):
         form.addRow(tr("ui.condition_value"), self.condition_value)
         form.addRow(tr("ui.condition_state"), self.condition_state)
         form.addRow(tr("ui.fill"), fill_row)
-        form.addRow(tr("ui.stroke"), self.stroke_button)
+        form.addRow(tr("ui.stroke"), self.stroke_widget)
         form.addRow(tr("ui.stroke_width"), self.stroke_width)
         form.addRow(tr("ui.stroke_style"), self.stroke_style)
         form.addRow(tr("ui.line_end_dx"), self.line_dx)
@@ -293,8 +302,8 @@ class ElementProperties(QWidget):
         self.condition_column.activated.connect(lambda _index: self.nodeChanged.emit({"condition_column": self.condition_column.currentText()}))
         self.condition_value.editingFinished.connect(lambda: self.nodeChanged.emit({"condition_value": self.condition_value.text()}))
         self.condition_operator.currentIndexChanged.connect(self._condition_operator_changed)
-        self.stroke_color.editingFinished.connect(lambda: self.nodeChanged.emit({"stroke": self.stroke_color.text()}))
-        self.fill_color.editingFinished.connect(lambda: self.nodeChanged.emit({"fill": self.fill_color.text() or None}))
+        self.stroke_color.editingFinished.connect(lambda: self._commit_node_color(self.stroke_color, "stroke"))
+        self.fill_color.editingFinished.connect(lambda: self._commit_node_color(self.fill_color, "fill"))
         self.stroke_width.editingFinished.connect(lambda: self.nodeChanged.emit({"stroke_width_mm": self.stroke_width.value()}))
         self.stroke_style.currentIndexChanged.connect(lambda _index: self.nodeChanged.emit({"stroke_style": self.stroke_style.currentData()}))
         self.fit_combo.currentTextChanged.connect(lambda value: self.nodeChanged.emit({"fit": value}))
@@ -322,10 +331,25 @@ class ElementProperties(QWidget):
         spin.setSingleStep(1.0)
         return spin
 
-    def _set_lock_icon(self, locked: bool) -> None:
-        from componentpress.app_assets import load_icon
+    @staticmethod
+    def _color_edit(name: str) -> QLineEdit:
+        edit = QLineEdit()
+        edit.setObjectName(name)
+        edit.setMaxLength(9)
+        edit.setFixedWidth(edit.fontMetrics().horizontalAdvance("#AARRGGBB") + 18)
+        return edit
 
-        self.lock_button.setIcon(load_icon("lock.png" if locked else "lock_open.png"))
+    @staticmethod
+    def _color_swatch(name: str, label: str) -> QPushButton:
+        button = QPushButton()
+        button.setObjectName(name)
+        button.setFixedSize(28, 28)
+        button.setAccessibleName(label)
+        button.setToolTip(label)
+        return button
+
+    def _set_lock_icon(self, locked: bool) -> None:
+        set_themed_icon(self.lock_button, "lock.png" if locked else "lock_open.png")
         self.lock_button.setIconSize(QSize(22, 22))
         self.lock_button.setAccessibleName(tr("ui.unlock_element") if locked else tr("ui.lock_element"))
 
@@ -358,17 +382,34 @@ class ElementProperties(QWidget):
         if value != getattr(self, "_node_color", value):
             self.nodeChanged.emit({"color": value})
 
-    def _update_html_color_swatch(self, value: str) -> None:
+    @staticmethod
+    def update_color_swatch(button: QPushButton, value: str | None) -> None:
         pixmap = QPixmap(24, 24)
+        pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         for y in range(0, 24, 6):
             for x in range(0, 24, 6):
                 color = Qt.GlobalColor.white if (x // 6 + y // 6) % 2 else Qt.GlobalColor.lightGray
                 painter.fillRect(x, y, 6, 6, color)
-        painter.fillRect(0, 0, 24, 24, QColor(value))
+        if value:
+            painter.fillRect(0, 0, 24, 24, QColor(value))
         painter.end()
-        self.color_swatch.setIcon(QIcon(pixmap))
-        self.color_swatch.setIconSize(QSize(24, 24))
+        button.setIcon(QIcon(pixmap))
+        button.setIconSize(QSize(24, 24))
+
+    def _update_html_color_swatch(self, value: str) -> None:
+        self.update_color_swatch(self.color_swatch, value)
+
+    def _commit_node_color(self, edit: QLineEdit, field: str) -> None:
+        value = edit.text().upper()
+        if not re.fullmatch(r"#[0-9A-F]{6}(?:[0-9A-F]{2})?", value):
+            value = getattr(self, f"_{field}_color", "#000000")
+        setattr(self, f"_{field}_color", value)
+        edit.setText(value)
+        self.update_color_swatch(self.fill_button if field == "fill" else self.stroke_button, value)
+        if value != getattr(self, f"_{field}_node_color", value):
+            setattr(self, f"_{field}_node_color", value)
+            self.nodeChanged.emit({field: value})
 
     def _condition_operator_changed(self, _index: int) -> None:
         operator = self.condition_operator.currentData()
@@ -427,20 +468,22 @@ class ElementProperties(QWidget):
         self.form.setRowVisible(self.line_dx, line)
         self.form.setRowVisible(self.line_dy, line)
         self.form.setRowVisible(self.fill_widget, shape)
-        self.form.setRowVisible(self.stroke_button, shape or line)
+        self.form.setRowVisible(self.stroke_widget, shape or line)
         self.form.setRowVisible(self.stroke_width, shape or line)
         self.form.setRowVisible(self.stroke_style, shape or line)
         if line:
             self.line_dx.setValue(node.dx_mm)
             self.line_dy.setValue(node.dy_mm)
         if shape or line:
-            self.stroke_color.setText(node.stroke)
-            self.stroke_button.setStyleSheet(f"background-color: {node.stroke}")
+            self.stroke_color.setText(node.stroke.upper())
+            self._stroke_color = self._stroke_node_color = node.stroke.upper()
+            self.update_color_swatch(self.stroke_button, node.stroke)
             self.stroke_width.setValue(node.stroke_width_mm)
             self.stroke_style.setCurrentIndex(max(0, self.stroke_style.findData(node.stroke_style)))
         if shape:
             self.fill_color.setText(node.fill or "")
-            self.fill_button.setStyleSheet(f"background-color: {node.fill or 'transparent'}")
+            self._fill_color = self._fill_node_color = (node.fill or "").upper()
+            self.update_color_swatch(self.fill_button, node.fill)
         is_group = isinstance(node, GroupNode)
         self.form.setRowVisible(self.group_bounds, is_group)
         conditional = isinstance(node, ConditionalGroupNode)
@@ -538,7 +581,7 @@ class ElementProperties(QWidget):
     def set_edit_locked(self, locked: bool) -> None:
         for widget in (
             self.name_edit, self.x_spin, self.y_spin, self.width_spin, self.height_spin, self.rotation_spin,
-            self.condition_column, self.condition_operator, self.condition_value, self.optional_image, self.stroke_button, self.fill_button, self.no_fill_button,
+            self.condition_column, self.condition_operator, self.condition_value, self.optional_image, self.stroke_button, self.fill_button, self.stroke_color, self.fill_color, self.no_fill_button,
             self.stroke_width, self.stroke_style, self.line_dx, self.line_dy,
             self.source_edit, self.fit_combo, self.content_mode, self.content_column,
             self.font_combo, self.font_spin, self.color_edit, self.color_swatch,
@@ -570,7 +613,10 @@ class ElementProperties(QWidget):
                    width_mm=item.width_mm, height_mm=item.height_mm, dpi_x=item.dpi_x, dpi_y=item.dpi_y, warning=status)
             )
         self.quality_label.setText("\n".join(lines))
-        self.quality_label.setStyleSheet("color: #A00000" if has_warning else "")
+        self.quality_label.setProperty("componentpressWarning", has_warning)
+        from .theme import style_warning
+
+        style_warning(self.quality_label, has_warning)
         self.form.setRowVisible(self.quality_label, True)
 
     def _content_mode_changed(self, _index: int) -> None:

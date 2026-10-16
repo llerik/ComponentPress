@@ -25,6 +25,8 @@ class Placement:
 class ImpositionPage:
     index: int
     placements: tuple[Placement, ...]
+    columns: int = 0
+    rows: int = 0
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,30 @@ class ImpositionPlan:
     paper_width_mm: float
     paper_height_mm: float
     pages: tuple[ImpositionPage, ...]
+
+
+def cut_grid_lines(page: ImpositionPage, gap_mm: float) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """Return unique vertical and horizontal cut coordinates for the full grid."""
+    if not page.placements:
+        return (), ()
+    first = page.placements[0]
+    vertical = {
+        round(first.x_mm + column * (first.width_mm + gap_mm), 9)
+        for column in range(page.columns)
+    }
+    vertical.update(
+        round(first.x_mm + column * (first.width_mm + gap_mm) + first.width_mm, 9)
+        for column in range(page.columns)
+    )
+    horizontal = {
+        round(first.y_mm + row * (first.height_mm + gap_mm), 9)
+        for row in range(page.rows)
+    }
+    horizontal.update(
+        round(first.y_mm + row * (first.height_mm + gap_mm) + first.height_mm, 9)
+        for row in range(page.rows)
+    )
+    return tuple(sorted(vertical)), tuple(sorted(horizontal))
 
 
 def paper_size_mm(settings: PrintSettings) -> tuple[float, float]:
@@ -62,7 +88,7 @@ def calculate_imposition(instances: tuple[BuildInstance, ...], settings: PrintSe
         for instance in group:
             for copy_index in range(instance.copies):
                 if len(placements) == capacity:
-                    pages.append(ImpositionPage(len(pages), tuple(placements)))
+                    pages.append(ImpositionPage(len(pages), tuple(placements), cols, rows))
                     placements = []
                 slot = len(placements)
                 row, column = divmod(slot, cols)
@@ -73,5 +99,5 @@ def calculate_imposition(instances: tuple[BuildInstance, ...], settings: PrintSe
                     width, height,
                 ))
         if placements:
-            pages.append(ImpositionPage(len(pages), tuple(placements)))
+            pages.append(ImpositionPage(len(pages), tuple(placements), cols, rows))
     return ImpositionPlan(paper_width, paper_height, tuple(pages))

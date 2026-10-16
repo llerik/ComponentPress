@@ -41,11 +41,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _editor(tmp_path: Path, qtbot, monkeypatch):
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *_args, **_kwargs: QMessageBox.StandardButton.Discard))
     root = tmp_path / "game"
     shutil.copytree(ROOT / "examples" / "demo-game", root)
     service = project_service()
     window = MainWindow(ProjectController(service))
+    monkeypatch.setattr(window, "_ask_unsaved_choice", lambda *_args: QMessageBox.StandardButton.Discard)
     window.load_session(service.open_session(root))
     qtbot.addWidget(window)
     window.show()

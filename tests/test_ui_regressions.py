@@ -24,7 +24,9 @@ from componentpress.editor.main_window import MainWindow
 from componentpress.editor.canvas import ComponentCanvas
 from componentpress.editor.canvas import ComponentPreview
 from componentpress.editor.properties import ElementProperties
+from componentpress.editor.theme import apply_theme
 from componentpress.editor.ui_state import UiState
+from componentpress.app_assets import load_icon
 from componentpress.project_io.repository import FileProjectRepository
 from componentpress.rendering import render_component
 from componentpress.rendering.exporter import ensure_gui_application, render_component_image
@@ -187,12 +189,14 @@ def test_preview_first_and_last_follow_filtered_excel_rows(make_editor, qtbot):
     assert not tab.preview_first.isEnabled()
     tab.preview_last.click()
     assert tab.preview_row_number == eligible[-1]
+    assert tab.instance_position.text() == f"Экземпляр {len(eligible)} из {len(eligible)}"
     assert window.data_row.currentData() == eligible[-1]
     qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
     assert not tab.preview_last.isEnabled() and tab.preview_first.isEnabled()
 
     tab.preview_first.click()
     assert tab.preview_row_number == eligible[0]
+    assert tab.instance_position.text() == f"Экземпляр 1 из {len(eligible)}"
     assert window.data_row.currentData() == eligible[0]
     qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
     assert not tab.preview_first.isEnabled() and tab.preview_last.isEnabled()
@@ -204,7 +208,7 @@ def test_active_static_validation_ignores_missing_project_excel_and_checks_resou
     assert window.add_image("assets/images/missing.png", 2, 2, node_id="missing-image")
     (root / "data" / "game.xlsx").unlink()
 
-    window.validate_active_action.trigger()
+    window._validate_active()
 
     messages = [window.event_list.item(i).text() for i in range(window.event_list.count())]
     assert any("RESOURCE_MISSING" in item and "missing-image" in item for item in messages)
@@ -262,15 +266,19 @@ def test_resolver_keeps_shapes_and_signed_line_visible_in_nested_trees(tmp_path,
 def make_editor(tmp_path, qtbot, monkeypatch):
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
     QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path / "settings"))
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **kw: QMessageBox.StandardButton.Discard))
+    theme_settings = QSettings(str(tmp_path / "theme.ini"), QSettings.Format.IniFormat)
+    theme_settings.setValue("theme", "light")
+    monkeypatch.setattr("componentpress.editor.main_window.theme_settings", lambda: theme_settings)
 
     def make(excel=False):
+        apply_theme("light")
         root = tmp_path / ("excel" if excel else "static")
         shutil.copytree(ROOT / "examples" / ("demo-excel-game" if excel else "demo-game"), root,
                         ignore=shutil.ignore_patterns(".componentpress"))
         controller = project_controller()
         service = controller.service
         window = MainWindow(controller)
+        monkeypatch.setattr(window, "_ask_unsaved_choice", lambda *_args: QMessageBox.StandardButton.Discard)
         window.ui_state = UiState(QSettings(str(tmp_path / (root.name + ".ini")), QSettings.Format.IniFormat))
         errors = []
         monkeypatch.setattr(window, "_show_error", errors.append)
@@ -478,9 +486,10 @@ def test_html_properties_switch_between_manual_and_excel_column_controls(qtbot):
 
 def test_layer_buttons_match_tool_dimensions(make_editor):
     window, _root, _errors = make_editor()
-    buttons = (window.layer_up, window.layer_down, window.group_button, window.ungroup_button, window.reparent_button)
+    buttons = (window.layer_up, window.layer_down, window.group_button, window.ungroup_button)
     assert all(button.size() == window.select_tool.size() == QSize(34, 34) for button in buttons)
     assert all(not button.icon().isNull() and button.accessibleName() for button in buttons)
+    assert not hasattr(window, "reparent_button")
 
 
 def test_zoom_refresh_keeps_text_and_overlay_proportions_without_document_change(make_editor, qtbot):
@@ -530,9 +539,9 @@ def test_drawing_shapes_produces_visible_preview_and_palette_changes_are_undoabl
             assert button is None or not button.isVisible()
             continue
         before = getattr(selected_node(window), field)
-        monkeypatch.setattr(QColorDialog, "getColor", staticmethod(lambda *a, **kw: QColor("#2468AC")))
+        monkeypatch.setattr(QColorDialog, "getColor", staticmethod(lambda *a, **kw: QColor("#802468AC")))
         button.click()
-        assert QColor(getattr(selected_node(window), field)) == QColor("#2468AC")
+        assert getattr(selected_node(window), field) == "#802468AC"
         tab.undo_stack.undo()
         assert getattr(selected_node(window), field) == before
         tab.undo_stack.redo()
@@ -582,6 +591,72 @@ def test_html_color_swatch_keeps_alpha_and_accepts_editable_hex(qtbot):
     assert not properties.color_swatch.icon().isNull()
 
 
+@pytest.mark.parametrize("field", ("fill", "stroke"))
+def test_shape_colors_use_editable_hex_and_keep_transparency(qtbot, field):
+    properties = ElementProperties()
+    qtbot.addWidget(properties)
+    node = ShapeNode(
+        id="shape", name="Shape", type="rectangle", x_mm=0, y_mm=0,
+        width_mm=10, height_mm=10, fill="#80123456", stroke="#AA345678",
+    )
+    properties.show_node(node)
+    edit = properties.fill_color if field == "fill" else properties.stroke_color
+    swatch = properties.fill_button if field == "fill" else properties.stroke_button
+    changes = []
+    properties.nodeChanged.connect(changes.append)
+    assert not edit.isReadOnly()
+    assert edit.maxLength() == 9
+    assert not swatch.icon().isNull()
+    edit.setText("#2468AC80")
+    edit.editingFinished.emit()
+    assert changes == [{field: "#2468AC80"}]
+    edit.setText("not a color")
+    edit.editingFinished.emit()
+    assert edit.text() == "#2468AC80"
+    assert changes == [{field: "#2468AC80"}]
+    if field == "fill":
+        properties.no_fill_button.click()
+        assert changes[-1] == {"fill": None}
+        before = swatch.icon().pixmap(24, 24).toImage()
+        properties.show_node(node.model_copy(update={"fill": None}))
+        assert not swatch.icon().isNull()
+        assert swatch.icon().pixmap(24, 24).toImage() != before
+
+
+def test_component_background_picker_and_hex_follow_html_color_control(make_editor, qtbot, monkeypatch):
+    window, _root, errors = make_editor()
+    background = window.properties
+    component_id = window.active_tab.component_id
+    original = window.session.documents[component_id].model.background
+    monkeypatch.setattr(QColorDialog, "getColor", staticmethod(lambda *a, **kw: QColor("#2468AC")))
+    background.background_button.click()
+    assert window.session.documents[component_id].model.background == "#2468AC"
+    assert background.background_edit.text() == "#2468AC"
+    assert not background.background_button.icon().isNull()
+    window.active_tab.undo_stack.undo()
+    assert background.background_edit.text() == original
+    background.background_edit.setText("#XYZXYZ")
+    background.background_edit.editingFinished.emit()
+    assert background.background_edit.text() == original
+    assert not errors
+
+
+def test_validate_project_toolbar_action_forces_excel_refresh(make_editor, monkeypatch):
+    window, _root, errors = make_editor(excel=True)
+    preview = window.controller.preview
+    validate_all = preview.validate_all
+    calls = []
+
+    def validate(snapshot, **kwargs):
+        calls.append(kwargs)
+        return validate_all(snapshot, **kwargs)
+
+    monkeypatch.setattr(preview, "validate_all", validate)
+    window.validate_all_action.trigger()
+    assert calls == [{"force_read": True, "manual": True}]
+    assert not errors
+
+
 def test_rotation_precision_does_not_round_model_when_field_is_untouched(qtbot):
     properties = ElementProperties()
     qtbot.addWidget(properties)
@@ -598,6 +673,7 @@ def test_rotation_precision_does_not_round_model_when_field_is_untouched(qtbot):
 
 
 def test_text_alignment_uses_existing_icons_with_accessible_names(qtbot):
+    apply_theme("light")
     properties = ElementProperties()
     qtbot.addWidget(properties)
     properties.show_node(text_node())
@@ -635,8 +711,7 @@ def test_html_swatch_palette_updates_alpha_color_and_undo(make_editor, qtbot, mo
 
 def matches_icon(icon, filename):
     size = QSize(22, 22)
-    expected = QPixmap(str(ROOT / "src/componentpress/app_assets" / filename)).scaled(
-        size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+    expected = load_icon(filename).pixmap(size, QIcon.Mode.Normal, QIcon.State.Off)
     return icon.pixmap(size, QIcon.Mode.Normal, QIcon.State.Off).toImage() == expected.toImage()
 
 

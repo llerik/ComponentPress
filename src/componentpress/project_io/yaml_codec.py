@@ -10,8 +10,8 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, ValidationError
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
-from ruamel.yaml.error import YAMLError
-from ruamel.yaml.tokens import AliasToken, AnchorToken, TagToken
+from ruamel.yaml.error import CommentMark, YAMLError
+from ruamel.yaml.tokens import AliasToken, AnchorToken, CommentToken, TagToken
 
 from componentpress.bindings.grammar import GrammarError, parse_references
 from componentpress.domain.component import ComponentDefinition
@@ -395,3 +395,40 @@ def update_tree(
                 rebuilt.append(raw)
         tree.clear()
         tree.extend(rebuilt)
+        if all(isinstance(item, CommentedMap) and "id" in item and "type" in item for item in tree):
+            def ends_with_blank(node: Any) -> bool:
+                if isinstance(node, CommentedMap) and node:
+                    key = next(reversed(node))
+                    attachment = node.ca.items.get(key)
+                    if attachment and len(attachment) > 2:
+                        token = attachment[2]
+                        tokens = token if isinstance(token, (list, tuple)) else (token,)
+                        if any("\n\n" in getattr(item, "value", "") for item in tokens if item is not None):
+                            return True
+                    return ends_with_blank(node[key])
+                if isinstance(node, CommentedSeq) and node:
+                    return ends_with_blank(node[-1])
+                return False
+
+            for index in range(len(tree) - 1):
+                if ends_with_blank(tree[index]):
+                    continue
+
+                def trailing_mapping(node: Any) -> CommentedMap:
+                    if isinstance(node, CommentedSeq) and node:
+                        return trailing_mapping(node[-1])
+                    if isinstance(node, CommentedMap) and node:
+                        value = node[next(reversed(node))]
+                        return trailing_mapping(value) if isinstance(value, (CommentedMap, CommentedSeq)) else node
+                    return tree[index]
+
+                mapping = trailing_mapping(tree[index])
+                key = next(reversed(mapping))
+                attachment = list(mapping.ca.items.get(key, (None, None, None, None)))
+                while len(attachment) < 4:
+                    attachment.append(None)
+                token = attachment[2]
+                tokens = token if isinstance(token, (list, tuple)) else (token,)
+                value = "".join(getattr(item, "value", "") for item in tokens if item is not None)
+                attachment[2] = CommentToken(value + "\n\n", CommentMark(0))
+                mapping.ca.items[key] = attachment

@@ -1,6 +1,6 @@
 """Qt item models for component and reverse-layer element trees."""
 
-from PySide6.QtCore import QTimer, QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QItemSelectionModel, QTimer, QSize, Qt, Signal
 from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import QStyle
 from PySide6.QtWidgets import QAbstractItemView, QStyleOptionViewItem, QStyledItemDelegate, QTreeView
@@ -9,7 +9,7 @@ from componentpress.i18n import tr
 from componentpress.application.sessions import ProjectSession
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
-from componentpress.app_assets import load_icon
+from componentpress.app_assets import set_themed_icon
 
 
 ID_ROLE = int(Qt.ItemDataRole.UserRole) + 1
@@ -21,6 +21,7 @@ class LayerTreeView(QTreeView):
 
     layerDropRequested = Signal(object, object, object, object)
     lockToggleRequested = Signal(str)
+    nodeContextMenuRequested = Signal(str, QPoint)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -45,7 +46,17 @@ class LayerTreeView(QTreeView):
 
     def mousePressEvent(self, event) -> None:
         index = self.indexAt(event.position().toPoint())
-        if index.isValid() and index.column() == 0:
+        if event.button() == Qt.MouseButton.RightButton:
+            if index.isValid():
+                if not self.selectionModel().isSelected(index):
+                    self.selectionModel().clearSelection()
+                    self.selectionModel().select(
+                        index, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+                    )
+                self.nodeContextMenuRequested.emit(str(index.data(ID_ROLE)), event.position().toPoint())
+            event.accept()
+            return
+        if event.button() == Qt.MouseButton.LeftButton and index.isValid() and index.column() == 0:
             if self.lock_icon_rect(index).contains(event.position().toPoint()):
                 self.lockToggleRequested.emit(str(index.data(ID_ROLE)))
                 event.accept()
@@ -121,7 +132,7 @@ def _node_row(node: Node, locked_ids: frozenset[str]) -> list[QStandardItem]:
         for child in reversed(node.children):
             name.appendRow(_node_row(child, locked_ids))
     locked = node.id in locked_ids
-    name.setIcon(load_icon("lock.png" if locked else "lock_open.png"))
+    set_themed_icon(name, "lock.png" if locked else "lock_open.png")
     name.setToolTip((tr("ui.item_locked_group") if isinstance(node, GroupNode) else tr("ui.item_locked")) if locked else tr("ui.item_lock_hint"))
     name.setData(locked, LOCKED_ROLE)
     return [name, kind]

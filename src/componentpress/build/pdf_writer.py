@@ -6,13 +6,13 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QMarginsF, QRectF, QSizeF
+from PySide6.QtCore import QLineF, QMarginsF, QRectF, QSizeF, Qt
 from PySide6.QtGui import QColor, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter, QPen
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.i18n import tr
 from componentpress.execution.cancellation import CancellationToken
-from .imposition import ImpositionPlan
+from .imposition import ImpositionPlan, cut_grid_lines
 from .input_snapshot import BuildInputSnapshot
 
 
@@ -40,6 +40,7 @@ def write_print_pdf(
         scale = snapshot.print_settings.dpi / 25.4
         pen = QPen(QColor("#000000"))
         pen.setWidthF(snapshot.print_settings.cut_line_width_mm * scale)
+        pen.setStyle(Qt.PenStyle.DashLine)
         painter.setRenderHint(QPainter.RenderHint.LosslessImageRendering, True)
         try:
             for page_number, page in enumerate(plan.pages):
@@ -60,12 +61,15 @@ def write_print_pdf(
                         placement.height_mm * scale,
                     )
                     painter.drawImage(rect, image)
-                    if snapshot.print_settings.cut_lines:
-                        painter.save()
-                        painter.setPen(pen)
-                        painter.setBrush(QColor(0, 0, 0, 0))
-                        painter.drawRect(rect)
-                        painter.restore()
+                if snapshot.print_settings.cut_lines and page.placements:
+                    vertical, horizontal = cut_grid_lines(page, snapshot.print_settings.gap_mm)
+                    painter.save()
+                    painter.setPen(pen)
+                    for x in vertical:
+                        painter.drawLine(QLineF(x * scale, 0, x * scale, plan.paper_height_mm * scale))
+                    for y in horizontal:
+                        painter.drawLine(QLineF(0, y * scale, plan.paper_width_mm * scale, y * scale))
+                    painter.restore()
                 if progress is not None:
                     progress(page_number + 1, len(plan.pages), tr("ui.pdf_page_progress", page=page_number + 1, total=len(plan.pages)))
         finally:

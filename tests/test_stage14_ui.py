@@ -4,7 +4,7 @@ from pathlib import Path
 import shutil
 import pytest
 
-from PySide6.QtCore import QSettings, QSize, Qt
+from PySide6.QtCore import QPoint, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox, QTreeView
@@ -41,6 +41,85 @@ def make_window(tmp_path: Path, qtbot):
 
 def use_temp_ui_settings(window: MainWindow, tmp_path: Path) -> None:
     window.ui_state = UiState(QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat))
+
+
+@pytest.mark.parametrize(("locale", "about_title"), (("ru", "О программе"), ("en", "About")))
+def test_startup_menus_receive_clicks_without_project_and_after_restore(
+    tmp_path: Path, qtbot, monkeypatch, locale: str, about_title: str
+) -> None:
+    from componentpress.i18n import language, set_language
+
+    previous_language = language()
+    settings_path = tmp_path / "settings.ini"
+    monkeypatch.setattr(
+        main_window_module,
+        "UiState",
+        lambda: UiState(QSettings(str(settings_path), QSettings.Format.IniFormat)),
+    )
+    set_language(locale)
+    try:
+        window = MainWindow(ProjectController(project_service()))
+        qtbot.addWidget(window)
+        window.show()
+        qtbot.waitUntil(window.menuBar().isVisible)
+        bar = window.menuBar()
+
+        for menu in (window.file_menu, window.about_menu):
+            rect = bar.actionGeometry(menu.menuAction())
+            for x in (rect.left() + 2, rect.center().x(), rect.right() - 2):
+                point = bar.mapToGlobal(QPoint(x, rect.center().y()))
+                receiver = QApplication.widgetAt(point)
+                assert receiver is bar
+                QTest.mouseClick(receiver, Qt.MouseButton.LeftButton, pos=receiver.mapFromGlobal(point))
+                qtbot.waitUntil(menu.isVisible)
+                menu.hide()
+                QApplication.processEvents()
+
+        assert window.new_action.isEnabled()
+        assert window.open_action.isEnabled()
+        assert not window.project_settings_action.isEnabled()
+
+        about_bar_rect = bar.actionGeometry(window.about_menu.menuAction())
+        about_bar_point = bar.mapToGlobal(about_bar_rect.center())
+        QTest.mouseClick(bar, Qt.MouseButton.LeftButton, pos=bar.mapFromGlobal(about_bar_point))
+        qtbot.waitUntil(window.about_menu.isVisible)
+        about_rect = window.about_menu.actionGeometry(window.about_action)
+        about_point = window.about_menu.mapToGlobal(about_rect.center())
+        about_receiver = QApplication.widgetAt(about_point)
+        assert about_receiver is window.about_menu
+        about_opened = []
+
+        def close_about() -> None:
+            dialog = QApplication.activeModalWidget()
+            about_opened.append(dialog is not None and dialog.objectName() == "aboutDialog")
+            if dialog is not None:
+                dialog.reject()
+
+        QTimer.singleShot(0, close_about)
+        QTest.mouseClick(
+            about_receiver,
+            Qt.MouseButton.LeftButton,
+            pos=about_receiver.mapFromGlobal(about_point),
+        )
+        assert about_opened == [True]
+        assert window.about_menu.title() == about_title
+
+        root = tmp_path / "game"
+        shutil.copytree(DEMO, root)
+        service = project_service()
+        window.load_session(service.open_session(root))
+        assert window.left_panel.isHidden()
+        assert window.icon_toolbar.isVisible()
+        assert window.project_settings_action.isEnabled()
+        window.ui_state.save(window)
+
+        restored = MainWindow(ProjectController(project_service()))
+        qtbot.addWidget(restored)
+        assert restored.left_panel.isHidden()
+        restored.load_session(project_service().open_session(root))
+        assert restored.left_panel.isHidden()
+    finally:
+        set_language(previous_language)
 
 
 def test_copy_mode_switch_changes_label_color_and_keyboard_state(qtbot) -> None:
@@ -108,9 +187,21 @@ def test_build_request_uses_copy_switch_mode(tmp_path: Path, qtbot, monkeypatch,
     assert isinstance(requests[0], BuildRequest)
     assert requests[0].mode == mode
     assert window._build_progress is not None
-    window._build_progress.close()
-    window._build_progress = None
-    window._active_build_job = None
+    assert not window.build_active_widget_action.isVisible()
+    assert not window.build_all_widget_action.isVisible()
+    assert window.cancel_build_widget_action.isVisible()
+    def show_build_error(*_args, **_kwargs):
+        assert window.build_active_widget_action.isVisible()
+        assert window.build_all_widget_action.isVisible()
+        assert not window.cancel_build_widget_action.isVisible()
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(show_build_error))
+    from types import SimpleNamespace
+    window._on_build_finished(SimpleNamespace(status="cancelled", diagnostics=()))
+    assert window.build_active_widget_action.isVisible()
+    assert window.build_all_widget_action.isVisible()
+    assert not window.cancel_build_widget_action.isVisible()
 
 
 @pytest.mark.parametrize("mode", ("prod", "test"))
@@ -615,7 +706,7 @@ def test_compact_shell_has_icon_tools_and_project_docks(tmp_path: Path, qtbot) -
     assert window.right_tabs.tabText(0) == "Компоненты"
     assert window.right_tabs.tabText(1) == "Элементы"
     assert window.events_dock.isVisible()
-    assert len(window.icon_toolbar.actions()) == 16
+    assert len(window.icon_toolbar.actions()) == 14
     assert sum(action.isSeparator() for action in window.icon_toolbar.actions()) == 2
     assert window.project_settings_action in window.quick_toolbar.actions()
     assert window.project_settings_action not in window.icon_toolbar.actions()
@@ -628,39 +719,76 @@ def test_compact_shell_has_icon_tools_and_project_docks(tmp_path: Path, qtbot) -
     assert window.about_menu.title() == "О программе"
 
 
-def test_command_and_instance_buttons_use_the_assigned_png_icons(tmp_path: Path, qtbot) -> None:
+def test_command_and_instance_buttons_use_the_assigned_png_icons(tmp_path: Path, qtbot, monkeypatch) -> None:
+    theme_settings = QSettings(str(tmp_path / "theme.ini"), QSettings.Format.IniFormat)
+    theme_settings.setValue("theme", "light")
+    monkeypatch.setattr(main_window_module, "theme_settings", lambda: theme_settings)
     _root, window, _service = make_window(tmp_path, qtbot)
     assets = Path(__file__).resolve().parents[1] / "src" / "componentpress" / "app_assets"
 
     def matches_asset(icon: QIcon, filename: str) -> bool:
         size = QSize(22, 22)
-        expected = QPixmap(str(assets / filename)).scaled(
-            size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
-        )
+        expected = QIcon(QPixmap(str(assets / filename))).pixmap(size, QIcon.Mode.Normal, QIcon.State.Off)
         actual = icon.pixmap(size, QIcon.Mode.Normal, QIcon.State.Off)
         return not actual.isNull() and actual.toImage() == expected.toImage()
 
     action_icons = {
         window.project_settings_action: "settings.png", window.add_component_action: "add.png",
         window.save_action: "save.png", window.undo_action: "undo.png", window.redo_action: "redo.png",
-        window.delete_action: "remove.png", window.actual_size_action: "real_size.png",
+        window.delete_action: "remove.png",
     }
     for action, filename in action_icons.items():
         assert matches_asset(action.icon(), filename), (action.text(), filename)
         assert action.toolTip() == action.text()
         assert action.property("accessibleName") == action.text()
 
+    assert window.actual_size_action not in window.icon_toolbar.actions()
+    assert window.validate_active_action not in window.quick_toolbar.actions()
+    assert window.validate_all_action.text() == "Обновить данные и проверить проект"
+    assert matches_asset(window.validate_all_action.icon(), "validate.png")
+    assert matches_asset(window.build_active_action.icon(), "build.png")
+    assert matches_asset(window.build_all_action.icon(), "build_all.png")
+    assert matches_asset(window.cancel_build_action.icon(), "stop.png")
+    assert not window.cancel_build_widget_action.isVisible()
+    assert not window.delete_widget_action.isVisible()
+    window.open_component("forest-card")
+    window._set_selection(("heading",), source="test")
+    assert window.delete_widget_action.isVisible()
+    window._set_selection((), source="test")
+    assert not window.delete_widget_action.isVisible()
+    window.active_tab.canvas.zoom_by(1.25)
+    assert window.actual_size_action in window.actions()
+    assert window.actual_size_action.shortcut().toString() == "Ctrl+1"
+    window.actual_size_action.trigger()
+    assert window.active_tab.canvas.zoom_percent == 100
+    window._active_build_job = "job"
+    window._update_actions()
+    assert not window.build_active_widget_action.isVisible()
+    assert not window.build_all_widget_action.isVisible()
+    assert window.cancel_build_widget_action.isVisible()
+    window._active_build_job = None
+    window._version_task = object()
+    window._update_actions()
+    assert window.build_active_widget_action.isVisible()
+    assert window.build_all_widget_action.isVisible()
+    assert not window.cancel_build_widget_action.isVisible()
+    assert not window.cancel_build_action.isEnabled()
+    window._version_task = None
+    window._update_actions()
+
     widget_icons = {
         window.select_tool: "cursor.png", window.image_tool: "image.png", window.html_tool: "text.png",
         window.conditional_group_tool: "condition.png", window.rectangle_tool: "rectangle.png",
         window.ellipse_tool: "ellipse.png", window.line_tool: "line.png", window.layer_up: "up.png",
         window.layer_down: "down.png", window.group_button: "group.png", window.ungroup_button: "ungroup.png",
-        window.reparent_button: "move.png", window.clear_events: "delete.png",
+        window.clear_events: "delete.png",
         window.add_component_button: "add.png",
     }
     for button, filename in widget_icons.items():
         assert matches_asset(button.icon(), filename), (button.accessibleName(), filename)
     assert window.clear_events.text() == "Очистить"
+    assert window.group_button.accessibleName() == "Сгруппировать"
+    assert not hasattr(window, "reparent_button")
     assert window.add_component_button.text() == ""
 
     tab = window.open_component("forest-card")
@@ -682,6 +810,7 @@ def test_command_and_instance_buttons_use_the_assigned_png_icons(tmp_path: Path,
     assert all(button.isHidden() for button in tab.instance_controls)
     tab.set_mode("layout")
     assert all(not button.isHidden() for button in tab.instance_controls)
+    assert tab.instance_position.text() == "Экземпляр 1 из 1"
     assert matches_asset(tab.layout_mode.icon(), "brick.png")
     assert matches_asset(tab.text_mode.icon(), "code.png")
 
@@ -690,12 +819,48 @@ def test_command_and_instance_buttons_use_the_assigned_png_icons(tmp_path: Path,
     assert settings_action.icon().isNull() is False
 
 
+def test_delete_selected_requires_confirmation_and_is_one_undo(tmp_path: Path, qtbot) -> None:
+    from componentpress.domain.tree import locations
+
+    _root, window, _service = make_window(tmp_path, qtbot)
+    window.open_component("forest-card")
+    document = window.session.documents["forest-card"]
+    tab = window.active_tab
+    window._set_selection(("heading",), source="test")
+    before = document.model
+    history_before = tab.undo_stack.count()
+
+    def cancel_delete() -> None:
+        dialog = QApplication.activeModalWidget()
+        assert dialog is not None
+        assert dialog.windowTitle() == "Подтвердите удаление"
+        assert "heading" not in dialog.text()
+        assert any(button.text() == "Удалить" for button in dialog.buttons())
+        next(button for button in dialog.buttons() if button.text() == "Отмена").click()
+
+    QTimer.singleShot(0, cancel_delete)
+    assert not window.delete_selected()
+    assert document.model == before
+    assert tab.undo_stack.count() == history_before
+    assert "heading" in locations(document.model)
+
+    QTimer.singleShot(0, lambda: next(
+        button for button in QApplication.activeModalWidget().buttons() if button.text() == "Удалить"
+    ).click())
+    assert window.delete_selected()
+    assert "heading" not in locations(document.model)
+    assert tab.undo_stack.count() == history_before + 1
+    window.undo_group.undo()
+    assert "heading" in locations(document.model)
+
+
 def test_component_creation_and_deletion_round_trip_preserves_draft_and_tab(tmp_path: Path, qtbot, monkeypatch) -> None:
     root, window, service = make_window(tmp_path, qtbot)
     errors = []
     monkeypatch.setattr(window, "_show_error", errors.append)
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Yes))
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Discard))
+    monkeypatch.setattr(window, "_ask_unsaved_choice", lambda *_args: QMessageBox.StandardButton.Discard)
 
     assert window.add_component("third", "Третий компонент")
     tab = window.active_tab
@@ -741,6 +906,8 @@ def test_ui_layout_preferences_are_local_and_restored(tmp_path: Path, qtbot) -> 
     settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
     state = UiState(settings)
     window.right_tabs.setCurrentIndex(1)
+    window.right_splitter.setSizes([160, 440])
+    saved_sizes = window.right_splitter.sizes()
     state.save(window)
     settings.sync()
 
@@ -748,6 +915,13 @@ def test_ui_layout_preferences_are_local_and_restored(tmp_path: Path, qtbot) -> 
     other.ui_state = state
     other.ui_state.restore(other)
     assert other.right_tabs.currentIndex() == 1
+    other.load_session(project_service().open_session(root))
+    other.show()
+    qtbot.waitUntil(lambda: sum(other.right_splitter.sizes()) > 0)
+    restored_sizes = other.right_splitter.sizes()
+    assert restored_sizes[0] / sum(restored_sizes) == pytest.approx(
+        saved_sizes[0] / sum(saved_sizes), abs=0.03
+    )
     assert (root / "project.yaml").exists()
     assert ".componentpress" not in (root / "project.yaml").read_text(encoding="utf-8")
 

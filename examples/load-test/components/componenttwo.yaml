@@ -1,0 +1,76 @@
+schema_version: 6
+id: componenttwo
+name: "ComponentTwo"
+size_mm:
+  width: 63.0
+  height: 88.0
+background: "#FFFFFF"
+data:
+  sheet: "ComponentTwo"
+elements:
+- id: illustration-a
+  name: Image 1
+  type: image
+  x_mm: 5.0
+  y_mm: 5.0
+  width_mm: 25.0
+  height_mm: 22.0
+  source: { mode: column, column: "Image 1" }
+  fit: cover
+  locked: false
+  transform: { m11: 1.0, m12: 0.0, m21: 0.0, m22: 1.0 }
+  optional: false
+- id: illustration-b
+  name: Image 2
+  type: image
+  x_mm: 33.0
+  y_mm: 5.0
+  width_mm: 25.0
+  height_mm: 22.0
+  source: { mode: column, column: "Image 2" }
+  fit: cover
+  locked: false
+  transform: { m11: 1.0, m12: 0.0, m21: 0.0, m22: 1.0 }
+  optional: false
+- id: text-title
+  name: Title
+  type: html
+  x_mm: 5.0
+  y_mm: 31.0
+  width_mm: 53.0
+  height_mm: 14.0
+  font_family: Arial
+  font_size_pt: 7.0
+  color: "#426A43"
+  content: { mode: column, column: Title }
+  locked: false
+  text_align: center
+  transform: { m11: 1.0, m12: 0.0, m21: 0.0, m22: 1.0 }
+- id: text-subtitle
+  name: Subtitle
+  type: html
+  x_mm: 5.0
+  y_mm: 48.0
+  width_mm: 53.0
+  height_mm: 13.0
+  font_family: Arial
+  font_size_pt: 6.0
+  color: "#C96555"
+  content: { mode: column, column: Subtitle }
+  locked: false
+  text_align: center
+  transform: { m11: 1.0, m12: 0.0, m21: 0.0, m22: 1.0 }
+- id: text-body
+  name: Body
+  type: html
+  x_mm: 6.0
+  y_mm: 64.0
+  width_mm: 51.0
+  height_mm: 20.0
+  font_family: Arial
+  font_size_pt: 5.5
+  color: "#222222"
+  content: { mode: column, column: Body }
+  locked: false
+  text_align: left
+  transform: { m11: 1.0, m12: 0.0, m21: 0.0, m22: 1.0 }

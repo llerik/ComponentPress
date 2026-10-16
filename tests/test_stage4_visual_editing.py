@@ -3,14 +3,18 @@
 from pathlib import Path
 import shutil
 
-from PySide6.QtCore import QMimeData, QPointF, Qt
+from PySide6.QtCore import QMimeData, QPointF, QTimer, Qt
 from PySide6.QtGui import QDropEvent, QImage
-from PySide6.QtWidgets import QAbstractItemView, QMessageBox
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QAbstractItemView, QApplication, QMessageBox
 
 from componentpress.bootstrap import project_service
 from componentpress.domain.component import ComponentDefinition, SizeMM
-from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode
+from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, ShapeNode
+from componentpress.i18n import language, set_language
 from componentpress.domain.tree import (
+    add_node,
+    duplicate_nodes,
     drop_nodes,
     group_nodes,
     locations,
@@ -18,6 +22,7 @@ from componentpress.domain.tree import (
     place_nodes,
     reparent_nodes,
     ungroup_node,
+    update_node,
 )
 from componentpress.editor.controllers import ProjectController
 from componentpress.editor.main_window import MainWindow
@@ -71,6 +76,41 @@ def test_layer_drop_changes_storage_order_used_by_painter() -> None:
     component = simple_component()
     changed = place_nodes(component, ("back",), "other")
     assert [node.id for node in changed.elements] == ["front", "back", "other"]
+
+
+def test_duplicate_nodes_copy_subtrees_to_front_with_fresh_ids_and_positions() -> None:
+    component = simple_component()
+    grouped = group_nodes(component, ("back", "front"), "pair", "Пара")
+    generated: set[str] = set()
+
+    def new_id(node, _name):
+        value = f"copy-{node.id}"
+        assert value not in generated
+        generated.add(value)
+        return value
+
+    duplicate = duplicate_nodes(grouped, ("other", "pair"), new_id, lambda _node: None)
+    index = locations(duplicate)
+    assert [node.id for node in duplicate.elements] == ["pair", "other", "copy-pair", "copy-other"]
+    assert [node.id for node in duplicate.elements[-2:]] == ["copy-pair", "copy-other"]
+    assert index["copy-pair"].parent_id is None
+    assert index["copy-back"].parent_id == "copy-pair"
+    assert index["copy-front"].parent_id == "copy-pair"
+    assert (index["copy-back"].global_x, index["copy-back"].global_y) == (5, 6)
+    assert (index["copy-front"].global_x, index["copy-front"].global_y) == (10, 12)
+    assert duplicate.elements[-2].name == "Пара"
+
+
+def test_duplicate_nodes_reject_locked_selection() -> None:
+    component = simple_component().model_copy(update={
+        "elements": (simple_component().elements[0].model_copy(update={"locked": True}), *simple_component().elements[1:]),
+    })
+    try:
+        duplicate_nodes(component, ("back",), lambda *_: "copy", lambda _node: None)
+    except ValueError as error:
+        assert "заблокирован" in str(error)
+    else:
+        raise AssertionError("locked nodes must not be duplicated")
 
 
 def test_drop_into_group_preserves_world_position_and_sibling_drop_sets_order() -> None:
@@ -129,11 +169,32 @@ elements:
     assert "# comment for front" in saved
 
 
-def editor(tmp_path: Path, qtbot) -> tuple[MainWindow, Path]:
+def test_added_nodes_get_yaml_blank_lines_without_losing_comments_or_html() -> None:
+    path = EXAMPLE / "components" / "forest-card.yaml"
+    text = path.read_text(encoding="utf-8")
+    model, tree = parse_component(text, path)
+    added = ShapeNode(
+        id="new-rectangle", name="Прямоугольник 1", type="rectangle",
+        x_mm=1, y_mm=1, width_mm=8, height_mm=5,
+    )
+    updated = add_node(model, added)
+    update_tree(tree, updated)
+    saved = dump_yaml(tree)
+    assert "\n\n- id: new-rectangle" in saved
+    assert "# Статический макет с вложенной группой" in saved
+    assert "{{ vars[\"edition\"] }}" in saved
+
+    reparsed, same_tree = parse_component(saved, path)
+    update_tree(same_tree, reparsed)
+    assert dump_yaml(same_tree) == saved
+
+
+def editor(tmp_path: Path, qtbot, monkeypatch) -> tuple[MainWindow, Path]:
     root = tmp_path / "Визуальный проект"
     shutil.copytree(EXAMPLE, root)
     service = project_service()
     window = MainWindow(ProjectController(service))
+    monkeypatch.setattr(window, "_ask_unsaved_choice", lambda *_args: QMessageBox.StandardButton.Discard)
     window.load_session(service.open_session(root))
     qtbot.addWidget(window)
     window.show()
@@ -145,7 +206,7 @@ def editor(tmp_path: Path, qtbot) -> tuple[MainWindow, Path]:
 
 def test_gui_add_group_undo_redo_save_and_export(tmp_path: Path, qtbot, monkeypatch) -> None:
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Discard))
-    window, root = editor(tmp_path, qtbot)
+    window, root = editor(tmp_path, qtbot, monkeypatch)
     assert window.add_html("<p>Новый текст</p>", 2, 3, node_id="new-title")
     assert window.add_image("assets/images/animals/enemy/leaf.png", 8, 9, node_id="new-art")
     assert window.session is not None and window.active_tab is not None
@@ -188,9 +249,84 @@ def test_gui_add_group_undo_redo_save_and_export(tmp_path: Path, qtbot, monkeypa
     assert image.size().width() == 238
 
 
+def test_default_names_reuse_freed_numbers_and_renumber_duplicate_subtrees(tmp_path: Path, qtbot, monkeypatch) -> None:
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args: warnings.append(args)))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Discard))
+    previous = language()
+    set_language("ru")
+    try:
+        window, _root = editor(tmp_path, qtbot, monkeypatch)
+        window._draw_element("rectangle", 1, 1, 8, 6)
+        window._draw_element("rectangle", 2, 2, 9, 7)
+        assert not warnings, warnings
+        model = window.session.documents["forest-card"].model
+        rectangles = [node for node in model.elements if node.type == "rectangle"]
+        assert [node.name for node in rectangles] == ["Прямоугольник 1", "Прямоугольник 2"]
+        window._apply_tree("Переименовать", update_node, rectangles[1].id, name="Фигура")
+        window._draw_element("rectangle", 3, 3, 10, 8)
+        model = window.session.documents["forest-card"].model
+        rectangles = [node for node in model.elements if node.type == "rectangle"]
+        assert [node.name for node in rectangles] == ["Прямоугольник 1", "Фигура", "Прямоугольник 2"]
+
+        window._set_selection((rectangles[0].id, rectangles[2].id), source="tree")
+        assert window.duplicate_selected()
+        model = window.session.documents["forest-card"].model
+        clones = [node for node in model.elements if node.id not in {item.id for item in rectangles} and node.type == "rectangle"]
+        assert [node.name for node in clones] == ["Прямоугольник 3", "Прямоугольник 4"]
+        clone_ids = tuple(node.id for node in clones)
+        window.undo_group.undo()
+        window.undo_group.redo()
+        assert tuple(node.id for node in window.session.documents["forest-card"].model.elements if node.id in clone_ids) == clone_ids
+        assert [locations(window.session.documents["forest-card"].model)[node_id].node.name for node_id in clone_ids] == ["Прямоугольник 3", "Прямоугольник 4"]
+
+        window._set_selection((rectangles[0].id, rectangles[1].id), source="tree")
+        assert window.group_selected("default-group", "Группа 1")
+        window._set_selection(("default-group",), source="tree")
+        assert window.duplicate_selected()
+        copied_group = locations(window.session.documents["forest-card"].model)[window._selected_ids()[0]].node
+        assert copied_group.name == "Группа 2"
+        assert [child.name for child in copied_group.children] == ["Прямоугольник 5", "Фигура"]
+    finally:
+        set_language(previous)
+
+
+def test_right_click_on_selected_layer_keeps_multiselection_and_shows_actions(tmp_path: Path, qtbot, monkeypatch) -> None:
+    window, _root = editor(tmp_path, qtbot, monkeypatch)
+    captured = []
+    def close_menu():
+        menu = QApplication.activePopupWidget()
+        if menu is not None:
+            captured.append(([action.text() for action in menu.actions()], window._selected_ids()))
+            menu.close()
+
+    window._set_selection(("heading", "caption"), source="tree")
+    index = window._index_for_id("heading")
+    point = window.element_tree.visualRect(index).center()
+    QTimer.singleShot(0, close_menu)
+    QTest.mouseClick(window.element_tree.viewport(), Qt.MouseButton.RightButton, pos=point)
+    actions, selected = captured[-1]
+    assert selected == ("heading", "caption")
+    assert actions == ["Дублировать", "Удалить", "Сгруппировать"]
+
+    canvas = window.active_tab.canvas
+    window._set_selection(("heading", "caption"), source="tree")
+    overlay = canvas._overlays["heading"]
+    point = canvas.mapFromScene(overlay.sceneBoundingRect().center())
+    QTimer.singleShot(0, close_menu)
+    QTest.mouseClick(canvas.viewport(), Qt.MouseButton.RightButton, pos=point)
+    assert captured[-1][1] == ("heading", "caption")
+
+    group_index = window._index_for_id("text-group")
+    group_point = window.element_tree.visualRect(group_index).center()
+    QTimer.singleShot(0, close_menu)
+    QTest.mouseClick(window.element_tree.viewport(), Qt.MouseButton.RightButton, pos=group_point)
+    assert captured[-1] == (["Дублировать", "Удалить", "Разгруппировать"], ("text-group",))
+
+
 def test_tree_and_canvas_selection_stay_synchronised(tmp_path: Path, qtbot, monkeypatch) -> None:
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Discard))
-    window, _root = editor(tmp_path, qtbot)
+    window, _root = editor(tmp_path, qtbot, monkeypatch)
     heading = window._index_for_id("heading")
     window.element_tree.selectionModel().select(
         heading,
@@ -208,7 +344,7 @@ def test_tree_and_canvas_selection_stay_synchronised(tmp_path: Path, qtbot, monk
 
 def test_layer_tree_uses_non_destructive_drop_mode(tmp_path: Path, qtbot, monkeypatch) -> None:
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Discard))
-    window, _root = editor(tmp_path, qtbot)
+    window, _root = editor(tmp_path, qtbot, monkeypatch)
     assert window.element_tree.dragDropMode() == QAbstractItemView.DragDropMode.DragDrop
     assert window.element_tree.defaultDropAction() == Qt.DropAction.CopyAction
     before = locations(window.session.documents["forest-card"].model)
@@ -252,7 +388,7 @@ def test_layer_tree_uses_non_destructive_drop_mode(tmp_path: Path, qtbot, monkey
 
 def test_deferred_layer_drop_is_discarded_after_switching_models(tmp_path: Path, qtbot, monkeypatch) -> None:
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Discard))
-    window, _root = editor(tmp_path, qtbot)
+    window, _root = editor(tmp_path, qtbot, monkeypatch)
     tab = window.active_tab
     assert tab is not None
     original = window.session.documents[tab.component_id].model
@@ -291,7 +427,7 @@ def test_deferred_layer_drop_is_discarded_after_switching_models(tmp_path: Path,
 
 def test_drop_outside_group_moves_element_to_root(tmp_path: Path, qtbot, monkeypatch) -> None:
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Discard))
-    window, _root = editor(tmp_path, qtbot)
+    window, _root = editor(tmp_path, qtbot, monkeypatch)
     tab = window.active_tab
     assert tab is not None
     component = window.session.documents[tab.component_id].model
@@ -319,7 +455,7 @@ def test_drop_outside_group_moves_element_to_root(tmp_path: Path, qtbot, monkeyp
 
 def test_one_shot_tool_is_cancelled_by_escape_and_tab_switch(tmp_path: Path, qtbot, monkeypatch) -> None:
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Discard))
-    window, _root = editor(tmp_path, qtbot)
+    window, _root = editor(tmp_path, qtbot, monkeypatch)
     first = window.active_tab
     assert first is not None
     window._begin_tool("image")

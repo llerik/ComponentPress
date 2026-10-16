@@ -113,6 +113,32 @@ def test_text_and_layout_are_synchronized_with_one_undo_step(tmp_path: Path, qtb
     window._clear_tabs(discard=True)
 
 
+def test_first_text_tab_loads_yaml_and_theme_events_do_not_create_drafts(tmp_path: Path, qtbot) -> None:
+    from componentpress.editor.theme import apply_theme
+
+    root = copy_example(tmp_path)
+    window = make_window(root, qtbot)
+    document = window.session.documents["forest-card"]
+    tab = window.active_tab
+    assert tab is not None
+    committed = document.committed.text
+    revision = document.revision
+
+    window._request_mode(tab, "text")
+    assert tab.text_editor.toPlainText() == committed
+    assert document.draft_text is None
+    for theme in ("dark", "light"):
+        apply_theme(theme)
+        qtbot.wait(0)
+        assert tab.text_editor.toPlainText() == committed
+        assert document.current_text == committed
+        assert document.draft_text is None
+        assert document.revision == revision
+        assert not document.draft_diagnostics
+
+    window._clear_tabs(discard=True)
+
+
 def test_invalid_draft_keeps_last_model_and_blocks_save(tmp_path: Path, qtbot) -> None:
     root = copy_example(tmp_path)
     window = make_window(root, qtbot)
