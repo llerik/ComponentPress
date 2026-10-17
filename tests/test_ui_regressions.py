@@ -314,6 +314,125 @@ def make_editor(tmp_path, qtbot, monkeypatch):
     return make
 
 
+def test_empty_preview_invalidates_late_worker_result(make_editor, monkeypatch, qtbot):
+    window, _root, _errors = make_editor(excel=True)
+    tab = window.open_component("forest-card")
+    qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation)
+    old_generation = tab.preview_generation
+    monkeypatch.setattr(window.controller.preview, "cached_data", lambda *_args, **_kwargs: None)
+    assert not window._refresh_preview(tab)
+    assert tab.preview_generation > old_generation
+    assert tab.preview_arguments is None
+    assert not tab.preview_timer.isActive()
+    assert tab.canvas._pixmap_item is None
+    assert not tab.apply_preview(QImage(1, 1, QImage.Format.Format_ARGB32), generation=old_generation)
+
+
+def test_build_reservation_rejects_preview_from_dialog_event_loop(make_editor, monkeypatch):
+    from types import SimpleNamespace
+    from PySide6.QtWidgets import QDialog
+    from componentpress.editor import main_window as main_window_module
+
+    window, _root, _errors = make_editor()
+    tab = window.active_tab
+    starts = []
+    monkeypatch.setattr(window.controller, "start_build", lambda request, **_kwargs: starts.append(request) or "test-job")
+
+    class Dialog:
+        DialogCode = QDialog.DialogCode
+
+        def __init__(self, *_args, **_kwargs):
+            self.workers = SimpleNamespace(value=lambda: 2)
+
+        def exec(self):
+            tab.previewRequested.emit()
+            return QDialog.DialogCode.Accepted
+
+        def print_settings(self):
+            return window.session.snapshot.model.print
+
+    monkeypatch.setattr(main_window_module, "BuildOptionsDialog", Dialog)
+    window._preview_coordinator.active = object()
+    window._start_build(False)
+    assert window._build_pending_active_only is False and not starts
+    window._preview_coordinator.active = None
+    window._continue_build_after_preview()
+    assert len(starts) == 1
+    assert window._preview_coordinator.active is None
+    assert window._active_build_job == "test-job"
+    window._active_build_job = None
+    window._build_progress.close()
+    window._build_progress.deleteLater()
+    window._build_progress = None
+
+
+def test_build_dialog_cancel_releases_reservation_and_resumes_preview(make_editor, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+    from componentpress.editor import main_window as main_window_module
+
+    window, _root, _errors = make_editor()
+
+    class Dialog:
+        DialogCode = QDialog.DialogCode
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def exec(self):
+            return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(main_window_module, "BuildOptionsDialog", Dialog)
+    window._start_build(False)
+    assert window._build_pending_active_only is None
+    assert window.active_tab.preview_timer.isActive()
+
+
+def test_build_reservation_rejects_project_switch_methods(make_editor, monkeypatch, tmp_path):
+    window, _root, _errors = make_editor()
+    session = window.session
+    window._build_pending_active_only = False
+    monkeypatch.setattr(window.controller, "open", lambda *_args: pytest.fail("project opened during build reservation"))
+    monkeypatch.setattr(window.controller, "create", lambda *_args: pytest.fail("project created during build reservation"))
+    assert not window.open_path(tmp_path)
+    assert not window.create_path(tmp_path, "blocked")
+    assert window.session is session
+    assert window._build_pending_active_only is False
+
+
+def test_cancelled_close_releases_build_reservation_and_resumes_preview(make_editor, monkeypatch):
+    window, _root, _errors = make_editor()
+    tab = window.active_tab
+    resumed = []
+    monkeypatch.setattr(window, "_confirm_all_dirty", lambda: False)
+    monkeypatch.setattr(window, "_refresh_preview", lambda current: resumed.append(current))
+    tab.preview_deferred = True
+    window._build_pending_active_only = False
+    assert not window.close()
+    assert window._build_pending_active_only is None
+    assert resumed == [tab]
+
+
+def test_build_progress_ignores_late_values_from_older_phase(make_editor):
+    from types import SimpleNamespace
+    from componentpress.application.contracts import BuildProgress
+
+    window, _root, _errors = make_editor()
+    accepted = []
+    window._active_build_job = "progress-test"
+    window._build_progress = SimpleNamespace(
+        setRange=lambda *_args: None,
+        setValue=accepted.append,
+        setLabelText=lambda *_args: None,
+    )
+    window._on_build_progress(BuildProgress("progress-test", "rendering", 2, 4))
+    window._on_build_progress(BuildProgress("progress-test", "rendering", 1, 4))
+    window._on_build_progress(BuildProgress("progress-test", "assembling_pdf", 1, 3))
+    window._on_build_progress(BuildProgress("progress-test", "rendering", 4, 4))
+    assert accepted == [2, 1]
+    window._active_build_job = None
+    window._build_progress = None
+
+
 def selected_node(window):
     model = window.session.documents[window.active_tab.component_id].model
     return locations(model)[window._selected_ids()[0]].node

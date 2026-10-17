@@ -30,7 +30,7 @@ class _RenderQueue:
 
     def run(self):
         initial = [self._reserve() for _ in range(min(self.snapshot.max_render_workers, len(self.snapshot.instances)))]
-        if not initial:
+        if self.active == 0:
             self.finished.set()
         for instance in initial:
             self._start(instance)

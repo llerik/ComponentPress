@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import threading
 import time
 import zipfile
 
@@ -54,6 +55,105 @@ def test_rotates_and_reports_without_exception_or_project_text(monkeypatch, tmp_
     assert 1 <= len(list(directory.glob("componentpress-*.log*"))) <= 4
     assert all(path.stat().st_size <= 700 for path in directory.glob("componentpress-*.log*"))
     diagnostics.shutdown()
+
+
+def test_report_snapshots_rotating_log_while_writer_rolls_over(monkeypatch, tmp_path: Path) -> None:
+    directory = isolated_log_dir(monkeypatch, tmp_path)
+    active = diagnostics.initialize()
+    assert active is not None
+    diagnostics.log_event("report.snapshot", operation="open")
+    handler = diagnostics._LOGGER.handlers[0]
+    handler.maxBytes = 1
+    entered_open, continue_open = threading.Event(), threading.Event()
+    reporter_requested_lock = threading.Event()
+    real_open = handler._open
+    real_acquire = handler.acquire
+
+    def pause_after_rollover():
+        entered_open.set()
+        assert continue_open.wait(2)
+        return real_open()
+
+    def track_report_lock():
+        if threading.current_thread().name == "support-report":
+            reporter_requested_lock.set()
+        return real_acquire()
+
+    handler._open = pause_after_rollover
+    handler.acquire = track_report_lock
+    errors = []
+    writer = threading.Thread(target=lambda: _capture_log(errors), daemon=True)
+    writer.start()
+    assert entered_open.wait(2)
+    reports = []
+    reporter = threading.Thread(
+        target=lambda: reports.append(diagnostics.create_report(tmp_path / "rotating.zip")),
+        name="support-report", daemon=True,
+    )
+    reporter.start()
+    try:
+        assert reporter_requested_lock.wait(2)
+    finally:
+        continue_open.set()
+    writer.join(timeout=2)
+    reporter.join(timeout=2)
+    assert not writer.is_alive() and not reporter.is_alive()
+    assert not errors
+    with zipfile.ZipFile(reports[0]) as archive:
+        contents = b"\n".join(archive.read(name) for name in archive.namelist() if name.startswith("session.log"))
+        assert contents.count(b"report.snapshot") == 1
+        assert contents.count(b"report.rollover") == 1
+    diagnostics.shutdown()
+
+
+def _capture_log(errors: list[Exception]) -> None:
+    try:
+        diagnostics.log_event("report.rollover", operation="open")
+    except Exception as error:
+        errors.append(error)
+
+
+def test_logging_continues_while_report_compresses_snapshot(monkeypatch, tmp_path: Path) -> None:
+    isolated_log_dir(monkeypatch, tmp_path)
+    assert diagnostics.initialize() is not None
+    diagnostics.log_event("report.before_snapshot", operation="open")
+    writing, continue_archive, logged = threading.Event(), threading.Event(), threading.Event()
+    original_writestr = zipfile.ZipFile.writestr
+
+    def pause_log_entry(archive, name, data, *args, **kwargs):
+        if str(name).startswith("session.log"):
+            writing.set()
+            assert continue_archive.wait(2)
+        return original_writestr(archive, name, data, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "writestr", pause_log_entry)
+    errors = []
+    reporter = threading.Thread(target=lambda: _capture_report(errors, tmp_path / "snapshot.zip"), daemon=True)
+    reporter.start()
+    assert writing.wait(2)
+    writer = threading.Thread(target=lambda: _capture_log_event(logged, errors), daemon=True)
+    writer.start()
+    try:
+        assert logged.wait(2)
+    finally:
+        continue_archive.set()
+    reporter.join(timeout=2)
+    writer.join(timeout=2)
+    assert not reporter.is_alive() and not writer.is_alive()
+    assert not errors
+    diagnostics.shutdown()
+
+
+def _capture_report(errors: list[Exception], target: Path) -> None:
+    try:
+        diagnostics.create_report(target)
+    except Exception as error:
+        errors.append(error)
+
+
+def _capture_log_event(completed: threading.Event, errors: list[Exception]) -> None:
+    _capture_log(errors)
+    completed.set()
 
 
 def test_prune_keeps_active_logs_and_unknown_files(monkeypatch, tmp_path: Path) -> None:

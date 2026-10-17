@@ -77,10 +77,6 @@ class ThreadBuildRunner(QObject):
         if job is None:
             return False
         job.token.cancel()
-        try:
-            self.store.update(job_id, phase="cancelling")
-        except Exception:
-            pass
         return True
 
     def is_active(self, job_id: str | None = None) -> bool:

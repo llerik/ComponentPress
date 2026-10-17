@@ -288,6 +288,13 @@ class DocumentTab(QWidget):
     def preview_arguments(self) -> PreviewArguments | None:
         return self._preview_arguments
 
+    def invalidate_preview(self) -> None:
+        self.preview_timer.stop()
+        self.preview_generation += 1
+        self.preview_deferred = False
+        self._preview_arguments = None
+        self._deferred_preview = None
+
     def update_preview_resolution(self, dpi: int) -> bool:
         arguments = self._preview_arguments
         if arguments is None or arguments.dpi == dpi:

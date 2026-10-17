@@ -196,6 +196,27 @@ def session_log() -> Path | None:
     return _LOG_PATH
 
 
+def _handler_snapshot(path: Path) -> tuple[tuple[str, bytes], ...]:
+    handler = next((item for item in _LOGGER.handlers if getattr(item, "baseFilename", None) == str(path.resolve())), None)
+    if handler is None:
+        return _read_log_parts(path)
+    handler.acquire()
+    try:
+        return _read_log_parts(path)
+    finally:
+        handler.release()
+
+
+def _read_log_parts(path: Path) -> tuple[tuple[str, bytes], ...]:
+    parts = []
+    for index in range(_MAX_BACKUPS + 1):
+        source = path if index == 0 else path.with_suffix(path.suffix + f".{index}")
+        if source.is_file() and not source.is_symlink():
+            name = "session.log" if index == 0 else f"session.log.{index}"
+            parts.append((name, source.read_bytes()))
+    return tuple(parts)
+
+
 def create_report(target: Path, *, incident_id: str | None = None, code: str | None = None,
                   job_id: str | None = None, phase: str | None = None,
                   status: str | None = None, mode: str | None = None) -> Path:
@@ -230,11 +251,9 @@ def create_report(target: Path, *, incident_id: str | None = None, code: str | N
             with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 archive.writestr("report.json", payload)
                 path = _LOG_PATH
-                if path is not None and path.is_file() and not path.is_symlink():
-                    for index in range(_MAX_BACKUPS + 1):
-                        source = path if index == 0 else path.with_suffix(path.suffix + f".{index}")
-                        if source.is_file() and not source.is_symlink():
-                            archive.write(source, "session.log" if index == 0 else f"session.log.{index}")
+                if path is not None:
+                    for name, data in _handler_snapshot(path):
+                        archive.writestr(name, data)
                 elif _BUFFER:
                     archive.writestr("session.log", ("\n".join(_BUFFER) + "\n").encode("utf-8"))
             stream.flush()

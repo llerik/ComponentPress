@@ -11,6 +11,7 @@ from componentpress.build import engine
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.execution.cancellation import CancellationToken
 from componentpress.execution import render_pool
+from componentpress.execution.job_store import JobStore
 
 
 class ManualPool:
@@ -127,6 +128,42 @@ def test_empty_snapshot_finishes_without_waiting(monkeypatch):
     monkeypatch.setattr(render_pool, "QThreadPool", lambda: pool)
     render_pool.render_instances(_snapshot(Path("."), count=0), CancellationToken(), lambda _item: None)
     assert pool.attempts == 0
+
+
+def test_cancel_before_initial_reservation_finishes_render_queue(monkeypatch):
+    pool = ManualPool()
+    monkeypatch.setattr(render_pool, "QThreadPool", lambda: pool)
+    monkeypatch.setattr(render_pool, "RenderInstanceTask", ManualTask)
+    token, errors = CancellationToken(), []
+    token.cancel()
+    thread = threading.Thread(
+        target=lambda: _capture(errors, render_pool.render_instances, _snapshot(Path(".")), token, lambda _item: None),
+        daemon=True,
+    )
+    thread.start()
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+    assert errors[0].diagnostic.code == "BUILD_CANCELLED"
+    assert pool.attempts == 0
+
+
+def test_build_runner_cancel_only_sets_thread_safe_token(tmp_path):
+    from componentpress.execution.thread_runner import ThreadBuildRunner, _RunningJob
+    from componentpress.rendering.exporter import ensure_gui_application
+
+    ensure_gui_application()
+    store = JobStore(tmp_path)
+    job_id = "cancel-owner-test"
+    store.initialize(job_id, "project")
+    store.update(job_id, phase="publishing", output_directory="output/result")
+    token = CancellationToken()
+    runner = ThreadBuildRunner(store)
+    runner._jobs[job_id] = _RunningJob(None, token, None, None)
+    assert runner.cancel(job_id)
+    assert token.cancelled
+    assert store.read(job_id)["phase"] == "publishing"
+    assert store.read(job_id)["output_directory"] == "output/result"
+    store.release(job_id)
 
 
 class BookkeepingStore:

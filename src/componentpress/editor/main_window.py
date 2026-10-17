@@ -112,9 +112,9 @@ class MainWindow(QMainWindow):
         self.controller = controller
         self._tabs: dict[str, DocumentTab] = {}
         self._selection_sync = False
-        self._active_build_job: str | None = None
+        self._active_build_job: str | None = None; self._build_pending_active_only: bool | None = None
         self._last_build_result: BuildResult | None = None
-        self._build_progress: QProgressDialog | None = None
+        self._build_progress: QProgressDialog | None = None; self._last_build_progress: BuildProgress | None = None
         self._close_after_build = False
         self._preview_session_identity, self._preview_coordinator = uuid4().hex, PreviewCoordinator()
         self._preview_pool = QThreadPool(self)
@@ -122,7 +122,6 @@ class MainWindow(QMainWindow):
         self._preview_signals = PreviewSignals(self)
         self._preview_signals.finished.connect(self._preview_task_finished, Qt.ConnectionType.QueuedConnection)
         self._preview_close_pending = False; self._preview_close_confirmed = False
-        self._build_retry_scheduled = False
         self._version_pool = QThreadPool(self)
         self._version_pool.setMaxThreadCount(1)
         self._version_task = None
@@ -851,6 +850,8 @@ class MainWindow(QMainWindow):
         self._update_actions()
 
     def open_path(self, root: Path) -> bool:
+        if self._build_pending_active_only is not None:
+            return False
         if not self._confirm_all_dirty():
             return False
         try:
@@ -862,6 +863,8 @@ class MainWindow(QMainWindow):
         return True
 
     def create_path(self, root: Path, name: str) -> bool:
+        if self._build_pending_active_only is not None:
+            return False
         if not self._confirm_all_dirty():
             return False
         try:
@@ -873,6 +876,8 @@ class MainWindow(QMainWindow):
         return True
 
     def new_project_dialog(self) -> None:
+        if self._build_pending_active_only is not None:
+            return
         folder = QFileDialog.getExistingDirectory(self, "Выберите пустую папку проекта")
         if not folder:
             return
@@ -881,6 +886,8 @@ class MainWindow(QMainWindow):
             self.create_path(Path(folder), name)
 
     def open_project_dialog(self) -> None:
+        if self._build_pending_active_only is not None:
+            return
         folder = QFileDialog.getExistingDirectory(self, "Открыть проект")
         if folder:
             self.open_path(Path(folder))
@@ -1668,14 +1675,12 @@ class MainWindow(QMainWindow):
             tab.resolved_component = None
             cached = self.controller.preview.cached_data(self.session.snapshot, tab.component_id, component=document.model)
             if cached is None:
-                tab.canvas.clear_document()
-                self._update_preview_navigation(tab)
+                self._clear_preview(tab)
                 return False
             eligible = [row for row in cached.rows if copies_for_mode(row, self.data_mode.mode) > 0]
             if not eligible:
                 tab.preview_row_number = None
-                tab.canvas.clear_document()
-                self._update_preview_navigation(tab)
+                self._clear_preview(tab)
                 return False
             if tab.preview_row_number not in {row.row_number for row in eligible}:
                 tab.preview_row_number = eligible[0].row_number
@@ -1702,6 +1707,11 @@ class MainWindow(QMainWindow):
         )
         self._update_preview_navigation(tab)
         return True
+
+    def _clear_preview(self, tab: DocumentTab) -> None:
+        tab.invalidate_preview()
+        tab.canvas.clear_document()
+        self._update_preview_navigation(tab)
 
     def _step_preview(self, direction: int, *, endpoint: str | None = None) -> None:
         tab = self.active_tab
@@ -1783,6 +1793,9 @@ class MainWindow(QMainWindow):
     def _preview_requested(self, tab: DocumentTab) -> None:
         if self._tabs.get(tab.component_id) is not tab or self.session is None:
             return
+        if self._build_pending_active_only is not None:
+            tab.preview_deferred = True
+            return
         if self.active_tab is not tab or self._active_build_job is not None:
             tab.preview_deferred = True
             return
@@ -1799,7 +1812,7 @@ class MainWindow(QMainWindow):
         if job is None:
             return
         request = job.request
-        if self.active_tab is not job.tab or self._active_build_job is not None or not self._preview_is_current(job):
+        if self.active_tab is not job.tab or self._active_build_job is not None or self._build_pending_active_only is not None or not self._preview_is_current(job):
             self._skip_preview_job(job)
             return
         try:
@@ -1835,7 +1848,7 @@ class MainWindow(QMainWindow):
             return
         job = self._preview_coordinator.active
         assert job is not None
-        if not self._preview_is_current(job) or self.active_tab is not job.tab or self._active_build_job is not None:
+        if not self._preview_is_current(job) or self.active_tab is not job.tab or self._active_build_job is not None or self._build_pending_active_only is not None:
             self._skip_preview_job(job)
             return
         if isinstance(result, FontReadFailed):
@@ -1874,6 +1887,7 @@ class MainWindow(QMainWindow):
         elif self._preview_is_current(job) and self.active_tab is job.tab:
             self._show_preview_failure(job, result.error)
         self._start_preview_job(transition.start)
+        self._continue_build_after_preview()
 
     def _finish_preview_failure(self, job: PreviewJob, phase: PreviewPhase, error: Exception) -> None:
         transition = self._preview_coordinator.finish(job.request.identity.request, phase)
@@ -1883,6 +1897,7 @@ class MainWindow(QMainWindow):
         if self._preview_is_current(job) and self.active_tab is job.tab:
             self._show_preview_failure(job, error)
         self._start_preview_job(transition.start)
+        self._continue_build_after_preview()
 
     def _skip_preview_job(self, job: PreviewJob) -> None:
         transition = self._preview_coordinator.finish(job.request.identity.request, PreviewPhase.FONTS)
@@ -1892,9 +1907,14 @@ class MainWindow(QMainWindow):
         ):
             job.tab.preview_deferred = True
         self._start_preview_job(transition.start)
+        self._continue_build_after_preview()
 
     def _release_preview_fonts(self, job: PreviewJob) -> None:
         job.fonts.close()
+
+    def _continue_build_after_preview(self) -> None:
+        if self._build_pending_active_only is not None and self._preview_coordinator.active is None:
+            self._show_build_options(self._build_pending_active_only)
 
     def _show_preview_failure(self, job: PreviewJob, error: Exception) -> None:
         message = format_diagnostic(error.diagnostic) if isinstance(error, ProjectError) else str(error)
@@ -2120,23 +2140,38 @@ class MainWindow(QMainWindow):
         )
 
     def _start_build(self, active_only: bool) -> None:
-        if self.session is None or self.controller.build is None or self._active_build_job is not None:
+        if self.session is None or self.controller.build is None or self._active_build_job is not None or self._version_task is not None or self._build_pending_active_only is not None:
             return
-        if self._preview_coordinator.active is not None or self._preview_pool.activeThreadCount():
-            if not self._build_retry_scheduled:
-                self._build_retry_scheduled = True
-                self.statusBar().showMessage("Предпросмотр завершает подготовку; сборка начнётся сразу после неё")
-                QTimer.singleShot(50, lambda: (setattr(self, "_build_retry_scheduled", False), self._start_build(active_only)))
-            return
+        self._build_pending_active_only = active_only
+        for tab in self._tabs.values():
+            tab.preview_timer.stop()
+            tab.preview_deferred = tab.preview_arguments is not None
+        self._preview_coordinator.discard_pending()
+        self._update_actions()
         if not self.save_all():
+            self._cancel_pending_build()
             return
-        mode = self.data_mode.mode
-        dialog = BuildOptionsDialog(self.session.snapshot.model.print, self, mode=mode)
+        if self._preview_coordinator.active is not None:
+            self.statusBar().showMessage("Предпросмотр завершает работу; сборка начнётся сразу после неё")
+            return
+        self._show_build_options(active_only)
+
+    def _show_build_options(self, active_only: bool) -> None:
+        if self._build_pending_active_only is None or self.session is None:
+            return
+        dialog = BuildOptionsDialog(self.session.snapshot.model.print, self, mode=self.data_mode.mode)
         if dialog.exec() != dialog.DialogCode.Accepted:
+            self._cancel_pending_build()
             return
+        if self._build_pending_active_only is None or self.session is None:
+            return
+        self._launch_build(dialog, active_only, self.data_mode.mode)
+
+    def _launch_build(self, dialog, active_only: bool, mode: str) -> None:
         component_ids = None
         if active_only:
             if self.active_tab is None:
+                self._cancel_pending_build()
                 return
             component_ids = (self.active_tab.component_id,)
         request = BuildRequest(
@@ -2145,33 +2180,71 @@ class MainWindow(QMainWindow):
             print_settings=dialog.print_settings(),
             max_render_workers=dialog.workers.value(),
         )
-        progress = QProgressDialog(tr("ui.build_prepare"), tr("action.cancel_build"), 0, 0, self)
-        progress.setWindowTitle("Сборка ComponentPress")
-        progress.setAutoClose(False)
-        progress.setAutoReset(False)
-        progress.canceled.connect(self._cancel_build)
-        progress.show()
+        self._start_build_request(request)
+
+    def _start_build_request(self, request: BuildRequest) -> None:
+        progress = self._build_progress_dialog()
         self._build_progress = progress
+        self._last_build_progress = None
         try:
             self._active_build_job = self.controller.start_build(
                 request,
                 on_progress=self._on_build_progress,
                 on_finished=self._queue_build_finished,
             )
+            self._build_pending_active_only = None
+            self._update_actions()
         except Exception as exc:
             progress.close()
             self._build_progress = None
+            self._cancel_pending_build()
             self._show_error(exc)
             return
         self.statusBar().showMessage(f"Сборка запущена: {self._active_build_job}")
         self._update_actions()
 
+    def _build_progress_dialog(self) -> QProgressDialog:
+        progress = QProgressDialog(tr("ui.build_prepare"), tr("action.cancel_build"), 0, 0, self)
+        progress.setWindowTitle("Сборка ComponentPress")
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        progress.canceled.connect(self._cancel_build)
+        progress.show()
+        return progress
+
+    def _cancel_pending_build(self, *, resume_preview: bool = True) -> None:
+        if self._build_pending_active_only is None:
+            return
+        self._build_pending_active_only = None
+        if resume_preview:
+            self._resume_deferred_preview()
+        self._update_actions()
+
+    def _resume_deferred_preview(self) -> None:
+        for tab in self._tabs.values():
+            if tab is not self.active_tab:
+                tab.preview_deferred = False
+        if self.active_tab is not None and self.active_tab.preview_deferred:
+            self.active_tab.preview_deferred = False
+            self._refresh_preview(self.active_tab)
+
     def _on_build_progress(self, progress: BuildProgress) -> None:
         if progress.job_id != self._active_build_job or self._build_progress is None:
             return
+        if not self._accept_build_progress(progress):
+            return
+        self._last_build_progress = progress
         self._build_progress.setRange(0, max(progress.total, 1))
         self._build_progress.setValue(progress.completed)
         self._build_progress.setLabelText(progress.message or progress.phase)
+
+    def _accept_build_progress(self, progress: BuildProgress) -> bool:
+        previous = self._last_build_progress
+        order = {"preparing": 0, "rendering": 1, "assembling_pdf": 2}
+        return previous is None or (
+            order.get(progress.phase, 0) >= order.get(previous.phase, 0)
+            and (progress.phase != previous.phase or progress.completed >= previous.completed)
+        )
 
     def _on_build_finished(self, result: BuildResult) -> None:
         if self._build_progress is not None:
@@ -3154,7 +3227,7 @@ class MainWindow(QMainWindow):
     def _update_actions(self) -> None:
         has_project = self.session is not None
         has_tab = self.active_tab is not None
-        visual = has_tab and self.active_tab.mode == "layout"
+        visual = has_tab and self.active_tab.mode == "layout" and self._build_pending_active_only is None
         active_stack = self.active_tab.undo_stack if self.active_tab is not None else None
         # In text mode Ctrl+Z/Ctrl+Y belong to QPlainTextEdit's local history.
         project_undo = self._component_history_index > 0
@@ -3168,10 +3241,10 @@ class MainWindow(QMainWindow):
         text_redo = bool(text_mode and self.active_tab.text_editor.document().isRedoAvailable())
         self.undo_action.setEnabled(bool(text_undo or project_undo or document_undo))
         self.redo_action.setEnabled(bool(text_redo or project_redo or document_redo))
-        self.add_component_action.setEnabled(has_project)
-        self.project_settings_action.setEnabled(has_project)
-        self.image_manager_action.setEnabled(has_project and self._active_build_job is None and self._version_task is None)
-        idle = self._active_build_job is None and self._version_task is None
+        idle = self._active_build_job is None and self._version_task is None and self._build_pending_active_only is None
+        self.add_component_action.setEnabled(has_project and idle)
+        self.project_settings_action.setEnabled(has_project and idle)
+        self.image_manager_action.setEnabled(has_project and self._active_build_job is None and self._version_task is None and self._build_pending_active_only is None)
         self.delete_component_action.setEnabled(has_project and has_tab and len(self.session.documents) > 1 and idle)
         self.build_all_action.setEnabled(has_project and idle)
         self.build_active_action.setEnabled(has_tab and idle)
@@ -3183,24 +3256,7 @@ class MainWindow(QMainWindow):
         self.cancel_build_action.setEnabled(build_running)
         self.delete_widget_action.setVisible(bool(visual and self._selected_ids()))
         self._update_build_toolbar()
-        ready = self._last_build_result is not None
-        self.open_build_action.setEnabled(ready)
-        self.open_pdf_action.setEnabled(ready)
-        self.save_all_action.setEnabled(has_project and bool(self.session and self.session.dirty))
-        self.save_action.setEnabled(
-            has_tab
-            and bool(self.session)
-            and bool(self.active_tab)
-            and self.session.documents[self.active_tab.component_id].dirty
-        )
-        self.close_tab_action.setEnabled(has_tab)
-        for action in (self.zoom_in_action, self.zoom_out_action, self.fit_action, self.actual_size_action):
-            action.setEnabled(visual)
-        for button in self.drawing_tools.values():
-            button.setEnabled(visual)
-        self.export_png_zip_action.setEnabled(has_project and idle)
-        self.export_project_archive_action.setEnabled(has_project and idle)
-        self.import_project_archive_action.setEnabled(idle)
+        self._update_file_actions(has_project, has_tab, idle, visual)
         selected = self._selected_ids()
         has_selection = bool(selected)
         locked_selection = False
@@ -3232,6 +3288,24 @@ class MainWindow(QMainWindow):
         self.ungroup_button.setEnabled(bool(visual and idle and can_ungroup))
         self._sync_tool_buttons()
 
+    def _update_file_actions(self, has_project: bool, has_tab: bool, idle: bool, visual: bool) -> None:
+        ready = self._last_build_result is not None
+        self.open_build_action.setEnabled(ready)
+        self.open_pdf_action.setEnabled(ready)
+        self.save_all_action.setEnabled(has_project and idle and bool(self.session and self.session.dirty))
+        self.save_action.setEnabled(has_tab and idle and bool(self.session and self.active_tab)
+                                    and self.session.documents[self.active_tab.component_id].dirty)
+        self.close_tab_action.setEnabled(has_tab and idle)
+        for action in (self.zoom_in_action, self.zoom_out_action, self.fit_action, self.actual_size_action):
+            action.setEnabled(visual)
+        for button in self.drawing_tools.values():
+            button.setEnabled(visual)
+        self.export_png_zip_action.setEnabled(has_project and idle)
+        self.export_project_archive_action.setEnabled(has_project and idle)
+        self.import_project_archive_action.setEnabled(idle)
+        self.new_action.setEnabled(idle)
+        self.open_action.setEnabled(idle)
+
     def _show_error(self, error: Exception) -> None:
         if isinstance(error, ProjectError):
             message = format_error(error.diagnostic)
@@ -3242,6 +3316,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(message, 7000)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        had_pending_build = self._build_pending_active_only is not None
+        self._cancel_pending_build(resume_preview=False)
         if self._preview_close_pending:
             event.ignore()
             return
@@ -3253,6 +3329,8 @@ class MainWindow(QMainWindow):
             self._defer_close_for_build(event)
             return
         if not self._prepare_preview_close(event):
+            if had_pending_build and not self._preview_coordinator.closed:
+                self._resume_deferred_preview()
             return
 
         self.ui_state.save(self)
