@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QTransform
+from PySide6.QtGui import QColor, QGradient, QPainter, QPen, QBrush, QTransform
 
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
@@ -11,6 +11,11 @@ from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNod
 from .geometry import HTML_DPI, MM_PER_INCH, image_fit_geometry
 from .html_document import prepare_html
 from .resources import ProjectResourceLoader
+
+
+# PySide 6.11 resolves this fillRect overload lazily. Finish its converter before
+# worker threads can observe a partially initialized QGradient.Preset binding.
+_GRADIENT_PRESET = QGradient.Preset
 
 
 def _draw_image(painter: QPainter, node: ImageNode, loader: ProjectResourceLoader, owner: Path, x: float, y: float, source: str) -> None:
