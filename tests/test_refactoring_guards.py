@@ -11,7 +11,7 @@ import pytest
 
 from refactoring_guard import (
     Inventory, Import, current_debt, cycle_edges, forbidden, import_graph,
-    module_name, production_files, ratchet_errors,
+    module_name, production_files, ratchet_errors, scan,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,6 +89,16 @@ def test_file_adapter_cannot_import_service_implementation():
     assert forbidden(edge)
     build_adapter = Import("src/componentpress/build/input_snapshot.py", "create", 4, "componentpress.application.identifiers.instance_id", "from")
     assert forbidden(build_adapter)
+
+
+def test_archive_adapter_does_not_import_the_concrete_project_repository():
+    _, imports, _ = scan(ROOT)
+    assert not any(
+        module_name(edge.path).startswith("componentpress.versioning")
+        and edge.target == "componentpress.project_io.repository.FileProjectRepository"
+        for edge in imports
+    )
+    assert not (ROOT / "src/componentpress/versioning/__init__.py").read_text(encoding="utf-8").strip()
 
 
 def test_static_guard_covers_all_import_escape_hatches():
@@ -174,6 +184,14 @@ def test_application_build_contracts_resolve_without_adapters(tmp_path):
 def test_preview_scenario_runs_with_fake_ports_without_adapters_or_side_effects(tmp_path):
     loaded = _probe(["componentpress.application.preview_service"], tmp_path)
     assert loaded == BASELINE["runtime"]["componentpress.application.preview_service"]["modules"]
+
+
+def test_version_scenario_runs_with_fake_ports_without_adapters_or_side_effects(tmp_path):
+    loaded = _probe(["componentpress.application.version_service"], tmp_path)
+    assert not any(
+        name.startswith(("componentpress.versioning", "componentpress.project_io", "PySide6"))
+        for name in loaded
+    )
 
 
 def test_diagnostic_string_conversion_stays_neutral_in_a_fresh_process(tmp_path):

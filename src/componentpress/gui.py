@@ -331,7 +331,6 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     expected_test_pngs = 2 if window.session.documents[first_id].model.data is not None else 1
     if zip_result.png_count != expected_test_pngs or not test_zip.is_file():
         return _smoke_failure(root, inspect.currentframe().f_lineno)
-    from componentpress.application.version_service import import_project_archive
     from componentpress.domain.diagnostics import ProjectError
     from componentpress.execution.cancellation import CancellationToken
 
@@ -369,7 +368,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     restored_root = root.parent / "release-smoke-restored"
     if restored_root.exists():
         return _smoke_failure(root, inspect.currentframe().f_lineno)
-    import_project_archive(version_zip, restored_root)
+    window.controller.service.versions.restore_path(version_zip, restored_root)
     restored_snapshot = window.controller.service.projects.open(restored_root)
     if restored_snapshot.model.version != "0.1.0":
         return _smoke_failure(root, inspect.currentframe().f_lineno)

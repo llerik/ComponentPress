@@ -133,11 +133,9 @@ def log_event(event: str, *, level: int = logging.INFO, **context: object) -> No
         event = "event.invalid"
     safe = {}
     for key, value in context.items():
-        if key not in {"operation", "status", "job_id", "phase", "mode", "code", "incident_id", "version", "language"}:
+        if key not in {"operation", "operation_id", "status", "job_id", "phase", "mode", "code", "incident_id", "version", "language"}:
             continue
-        if isinstance(value, bool) or value is None:
-            safe[key] = value
-        elif isinstance(value, (int, float)):
+        if value is None or isinstance(value, (bool, int, float)):
             safe[key] = value
         elif isinstance(value, str):
             valid = (
@@ -149,6 +147,7 @@ def log_event(event: str, *, level: int = logging.INFO, **context: object) -> No
                 or key == "code" and bool(_CODE_RE.fullmatch(value))
                 or key == "incident_id" and bool(re.fullmatch(r"[0-9a-f]{32}", value))
                 or key == "job_id" and bool(re.fullmatch(r"[0-9a-f]{32}", value))
+                or key == "operation_id" and bool(re.fullmatch(r"[0-9a-f]{32}", value))
                 or key == "version" and bool(re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,2}", value))
             )
             if valid:

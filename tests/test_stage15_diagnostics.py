@@ -34,6 +34,11 @@ def test_rotates_and_reports_without_exception_or_project_text(monkeypatch, tmp_
 
     for _ in range(40):
         diagnostics.log_event("project.operation", operation="open", status="succeeded", mode="prod")
+    operation_id = "a" * 32
+    diagnostics.log_event(
+        "project.archive", operation="archive", phase="export", status="started",
+        operation_id=operation_id, target="SECRET_PROJECT_PATH",
+    )
     try:
         raise RuntimeError("SECRET_FROM_EXCEPTION")
     except RuntimeError as error:
@@ -52,6 +57,8 @@ def test_rotates_and_reports_without_exception_or_project_text(monkeypatch, tmp_
     assert b"SECRET_FROM_EXCEPTION" not in contents
     assert b"SECRET_PROJECT_PATH" not in contents
     assert b"SECRET_PROJECT_NAME" not in contents
+    assert operation_id.encode("ascii") in contents
+    assert b"SECRET_PROJECT_PATH" not in contents
     assert 1 <= len(list(directory.glob("componentpress-*.log*"))) <= 4
     assert all(path.stat().st_size <= 700 for path in directory.glob("componentpress-*.log*"))
     diagnostics.shutdown()

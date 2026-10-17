@@ -73,7 +73,7 @@ class FileProjectRepository:
         root = root.resolve()
         project_path = root / "project.yaml"
         preflight_project_schemas(root)
-        from componentpress.application.version_service import recover_project_versions
+        from componentpress.versioning.recovery import recover_project_versions
 
         self.version_recovery_diagnostics = recover_project_versions(root)
         if recovery_required(root):

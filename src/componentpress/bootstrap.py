@@ -6,6 +6,7 @@ from componentpress.project_io.repository import FileProjectRepository
 from componentpress.resources.repository import ResourceRepository
 from componentpress.platforms.services import ProjectWriteLock
 from componentpress.application.project_service import ProjectService
+from componentpress.application.version_service import VersionService
 from componentpress.application.preview_service import PreviewService
 from componentpress.application.build_service import BuildService
 from componentpress.execution.build_runtime import QtBuildRuntime
@@ -17,6 +18,7 @@ from componentpress.data_sources import XlsxReader
 from componentpress.i18n import tr
 from componentpress.i18n.diagnostics import format_diagnostic
 from componentpress.project_io.validation_state import PreviewValidationStore
+from componentpress.versioning.repository import ZipArchiveRepository
 from componentpress.rendering.exporter import render_component
 
 if TYPE_CHECKING:
@@ -32,8 +34,13 @@ def resource_repository() -> ResourceRepository:
 
 
 def project_service() -> ProjectService:
+    projects = project_repository()
+    versions = VersionService(
+        ZipArchiveRepository(projects, ProjectWriteLock, diagnostic_formatter=format_diagnostic),
+        projects,
+    )
     return ProjectService(
-        project_repository(), resource_repository(), ProjectWriteLock,
+        projects, resource_repository(), ProjectWriteLock, versions,
         diagnostic_formatter=format_diagnostic,
     )
 

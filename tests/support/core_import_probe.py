@@ -163,6 +163,23 @@ if sys.argv[3:] == ["componentpress.application.preview_service"]:
     assert service.select_row(source_snapshot, "card", validate_resources=False).component is bound
     assert resolver.validate_resources is False
     service.invalidate(root)
+if sys.argv[3:] == ["componentpress.application.version_service"]:
+    from componentpress.application.version_service import VersionService
+
+    class Archive:
+        def export(self, snapshot, target, **options):
+            return (target, "0.1.1", True, None)
+
+        def restore_path(self, archive_path, destination, **options):
+            return destination
+
+    class Projects:
+        def open(self, root):
+            return root
+
+    service = VersionService(Archive(), Projects())
+    assert service.export(object(), "archive.zip")[1:] == ("0.1.1", True, None)
+    assert service.restore("archive.zip", "restored") == "restored"
 if all(module.startswith("componentpress.domain.") for module in sys.argv[3:]):
     assert not any(name.startswith("componentpress.application.") for name in sys.modules), "domain imported application"
 assert threading.enumerate() == before_threads
