@@ -23,6 +23,7 @@ from componentpress.domain.project import PrintSettings
 from componentpress.execution.cancellation import CancellationToken
 from componentpress.execution.cleanup import cleanup_job_directory
 from componentpress.execution.job_store import JobStore
+from componentpress.execution.tasks import RenderInstanceTask
 from componentpress.editor.controllers import ProjectController
 from componentpress.domain.diagnostics import Diagnostic
 from componentpress.rendering.exporter import ensure_gui_application
@@ -165,6 +166,51 @@ def test_snapshot_uses_disk_spill_only_for_used_resources(tmp_path: Path) -> Non
             QFontDatabase.removeApplicationFont(font_id)
         cleanup_job_directory(store, job_id)
         store.release(job_id)
+
+
+def test_memory_and_disk_snapshots_render_identically(tmp_path: Path) -> None:
+    ensure_gui_application()
+    root = _copy_demo(tmp_path)
+    source = project_service().open(root)
+    rendered = []
+    snapshots = []
+    store = JobStore(root)
+    for job_id, budget in (("memory-zero", 0), ("memory-enough", 1024 * 1024 * 1024)):
+        directory = store.initialize(job_id, source.model.id)
+        snapshot = InputSnapshotBuilder().create(
+            source,
+            job_id=job_id,
+            job_directory=directory,
+            component_ids=("forest-card",),
+            memory_budget_bytes=budget,
+            max_render_workers=1,
+        )
+        snapshots.append(snapshot)
+        try:
+            assert snapshot.resources
+            errors = []
+            hashes = []
+            for instance in snapshot.instances:
+                RenderInstanceTask(
+                    snapshot, instance, CancellationToken(),
+                    lambda _index, error: errors.append(error) if error else None,
+                ).run()
+                assert not errors, errors
+                hashes.append(_hash(snapshot.staging_directory / "images" / instance.png_name))
+            rendered.append(tuple(hashes))
+        finally:
+            for font_id in reversed(snapshot.registered_font_ids):
+                QFontDatabase.removeApplicationFont(font_id)
+            cleanup_job_directory(store, job_id)
+            store.release(job_id)
+
+    memory, disk = snapshots
+    assert memory.input_hashes == disk.input_hashes
+    assert memory.instances == disk.instances
+    assert memory.warnings == disk.warnings
+    assert all(item.data is None and item.copied_path for item in memory.resources.values())
+    assert all(item.data is not None for item in disk.resources.values())
+    assert rendered[0] == rendered[1]
 
 
 def test_snapshot_resource_loader_prefers_memory_over_disk(tmp_path: Path) -> None:

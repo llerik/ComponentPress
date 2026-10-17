@@ -2,20 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-import hashlib
-import os
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 import re
 from types import MappingProxyType
 from typing import Mapping
-from uuid import uuid4
-
-from PySide6.QtCore import QByteArray
-from PySide6.QtGui import QFontDatabase, QImage, QRawFont
 
 from componentpress.application.contracts import BuildInputSnapshot, BuildInstance, ProjectSnapshot, SnapshotResource
 from componentpress.application.identifiers import instance_id as make_instance_id
+from componentpress.application.ports import Cancellation, ComponentResolver
 from componentpress.bindings.resolver import BindingResolver
 from componentpress.data_sources import XlsxReader
 from componentpress.domain.component import ComponentDefinition
@@ -24,53 +19,34 @@ from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.html_resources import html_image_sources
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
 from componentpress.domain.project import PrintSettings
+from componentpress.domain.render_plan import ResolvedComponent
+from componentpress.domain.values import DataRow, DataSheetSnapshot
 from componentpress.project_io.files import file_hash
 from componentpress.project_io.paths import check_exact_case, resolve_project_path
-from componentpress.rendering.resources import LoadedImage, ProjectResourceLoader
+from componentpress.project_io.snapshot_capture import copy_stable, read_stable
 from componentpress.rendering.image_quality import measure_component_images
-from componentpress.application.ports import Cancellation, ComponentResolver
+from componentpress.rendering.resources import ProjectResourceLoader
+from componentpress.rendering.snapshot_fonts import register_snapshot_fonts as _register_snapshot_fonts
+from componentpress.rendering.snapshot_resources import SnapshotResourceLoader
 from componentpress.execution.cancellation import CancellationToken
 
 
-def _read_snapshot_resource(resource: SnapshotResource) -> bytes:
-    if resource.data is not None:
-        return resource.data
-    if resource.copied_path is None:
-        raise RuntimeError("resource has no storage")
-    return resource.copied_path.read_bytes()
+@dataclass
+class _BuildPlan:
+    instances: list[BuildInstance] = field(default_factory=list)
+    resource_paths: set[str] = field(default_factory=set)
+    font_families: set[str] = field(default_factory=set)
+    input_hashes: dict[str, str] = field(default_factory=dict)
+    source_hashes: dict[Path, str] = field(default_factory=dict)
+    xlsx_bytes: dict[Path, bytes] = field(default_factory=dict)
 
 
-class SnapshotResourceLoader:
-    """Thread-owned QImage cache backed only by captured bytes/copies."""
-
-    def __init__(self, resources: Mapping[str, SnapshotResource], max_cache_bytes: int = 64 * 1024 * 1024):
-        self.resources = resources
-        self.max_cache_bytes = max_cache_bytes
-        self._images: dict[str, LoadedImage] = {}
-        self._cache_bytes = 0
-
-    def image(self, relative_path: str, *, owner: Path | None = None, field: str | None = None) -> LoadedImage:
-        resource = self.resources.get(relative_path)
-        if resource is None:
-            raise ProjectError(Diagnostic("RESOURCE_NOT_SNAPSHOTTED", f"ресурс не включён в снимок: {relative_path}", owner, field))
-        cached = self._images.get(resource.content_hash)
-        if cached is not None:
-            return cached
-        try:
-            data = _read_snapshot_resource(resource)
-        except OSError as exc:
-            raise ProjectError(Diagnostic("SNAPSHOT_READ", str(exc), resource.copied_path, field)) from exc
-        if hashlib.sha256(data).hexdigest() != resource.content_hash:
-            raise ProjectError(Diagnostic("SNAPSHOT_CORRUPT", f"повреждена копия ресурса {relative_path}", resource.copied_path, field))
-        image = QImage.fromData(QByteArray(data))
-        if image.isNull():
-            raise ProjectError(Diagnostic("RESOURCE_INVALID", f"не удалось прочитать изображение: {relative_path}", owner, field))
-        loaded = LoadedImage(image, resource.content_hash)
-        size = image.sizeInBytes()
-        if self._cache_bytes + size <= self.max_cache_bytes:
-            self._images[resource.content_hash] = loaded
-            self._cache_bytes += size
-        return loaded
+@dataclass
+class _ResourceCapture:
+    resources: dict[str, SnapshotResource] = field(default_factory=dict)
+    input_hashes: dict[str, str] = field(default_factory=dict)
+    source_hashes: dict[Path, str] = field(default_factory=dict)
+    memory_used: int = 0
 
 
 def _safe_name(value: str) -> str:
@@ -109,183 +85,169 @@ def _font_families(component: ComponentDefinition) -> set[str]:
     return result
 
 
-def _font_key(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "", value.casefold())
-
-
 class InputSnapshotBuilder:
     def __init__(self, reader: XlsxReader | None = None):
         self.reader = reader or XlsxReader()
 
-    @staticmethod
-    def _read_stable(path: Path) -> tuple[bytes, str]:
-        try:
-            before = path.stat()
-            data = path.read_bytes()
-            after = path.stat()
-        except FileNotFoundError as exc:
-            raise ProjectError(Diagnostic("RESOURCE_MISSING", "используемый файл не найден", path)) from exc
-        except OSError as exc:
-            raise ProjectError(Diagnostic("FILE_READ", str(exc), path)) from exc
-        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-            raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "файл изменился во время подготовки снимка", path))
-        return data, hashlib.sha256(data).hexdigest()
-
-    @staticmethod
-    def _copy_stable(path: Path, directory: Path) -> tuple[Path, str, int]:
-        """Stream a large source to managed storage without a full byte buffer."""
-        directory.mkdir(parents=True, exist_ok=True)
-        temporary = directory / f".capture-{uuid4().hex}.tmp"
-        digest = hashlib.sha256()
-        size = 0
-        try:
-            before = path.stat()
-            with path.open("rb") as source, temporary.open("xb") as target:
-                for block in iter(lambda: source.read(1024 * 1024), b""):
-                    target.write(block)
-                    digest.update(block)
-                    size += len(block)
-                target.flush()
-                os.fsync(target.fileno())
-            after = path.stat()
-            if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns) or size != before.st_size:
-                raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "файл изменился во время подготовки снимка", path))
-            content_hash = digest.hexdigest()
-            copied = directory / f"{content_hash}{path.suffix.lower()}"
-            if copied.exists():
-                temporary.unlink()
-            else:
-                os.replace(temporary, copied)
-            return copied, content_hash, size
-        except ProjectError:
-            raise
-        except FileNotFoundError as exc:
-            raise ProjectError(Diagnostic("RESOURCE_MISSING", "используемый файл не найден", path)) from exc
-        except OSError as exc:
-            raise ProjectError(Diagnostic("FILE_READ", str(exc), path)) from exc
-        finally:
-            temporary.unlink(missing_ok=True)
-
-    def create(
-        self,
-        source: ProjectSnapshot,
-        *,
-        job_id: str,
-        job_directory: Path,
-        component_ids: tuple[str, ...] | None = None,
-        mode: str = "prod",
-        print_settings: PrintSettings | None = None,
-        memory_budget_bytes: int = 128 * 1024 * 1024,
-        max_render_workers: int = 2,
-        cancellation: Cancellation | None = None,
-        defer_font_registration: bool = False,
-    ) -> BuildInputSnapshot:
-        token = cancellation or CancellationToken()
-        mode = validate_copy_mode(mode)
+    def _validate_options(self, memory_budget_bytes: int, max_render_workers: int) -> None:
         if memory_budget_bytes < 0:
             raise ProjectError(Diagnostic("BUILD_MEMORY_BUDGET", "бюджет памяти не может быть отрицательным"))
         if max_render_workers not in range(1, 65):
             raise ProjectError(Diagnostic("BUILD_WORKERS", "число потоков должно быть от 1 до 64"))
+
+    @staticmethod
+    def _selected_components(source: ProjectSnapshot, component_ids: tuple[str, ...] | None) -> tuple[str, ...]:
         selected = set(component_ids) if component_ids is not None else {item.id for item in source.model.components}
         unknown = selected.difference(source.documents)
         if unknown:
             raise ProjectError(Diagnostic("COMPONENT_UNKNOWN", f"компоненты не найдены: {', '.join(sorted(unknown))}", source.root))
-        ordered = [item.id for item in source.model.components if item.id in selected]
+        ordered = tuple(item.id for item in source.model.components if item.id in selected)
         if not ordered:
             raise ProjectError(Diagnostic("BUILD_EMPTY", "не выбраны компоненты для сборки", source.root))
+        return ordered
 
+    @staticmethod
+    def _create_directories(job_directory: Path) -> Path:
         job_directory.mkdir(parents=True, exist_ok=True)
         staging = job_directory / "staging"
         (staging / "images").mkdir(parents=True, exist_ok=True)
-        resource_directory = job_directory / "resources"
-        instances: list[BuildInstance] = []
-        paths: set[str] = set()
-        requested_fonts: set[str] = set()
-        input_hashes: dict[str, str] = {"project.yaml": source.disk_hash}
-        source_file_hashes: dict[Path, str] = {source.root / "project.yaml": source.disk_hash}
-        xlsx_bytes: dict[Path, bytes] = {}
-        xlsx_hashes: dict[Path, str] = {}
-        live_loader = ProjectResourceLoader(source.root)
-        resolver: ComponentResolver = BindingResolver(source.root, source.model, live_loader)
+        return staging
 
+    def create(
+        self, source: ProjectSnapshot, *, job_id: str, job_directory: Path,
+        component_ids: tuple[str, ...] | None = None, mode: str = "prod",
+        print_settings: PrintSettings | None = None, memory_budget_bytes: int = 128 * 1024 * 1024,
+        max_render_workers: int = 2, cancellation: Cancellation | None = None,
+        defer_font_registration: bool = False,
+    ) -> BuildInputSnapshot:
+        token = cancellation or CancellationToken()
+        mode = validate_copy_mode(mode)
+        self._validate_options(memory_budget_bytes, max_render_workers)
+        ordered = self._selected_components(source, component_ids)
+        staging = self._create_directories(job_directory)
+        plan = self._collect_instances(source, ordered, mode, token)
+        captured = self._capture_resources(source, plan, job_directory, memory_budget_bytes, token)
+        self._verify_sources(plan.source_hashes, captured.source_hashes, token)
+        warnings = self._quality_warnings(source, plan.instances, captured.resources)
+        snapshot = self._assemble_snapshot(source, plan, captured, job_id, job_directory, staging,
+                                           print_settings, mode, max_render_workers, memory_budget_bytes, warnings)
+        return snapshot if defer_font_registration else self.register_snapshot_fonts(snapshot)
+
+    @staticmethod
+    def _record_source(plan: _BuildPlan, path: Path, source: ProjectSnapshot, digest: str) -> None:
+        relative = path.relative_to(source.root).as_posix()
+        plan.input_hashes[relative] = digest
+        plan.source_hashes[path] = digest
+
+    def _read_sheet(self, source: ProjectSnapshot, component: ComponentDefinition, owner: Path,
+                    plan: _BuildPlan) -> DataSheetSnapshot:
+        binding = component.data
+        data_source = source.model.data_source
+        if data_source is None:
+            raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", f"источник {binding.source!r} не найден", owner, "data.source"))
+        check_exact_case(source.root, data_source.path)
+        path = resolve_project_path(source.root, data_source.path)
+        if path not in plan.xlsx_bytes:
+            data, digest = read_stable(path)
+            plan.xlsx_bytes[path] = data
+            self._record_source(plan, path, source, digest)
+        return self.reader.read(
+            path, binding.sheet, source="main",
+            copies_columns=(source.model.copies_columns.prod, source.model.copies_columns.test),
+            data=plan.xlsx_bytes[path],
+        )
+
+    @staticmethod
+    def _resolve_excel_rows(component: ComponentDefinition, sheet: DataSheetSnapshot, owner: Path,
+                            project_id: str, resolver: ComponentResolver,
+                            mode: str) -> tuple[tuple[DataRow, ResolvedComponent], ...]:
+        resolved_rows = []
+        for row in sheet.rows:
+            stable = replace(row, instance_id=make_instance_id(
+                project_id, component.id, sheet.sheet, row.row_number))
+            resolved = resolver.resolve_component(component, sheet, stable, owner=owner)
+            if copies_for_mode(stable, mode) > 0:
+                resolved_rows.append((stable, resolved))
+        return tuple(resolved_rows)
+
+    def _resolve_rows(self, source: ProjectSnapshot, document, plan: _BuildPlan,
+                      resolver: ComponentResolver, mode: str) -> tuple[tuple[DataRow | None, ResolvedComponent], ...]:
+        component = document.model
+        if component.data is None:
+            return ((None, resolver.resolve_component(component, None, None, owner=document.path)),)
+        sheet = self._read_sheet(source, component, document.path, plan)
+        return self._resolve_excel_rows(component, sheet, document.path,
+                                        source.model.id, resolver, mode)
+
+    @staticmethod
+    def _make_instance(index: int, component_id: str, document, row: DataRow | None, mode: str,
+                       resolved: ResolvedComponent) -> BuildInstance:
+        instance_id = row.instance_id if row is not None else "static"
+        png_name = f"{index + 1:04d}-{_safe_name(component_id)}-{_safe_name(instance_id)}.png"
+        return BuildInstance(
+            index, component_id, document.model.name, instance_id,
+            row.row_number if row is not None else None,
+            copies_for_mode(row, mode) if row is not None else 1,
+            resolved.component, document.path, png_name,
+        )
+
+    def _process_component(self, source: ProjectSnapshot, component_id: str, mode: str,
+                           token: Cancellation, resolver: ComponentResolver, plan: _BuildPlan) -> None:
+        document = source.documents[component_id]
+        self._record_source(plan, document.path, source, document.disk_hash)
+        rows = self._resolve_rows(source, document, plan, resolver, mode)
+        for row, resolved in rows:
+            token.check()
+            instance = self._make_instance(len(plan.instances), component_id, document, row, mode, resolved)
+            plan.instances.append(instance)
+            plan.resource_paths.update(_resource_paths(resolved.component))
+            plan.font_families.update(_font_families(resolved.component))
+
+    def _collect_instances(self, source: ProjectSnapshot, ordered: tuple[str, ...], mode: str,
+                           token: Cancellation) -> _BuildPlan:
+        plan = _BuildPlan(input_hashes={"project.yaml": source.disk_hash},
+                          source_hashes={source.root / "project.yaml": source.disk_hash})
+        resolver: ComponentResolver = BindingResolver(
+            source.root, source.model, ProjectResourceLoader(source.root))
         for component_id in ordered:
             token.check()
-            document = source.documents[component_id]
-            input_hashes[document.path.relative_to(source.root).as_posix()] = document.disk_hash
-            source_file_hashes[document.path] = document.disk_hash
-            component = document.model
-            rows = ((None, None),)
-            sheet = None
-            if component.data is not None:
-                data_source = source.model.data_source
-                if data_source is None:
-                    raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", f"источник {component.data.source!r} не найден", document.path, "data.source"))
-                check_exact_case(source.root, data_source.path)
-                xlsx_path = resolve_project_path(source.root, data_source.path)
-                if xlsx_path not in xlsx_bytes:
-                    data, digest = self._read_stable(xlsx_path)
-                    xlsx_bytes[xlsx_path] = data
-                    xlsx_hashes[xlsx_path] = digest
-                    input_hashes[xlsx_path.relative_to(source.root).as_posix()] = digest
-                sheet = self.reader.read(
-                    xlsx_path,
-                    component.data.sheet,
-                    source="main",
-                    copies_columns=(source.model.copies_columns.prod, source.model.copies_columns.test),
-                    data=xlsx_bytes[xlsx_path],
-                )
-                # Validate every row, including zero-copy rows. Only after
-                # resolution succeeds do we retain the stage-8 Prod rows.
-                validated_rows = []
-                for row in sheet.rows:
-                    stable = replace(row, instance_id=make_instance_id(source.model.id, component_id, sheet.sheet, row.row_number))
-                    resolved = resolver.resolve_component(component, sheet, stable, owner=document.path)
-                    if copies_for_mode(stable, mode) > 0:
-                        validated_rows.append((stable, resolved))
-                rows = tuple(validated_rows)
-            else:
-                rows = ((None, resolver.resolve_component(component, None, None, owner=document.path)),)
-            for row, resolved in rows:
-                token.check()
-                copies = copies_for_mode(row, mode) if row is not None else 1
-                index = len(instances)
-                instance_id = row.instance_id if row is not None else "static"
-                png_name = f"{index + 1:04d}-{_safe_name(component_id)}-{_safe_name(instance_id)}.png"
-                instance = BuildInstance(
-                    index, component_id, component.name, instance_id,
-                    row.row_number if row is not None else None, copies,
-                    resolved.component, document.path, png_name,
-                )
-                instances.append(instance)
-                paths.update(_resource_paths(resolved.component))
-                requested_fonts.update(_font_families(resolved.component))
-        if not instances:
+            self._process_component(source, component_id, mode, token, resolver, plan)
+        if not plan.instances:
             raise ProjectError(Diagnostic("BUILD_EMPTY", "у выбранных компонентов нет строк с положительным тиражом", source.root))
+        return plan
 
-        resources: dict[str, SnapshotResource] = {}
-        memory_used = 0
-        captured_sources: dict[Path, str] = {}
-        for relative in sorted(paths):
-            token.check()
-            check_exact_case(source.root, relative)
-            path = resolve_project_path(source.root, relative)
-            try:
-                size = path.stat().st_size
-            except OSError as exc:
-                raise ProjectError(Diagnostic("FILE_READ", str(exc), path)) from exc
-            if memory_used + size <= memory_budget_bytes:
-                data, digest = self._read_stable(path)
-                entry = SnapshotResource(relative, digest, len(data), data=data)
-                memory_used += len(data)
-            else:
-                copied, digest, size = self._copy_stable(path, resource_directory)
-                entry = SnapshotResource(relative, digest, size, copied_path=copied)
-            captured_sources[path] = digest
-            input_hashes[relative] = digest
-            resources[relative] = entry
+    @staticmethod
+    def _capture_resource(source: ProjectSnapshot, relative: str, job_directory: Path,
+                          budget: int, token: Cancellation, captured: _ResourceCapture) -> None:
+        token.check()
+        check_exact_case(source.root, relative)
+        path = resolve_project_path(source.root, relative)
+        try:
+            size = path.stat().st_size
+        except OSError as exc:
+            raise ProjectError(Diagnostic("FILE_READ", str(exc), path)) from exc
+        if captured.memory_used + size <= budget:
+            data, digest = read_stable(path)
+            resource = SnapshotResource(relative, digest, len(data), data=data)
+            captured.memory_used += len(data)
+        else:
+            copied, digest, size = copy_stable(path, job_directory / "resources")
+            resource = SnapshotResource(relative, digest, size, copied_path=copied)
+        captured.resources[relative] = resource
+        captured.input_hashes[relative] = digest
+        captured.source_hashes[path] = digest
 
-        # Accept the snapshot only if every source still matches the captured version.
-        for path, expected in {**source_file_hashes, **xlsx_hashes, **captured_sources}.items():
+    def _capture_resources(self, source: ProjectSnapshot, plan: _BuildPlan, job_directory: Path,
+                           budget: int, token: Cancellation) -> _ResourceCapture:
+        captured = _ResourceCapture(input_hashes=dict(plan.input_hashes))
+        for relative in sorted(plan.resource_paths):
+            self._capture_resource(source, relative, job_directory, budget, token, captured)
+        return captured
+
+    @staticmethod
+    def _verify_sources(source_hashes: Mapping[Path, str], captured_hashes: Mapping[Path, str],
+                        token: Cancellation) -> None:
+        for path, expected in {**source_hashes, **captured_hashes}.items():
             token.check()
             try:
                 actual = file_hash(path)
@@ -293,115 +255,50 @@ class InputSnapshotBuilder:
                 raise ProjectError(Diagnostic("FILE_READ", str(exc), path)) from exc
             if actual != expected:
                 raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "файл изменился во время подготовки снимка", path))
-        image_warnings: list[Diagnostic] = []
-        quality_loader = SnapshotResourceLoader(resources)
+
+    @staticmethod
+    def _quality_warnings_for_instance(source: ProjectSnapshot, instance: BuildInstance,
+                                       loader: SnapshotResourceLoader) -> list[Diagnostic]:
+        binding = instance.component.data
+        measurements = measure_component_images(
+            instance.component, source.model, loader, instance.document_path, bindings_resolved=True)
+        warnings = []
+        for measurement in measurements:
+            warning = measurement.diagnostic(
+                instance.document_path,
+                source=binding.source if binding else None,
+                sheet=binding.sheet if binding else None,
+            )
+            if warning is not None:
+                if instance.row_number is not None:
+                    warning = replace(warning, message=f"строка Excel {instance.row_number}: {warning.message}")
+                warnings.append(warning)
+        return warnings
+
+    def _quality_warnings(self, source: ProjectSnapshot, instances: list[BuildInstance],
+                          resources: Mapping[str, SnapshotResource]) -> tuple[Diagnostic, ...]:
+        loader = SnapshotResourceLoader(resources)
+        warnings = []
         for instance in instances:
-            owner = instance.document_path
-            data_binding = instance.component.data
-            measurements = measure_component_images(
-                instance.component,
-                source.model,
-                quality_loader,
-                owner,
-                bindings_resolved=True,
-            )
-            for measurement in measurements:
-                warning = measurement.diagnostic(
-                    owner,
-                    source=data_binding.source if data_binding else None,
-                    sheet=data_binding.sheet if data_binding else None,
-                )
-                if warning is not None:
-                    if instance.row_number is not None:
-                        warning = replace(
-                            warning,
-                            message=f"строка Excel {instance.row_number}: {warning.message}",
-                        )
-                    image_warnings.append(warning)
-        snapshot = BuildInputSnapshot(
-            job_id=job_id,
-            root=source.root,
-            job_directory=job_directory,
-            staging_directory=staging,
-            project=source.model.model_copy(deep=True),
-            print_settings=print_settings or source.model.print,
-            mode=mode,
-            instances=tuple(instances),
-            resources=MappingProxyType(resources),
-            input_hashes=MappingProxyType(input_hashes),
-            font_families=tuple(sorted(requested_fonts)),
-            registered_font_ids=(),
-            max_render_workers=max_render_workers,
-            memory_budget_bytes=memory_budget_bytes,
-            warnings=tuple(image_warnings),
+            warnings.extend(self._quality_warnings_for_instance(source, instance, loader))
+        return tuple(warnings)
+
+    @staticmethod
+    def _assemble_snapshot(source: ProjectSnapshot, plan: _BuildPlan, captured: _ResourceCapture,
+                           job_id: str, job_directory: Path, staging: Path,
+                           print_settings: PrintSettings | None, mode: str, workers: int,
+                           budget: int, warnings: tuple[Diagnostic, ...]) -> BuildInputSnapshot:
+        return BuildInputSnapshot(
+            job_id=job_id, root=source.root, job_directory=job_directory,
+            staging_directory=staging, project=source.model.model_copy(deep=True),
+            print_settings=print_settings or source.model.print, mode=mode,
+            instances=tuple(plan.instances), resources=MappingProxyType(captured.resources),
+            input_hashes=MappingProxyType(captured.input_hashes),
+            font_families=tuple(sorted(plan.font_families)), registered_font_ids=(),
+            max_render_workers=workers, memory_budget_bytes=budget, warnings=warnings,
         )
-        return snapshot if defer_font_registration else self.register_snapshot_fonts(snapshot)
 
-    def register_snapshot_fonts(self, snapshot: BuildInputSnapshot) -> BuildInputSnapshot:
-        """Register and capture only fonts used by printable resolved instances.
-
-        This method must be called in the Qt main thread before render tasks are
-        issued. Invalid unrelated font files are deliberately ignored.
-        """
-        requested = {name.casefold(): name for name in snapshot.font_families}
-        requested_keys = {_font_key(name): name for name in snapshot.font_families}
-        resources = dict(snapshot.resources)
-        input_hashes = dict(snapshot.input_hashes)
-        memory_used = sum(item.size for item in resources.values() if item.data is not None)
-        resource_directory = snapshot.job_directory / "resources"
-        font_ids: list[int] = []
-        invalid_candidates: dict[str, Path] = {}
-        font_root = snapshot.root / "assets" / "fonts"
-        try:
-            if font_root.exists():
-                for path in sorted(font_root.rglob("*")):
-                    if path.is_symlink():
-                        raise ProjectError(Diagnostic("PATH_SYMLINK", "символические ссылки шрифтов не поддерживаются", path))
-                    if not path.is_file() or path.suffix.lower() not in (".ttf", ".otf"):
-                        continue
-                    data, digest = self._read_stable(path)
-                    raw = QRawFont(QByteArray(data), 16.0)
-                    if not raw.isValid():
-                        key = _font_key(path.stem)
-                        if key in requested_keys:
-                            invalid_candidates[key] = path
-                        continue
-                    family = raw.familyName()
-                    if family.casefold() not in requested:
-                        continue
-                    font_id = QFontDatabase.addApplicationFontFromData(QByteArray(data))
-                    if font_id < 0:
-                        raise ProjectError(Diagnostic("FONT_INVALID", "не удалось зарегистрировать используемый шрифт", path))
-                    font_ids.append(font_id)
-                    if file_hash(path) != digest:
-                        raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "шрифт изменился во время подготовки снимка", path))
-                    relative = path.relative_to(snapshot.root).as_posix()
-                    input_hashes[relative] = digest
-                    if memory_used + len(data) <= snapshot.memory_budget_bytes:
-                        resources[relative] = SnapshotResource(relative, digest, len(data), data=data)
-                        memory_used += len(data)
-                    else:
-                        resource_directory.mkdir(parents=True, exist_ok=True)
-                        copied = resource_directory / f"{digest}{path.suffix.lower()}"
-                        if not copied.exists():
-                            copied.write_bytes(data)
-                        resources[relative] = SnapshotResource(relative, digest, len(data), copied_path=copied)
-
-            available = {family.casefold() for family in QFontDatabase.families()}
-            invalid = next((invalid_candidates.get(_font_key(name)) for name in snapshot.font_families if _font_key(name) in invalid_candidates), None)
-            if invalid is not None:
-                raise ProjectError(Diagnostic("FONT_INVALID", "используемый файл шрифта повреждён", invalid))
-            missing = sorted(name for name in snapshot.font_families if name.casefold() not in available)
-            if missing:
-                raise ProjectError(Diagnostic("FONT_MISSING", f"шрифты не найдены: {', '.join(missing)}", snapshot.root))
-
-            return replace(
-                snapshot,
-                resources=MappingProxyType(resources),
-                input_hashes=MappingProxyType(input_hashes),
-                registered_font_ids=tuple(font_ids),
-            )
-        except Exception:
-            for font_id in reversed(font_ids):
-                QFontDatabase.removeApplicationFont(font_id)
-            raise
+    @staticmethod
+    def register_snapshot_fonts(snapshot: BuildInputSnapshot) -> BuildInputSnapshot:
+        """Register captured fonts in the main thread before render tasks start."""
+        return _register_snapshot_fonts(snapshot)

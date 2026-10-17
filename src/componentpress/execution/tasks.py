@@ -9,11 +9,11 @@ from PySide6.QtGui import QImage, QPainter
 
 from componentpress.application.contracts import BuildInputSnapshot, BuildInstance
 from componentpress.application.ports import Cancellation
-from componentpress.build.input_snapshot import SnapshotResourceLoader
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.diagnostics.logging import log_exception
 from componentpress.rendering.geometry import MM_PER_INCH, pixel_size
 from componentpress.rendering.painter import paint_component
+from componentpress.rendering.snapshot_resources import SnapshotResourceLoader
 
 
 class RenderInstanceTask(QRunnable):

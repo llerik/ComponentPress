@@ -263,38 +263,6 @@
       "stage": "9а",
       "owner": "coder:src/componentpress/build"
     },
-    "src/componentpress/build/input_snapshot.py|SnapshotResourceLoader.image": {
-      "path": "src/componentpress/build/input_snapshot.py",
-      "name": "SnapshotResourceLoader.image",
-      "line": 95,
-      "length": 22,
-      "stage": "3а",
-      "owner": "coder:src/componentpress/build"
-    },
-    "src/componentpress/build/input_snapshot.py|InputSnapshotBuilder._copy_stable": {
-      "path": "src/componentpress/build/input_snapshot.py",
-      "name": "InputSnapshotBuilder._copy_stable",
-      "line": 178,
-      "length": 33,
-      "stage": "3а",
-      "owner": "coder:src/componentpress/build"
-    },
-    "src/componentpress/build/input_snapshot.py|InputSnapshotBuilder.create": {
-      "path": "src/componentpress/build/input_snapshot.py",
-      "name": "InputSnapshotBuilder.create",
-      "line": 212,
-      "length": 170,
-      "stage": "3а",
-      "owner": "coder:src/componentpress/build"
-    },
-    "src/componentpress/build/input_snapshot.py|InputSnapshotBuilder.register_snapshot_fonts": {
-      "path": "src/componentpress/build/input_snapshot.py",
-      "name": "InputSnapshotBuilder.register_snapshot_fonts",
-      "line": 383,
-      "length": 68,
-      "stage": "3а",
-      "owner": "coder:src/componentpress/build"
-    },
     "src/componentpress/build/pdf_writer.py|write_print_pdf": {
       "path": "src/componentpress/build/pdf_writer.py",
       "name": "write_print_pdf",
@@ -1959,6 +1927,7 @@
         "componentpress.project_io.paths",
         "componentpress.project_io.repository",
         "componentpress.project_io.schema_checks",
+        "componentpress.project_io.snapshot_capture",
         "componentpress.project_io.transactions",
         "componentpress.project_io.yaml_codec",
         "componentpress.rendering",
@@ -1969,6 +1938,8 @@
         "componentpress.rendering.image_quality",
         "componentpress.rendering.painter",
         "componentpress.rendering.resources",
+        "componentpress.rendering.snapshot_fonts",
+        "componentpress.rendering.snapshot_resources",
         "jinja2",
         "jinja2._identifier",
         "jinja2.async_utils",
@@ -2252,6 +2223,7 @@
         "componentpress.project_io",
         "componentpress.project_io.files",
         "componentpress.project_io.paths",
+        "componentpress.project_io.snapshot_capture",
         "componentpress.rendering",
         "componentpress.rendering.exporter",
         "componentpress.rendering.fonts",
@@ -2260,6 +2232,8 @@
         "componentpress.rendering.image_quality",
         "componentpress.rendering.painter",
         "componentpress.rendering.resources",
+        "componentpress.rendering.snapshot_fonts",
+        "componentpress.rendering.snapshot_resources",
         "jinja2",
         "jinja2._identifier",
         "jinja2.async_utils",
