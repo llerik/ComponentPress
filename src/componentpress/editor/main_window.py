@@ -2156,7 +2156,7 @@ class MainWindow(QMainWindow):
             self._active_build_job = self.controller.start_build(
                 request,
                 on_progress=self._on_build_progress,
-                on_finished=self._on_build_finished,
+                on_finished=self._queue_build_finished,
             )
         except Exception as exc:
             progress.close()
@@ -2196,6 +2196,13 @@ class MainWindow(QMainWindow):
         if self._close_after_build:
             self._close_after_build = False
             self.close()
+
+    def _queue_build_finished(self, result: BuildResult) -> None:
+        QTimer.singleShot(0, lambda: self._deliver_build_finished(result))
+
+    def _deliver_build_finished(self, result: BuildResult) -> None:
+        if result.job_id == self._active_build_job:
+            self._on_build_finished(result)
 
     def _cancel_build(self) -> None:
         if self._active_build_job and self.controller.cancel_build(self._active_build_job):

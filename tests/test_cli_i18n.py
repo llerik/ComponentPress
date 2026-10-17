@@ -162,10 +162,13 @@ def test_build_warning_uses_the_selected_language(language: str, warning: str, t
 
     set_language(language)
     diagnostic = Diagnostic("CLEANUP_PENDING", "cleanup pending", tmp_path, severity="warning")
-    monkeypatch.setattr(cli, "BuildService", lambda _service: SimpleNamespace(run=lambda *_args, **_kwargs: SimpleNamespace(
+    result = SimpleNamespace(
         status="succeeded", diagnostics=(diagnostic,), output_directory=tmp_path / "output",
         pdf_path=tmp_path / "output" / "print.pdf",
-    )))
+    )
+    monkeypatch.setattr(cli, "build_service", lambda _service: SimpleNamespace(
+        start=lambda _session, _request, *, on_progress, on_finished: (on_finished(result), "job-1")[1],
+    ))
     monkeypatch.setattr("componentpress.rendering.exporter.ensure_gui_application", lambda: None)
     args = SimpleNamespace(folder=tmp_path, component=None, mode="prod", workers=1)
     assert cli._run_build(args, SimpleNamespace(open_session=lambda _folder: object())) == 0

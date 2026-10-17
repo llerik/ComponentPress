@@ -8,8 +8,12 @@ from componentpress.platforms.services import ProjectWriteLock
 from componentpress.application.project_service import ProjectService
 from componentpress.application.preview_service import PreviewService
 from componentpress.application.build_service import BuildService
+from componentpress.execution.build_runtime import QtBuildRuntime
+from componentpress.execution.cancellation import CancellationToken
+from componentpress.build.input_snapshot import InputSnapshotBuilder
 from componentpress.bindings.resolver import BindingResolver
 from componentpress.data_sources import XlsxReader
+from componentpress.i18n import tr
 from componentpress.i18n.diagnostics import format_diagnostic
 from componentpress.project_io.validation_state import PreviewValidationStore
 from componentpress.rendering.exporter import render_component
@@ -37,13 +41,18 @@ def project_controller() -> "ProjectController":
     from componentpress.editor.controllers import ProjectController
 
     service = project_service()
-    return ProjectController(service, preview_service(), BuildService(service))
+    return ProjectController(service, preview_service(), build_service(service))
 
 
 def preview_service(reader=None) -> PreviewService:
     return PreviewService(reader or XlsxReader(), PreviewValidationStore(), BindingResolver, render_component)
 
 
-def build_service() -> BuildService:
-    service = project_service()
-    return BuildService(service)
+def build_service(service=None) -> BuildService:
+    service = service or project_service()
+    return BuildService(
+        service.save_all,
+        lambda root: QtBuildRuntime(root, InputSnapshotBuilder(), ProjectWriteLock),
+        CancellationToken,
+        lambda: tr("ui.build_prepare"),
+    )

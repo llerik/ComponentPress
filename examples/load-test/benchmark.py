@@ -27,13 +27,13 @@ from PySide6.QtCore import QSize
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtPdf import QPdfDocument
 
-from componentpress.application.build_service import BuildService
+from componentpress.bootstrap import build_service
 from componentpress.application.contracts import BuildRequest
 from componentpress.application.preview_service import ValidationIssues
-from componentpress.bootstrap import preview_service
-from componentpress.bootstrap import project_service
+from componentpress.bootstrap import preview_service, project_service
 from componentpress.build.engine import BuildEngine
 from componentpress.build.input_snapshot import InputSnapshotBuilder
+from componentpress.execution.qt_wait import run_build
 from componentpress.data_sources import XlsxReader
 from componentpress.i18n import set_language
 from componentpress.rendering.exporter import ensure_gui_application
@@ -217,7 +217,7 @@ def main() -> None:
     reader = XlsxReader()
     service = project_service()
     session = service.open_session(ROOT)
-    builder = BuildService(service)
+    builder = build_service(service)
     source_meta = source_fingerprint()
     hardware = system_info()
     previous = None
@@ -265,7 +265,7 @@ def main() -> None:
             with patch.object(InputSnapshotBuilder, "create", timed_create), \
                  patch.object(BuildEngine, "_render", staticmethod(timed_render)), \
                  patch.object(engine_module, "write_print_pdf", timed_pdf):
-                result = builder.run(session, BuildRequest(mode=mode, max_render_workers=2))
+                result = run_build(builder, session, BuildRequest(mode=mode, max_render_workers=2))
             total_build_ms = (time.perf_counter() - started) * 1000
             assert result.status == "succeeded", (mode, iteration, result.diagnostics)
             assert digest(XLSX) == image_before, "The application changed the source workbook"

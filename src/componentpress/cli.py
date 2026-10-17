@@ -5,13 +5,13 @@ import sys
 import atexit
 from PySide6.QtCore import QSettings
 
-from componentpress.bootstrap import project_service
-from componentpress.application.build_service import BuildService
+from componentpress.bootstrap import build_service, project_service
 from componentpress.application.contracts import BuildRequest
 from componentpress.domain.diagnostics import ProjectError
 from componentpress.diagnostics import logging as technical_log
 from componentpress.i18n import set_language, validate_catalogs, tr
 from componentpress.i18n.diagnostics import format_diagnostic
+from componentpress.execution.qt_wait import run_build
 
 
 _ARGPARSE_PATTERNS = (
@@ -229,7 +229,7 @@ def _run_build(args, service) -> int:
         mode=args.mode,
         max_render_workers=args.workers,
     )
-    result = BuildService(service).run(session, request, on_progress=_print_build_progress)
+    result = run_build(build_service(service), session, request, on_progress=_print_build_progress)
     if result.status != "succeeded":
         for diagnostic in result.diagnostics:
             print(format_diagnostic(diagnostic), file=sys.stderr)

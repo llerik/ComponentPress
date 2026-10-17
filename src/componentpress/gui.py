@@ -14,10 +14,10 @@ from PySide6.QtCore import QLibraryInfo, QSettings, QTranslator
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QTreeView
 
-from componentpress.bootstrap import project_controller
+from componentpress.bootstrap import build_service, project_controller
 from componentpress.domain.component import SizeMM
 from componentpress.application.contracts import BuildRequest
-from componentpress.application.build_service import BuildService
+from componentpress.execution.qt_wait import run_build
 from componentpress.app_assets import load_application_icon
 from componentpress.editor import MainWindow
 from componentpress.diagnostics import logging as technical_log
@@ -307,8 +307,8 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     if not window._refresh_preview(first_tab) or not _wait_for_preview(first_tab):
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     if window.controller.build is None:
-        window.controller.build = BuildService(window.controller.service)
-    build_result = window.controller.build.run(window.session, BuildRequest(max_render_workers=2))
+        window.controller.build = build_service(window.controller.service)
+    build_result = run_build(window.controller.build, window.session, BuildRequest(max_render_workers=2))
     if (
         build_result.status != "succeeded"
         or build_result.pdf_path is None
@@ -320,7 +320,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     window.data_mode.setChecked(True)
     if window.data_mode.mode != "test":
         return _smoke_failure(root, inspect.currentframe().f_lineno)
-    test_build = window.controller.build.run(window.session, BuildRequest(max_render_workers=2, mode="test"))
+    test_build = run_build(window.controller.build, window.session, BuildRequest(max_render_workers=2, mode="test"))
     if test_build.status != "succeeded" or test_build.mode != "test" or test_build.report_path is None:
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     test_report = json.loads(test_build.report_path.read_text(encoding="utf-8"))
@@ -376,7 +376,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     from componentpress.application.sessions import ProjectSession
 
-    restored_result = BuildService(window.controller.service).run(ProjectSession.from_snapshot(restored_snapshot), BuildRequest(max_render_workers=2))
+    restored_result = run_build(build_service(window.controller.service), ProjectSession.from_snapshot(restored_snapshot), BuildRequest(max_render_workers=2))
     if restored_result.status != "succeeded" or restored_result.pdf_path is None or not restored_result.pdf_path.is_file():
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     cancelled = []

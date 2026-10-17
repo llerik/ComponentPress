@@ -12,9 +12,8 @@ from PySide6.QtCore import QEventLoop, QSize
 from PySide6.QtGui import QFontDatabase, QImage
 from PySide6.QtPdf import QPdfDocument
 
-from componentpress.application.build_service import BuildService
 from componentpress.application.contracts import BuildRequest, SnapshotResource
-from componentpress.bootstrap import project_service
+from componentpress.bootstrap import build_service, project_service
 from componentpress.build.engine import BuildEngine
 from componentpress.build.imposition import calculate_imposition, cut_grid_lines
 from componentpress.build.input_snapshot import BuildInstance, InputSnapshotBuilder, SnapshotResourceLoader
@@ -23,6 +22,7 @@ from componentpress.domain.project import PrintSettings
 from componentpress.execution.cancellation import CancellationToken
 from componentpress.execution.cleanup import cleanup_job_directory
 from componentpress.execution.job_store import JobStore
+from componentpress.execution.qt_wait import run_build
 from componentpress.execution.tasks import RenderInstanceTask
 from componentpress.editor.controllers import ProjectController
 from componentpress.domain.diagnostics import Diagnostic
@@ -79,7 +79,7 @@ def test_pdf_omits_cut_grid_when_setting_is_disabled(tmp_path: Path) -> None:
         "cut_lines: true", "cut_lines: false", 1
     ), encoding="utf-8")
     service = project_service()
-    result = BuildService(service).run(service.open_session(root), BuildRequest(max_render_workers=1))
+    result = run_build(build_service(service), service.open_session(root), BuildRequest(max_render_workers=1))
     assert result.status == "succeeded", result.diagnostics
 
     pdf = QPdfDocument()
@@ -96,11 +96,11 @@ def test_build_is_deterministic_for_one_two_and_four_workers(tmp_path: Path) -> 
     root = _copy_demo(tmp_path)
     service = project_service()
     session = service.open_session(root)
-    builds = BuildService(service)
+    builds = build_service(service)
     hashes = []
     results = []
     for workers in (1, 2, 4):
-        result = builds.run(session, BuildRequest(max_render_workers=workers))
+        result = run_build(builds, session, BuildRequest(max_render_workers=workers))
         assert result.status == "succeeded", result.diagnostics
         assert result.cleanup_state == "done"
         report = json.loads(result.report_path.read_text(encoding="utf-8"))
@@ -341,7 +341,7 @@ def test_service_can_cancel_during_background_preparation(tmp_path: Path) -> Non
     root = _copy_demo(tmp_path)
     service = project_service()
     session = service.open_session(root)
-    builds = BuildService(service)
+    builds = build_service(service)
     loop = QEventLoop()
     results = []
     job_id = builds.start(session, BuildRequest(), on_finished=lambda result: (results.append(result), loop.quit()))
@@ -472,7 +472,8 @@ def test_unused_broken_project_font_does_not_block_build(tmp_path: Path) -> None
     font.parent.mkdir(parents=True, exist_ok=True)
     font.write_bytes(b"not a font")
     service = project_service()
-    result = BuildService(service).run(
+    result = run_build(
+        build_service(service),
         service.open_session(root),
         BuildRequest(component_ids=("event-card",), max_render_workers=1),
     )
@@ -493,7 +494,8 @@ def test_broken_used_project_font_is_diagnosed(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     service = project_service()
-    result = BuildService(service).run(
+    result = run_build(
+        build_service(service),
         service.open_session(root),
         BuildRequest(component_ids=("event-card",), max_render_workers=1),
     )
@@ -527,11 +529,11 @@ def test_recovery_warnings_reach_controller_and_build_result(tmp_path: Path) -> 
     unknown.mkdir(parents=True)
     (unknown / "job.json").write_text("broken", encoding="utf-8")
     service = project_service()
-    builds = BuildService(service)
+    builds = build_service(service)
     controller = ProjectController(service, build=builds)
     session = controller.open(root)
     assert any(item.code == "JOB_METADATA_INVALID" for item in controller.recovery_diagnostics)
-    result = builds.run(session, BuildRequest(component_ids=("event-card",), max_render_workers=1))
+    result = run_build(builds, session, BuildRequest(component_ids=("event-card",), max_render_workers=1))
     assert result.status == "succeeded", result.diagnostics
     assert any(item.code == "JOB_METADATA_INVALID" for item in result.diagnostics)
 

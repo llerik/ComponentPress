@@ -14,15 +14,15 @@ from PySide6.QtGui import QColor, QImage
 from PySide6.QtPdf import QPdfDocument
 
 from componentpress.application.contracts import DocumentSnapshot, ProjectSnapshot
-from componentpress.application.build_service import BuildService
 from componentpress.application.contracts import BuildRequest
-from componentpress.bootstrap import project_controller, project_service
+from componentpress.bootstrap import build_service, project_controller, project_service
 from componentpress.domain.component import ComponentDefinition, SizeMM
 from componentpress.domain.nodes import HtmlNode, ImageNode
 from componentpress.domain.project import ProjectDefinition
 from componentpress.editor.main_window import MainWindow
 from componentpress.project_io.repository import FileProjectRepository
 from componentpress.rendering.exporter import ensure_gui_application, render_component
+from componentpress.execution.qt_wait import run_build
 from componentpress.rendering.geometry import effective_image_dpi
 from componentpress.rendering.image_quality import measure_component_images
 from componentpress.rendering.resources import ProjectResourceLoader
@@ -112,7 +112,8 @@ def test_low_resolution_image_is_reported_without_blocking_build(tmp_path: Path)
     root = tmp_path / "demo"
     shutil.copytree(DEMO, root)
     service = project_service()
-    result = BuildService(service).run(
+    result = run_build(
+        build_service(service),
         service.open_session(root),
         BuildRequest(component_ids=("forest-card",), max_render_workers=1),
     )

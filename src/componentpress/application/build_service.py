@@ -1,231 +1,120 @@
-"""Application use case coordinating save, background snapshot and one job."""
+"""Build use case; runtime, persistence and presentation stay at the edges."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Callable
 from uuid import uuid4
 
-from PySide6.QtCore import QEventLoop, QObject, QRunnable, QThreadPool, Qt, Signal
-
-from componentpress.application.contracts import BuildProgress, BuildRequest, BuildResult
-from componentpress.application.ports import Cancellation
+from componentpress.application.contracts import BuildInputSnapshot, BuildProgress, BuildRequest, BuildResult
+from componentpress.application.ports import BuildRuntime, Cancellation
 from componentpress.application.sessions import ProjectSession
-from componentpress.build.input_snapshot import InputSnapshotBuilder
-from componentpress.domain.diagnostics import Diagnostic, ProjectError
-from componentpress.diagnostics.logging import log_event, log_exception
 from componentpress.domain.copy_mode import validate_copy_mode
-from componentpress.execution.cancellation import CancellationToken
-from componentpress.execution.cleanup import cleanup_job_directory
-from componentpress.execution.job_store import JobStore
-from componentpress.execution.thread_runner import ThreadBuildRunner
-from componentpress.platforms.services import ProjectWriteLock
-from componentpress.i18n import tr
-from .project_service import ProjectService
-
-
-class _PreparationSignals(QObject):
-    finished = Signal(object)
-
-
-class _PreparationTask(QRunnable):
-    def __init__(self, builder, source, kwargs, token, signals, job_id):
-        super().__init__()
-        self.builder = builder
-        self.source = source
-        self.kwargs = kwargs
-        self.token = token
-        self.signals = signals
-        self.job_id = job_id
-
-    def run(self) -> None:
-        try:
-            with ProjectWriteLock(self.source.root):
-                snapshot = self.builder.create(self.source, cancellation=self.token, **self.kwargs)
-        except Exception as exc:
-            self.signals.finished.emit((self.job_id, None, exc))
-        else:
-            self.signals.finished.emit((self.job_id, snapshot, None))
+from componentpress.domain.diagnostics import Diagnostic, ProjectError
 
 
 @dataclass
 class _Preparing:
+    runtime: BuildRuntime
     token: Cancellation
-    recovery_diagnostics: tuple[Diagnostic, ...]
-    on_progress: object
-    on_finished: object
+    recovery: tuple[Diagnostic, ...]
+    finished: Callable | None
+    progress: Callable | None
     mode: str
 
 
-class BuildService(QObject):
-    def __init__(self, projects: ProjectService, snapshot_builder: InputSnapshotBuilder | None = None):
-        super().__init__()
-        self.projects = projects
-        self.snapshot_builder = snapshot_builder or InputSnapshotBuilder()
-        self._store: JobStore | None = None
-        self._runner: ThreadBuildRunner | None = None
-        self._preparation_pool = QThreadPool(self)
-        self._preparation_pool.setMaxThreadCount(1)
-        self._preparation_signals = _PreparationSignals(self)
-        self._preparation_signals.finished.connect(self._prepared, Qt.ConnectionType.QueuedConnection)
+class BuildService:
+    def __init__(self, save_all: Callable[[ProjectSession], None], runtime_factory: Callable[[Path], BuildRuntime], cancellation_factory: Callable[[], Cancellation], prepare_message: Callable[[], str]):
+        self.save_all = save_all
+        self.runtime_factory = runtime_factory
+        self.cancellation_factory = cancellation_factory
+        self.prepare_message = prepare_message
+        self._runtimes: dict[Path, BuildRuntime] = {}
         self._preparing: dict[str, _Preparing] = {}
 
-    def _runtime(self, root: Path) -> tuple[JobStore, ThreadBuildRunner]:
-        if self._store is None or self._store.root != root.resolve():
-            if self.is_active():
-                raise ProjectError(Diagnostic("BUILD_ACTIVE", "нельзя сменить проект во время сборки", root))
-            self._store = JobStore(root)
-            self._runner = ThreadBuildRunner(self._store)
-        assert self._runner is not None
-        return self._store, self._runner
+    def _runtime(self, root: Path) -> BuildRuntime:
+        key = root.resolve()
+        if key not in self._runtimes:
+            self._runtimes[key] = self.runtime_factory(key)
+        return self._runtimes[key]
 
     def recover(self, root: Path) -> tuple[Diagnostic, ...]:
-        store, _runner = self._runtime(root)
-        return store.recover()
+        return self._runtime(root).recover(root)
 
     def start(self, session: ProjectSession, request: BuildRequest, *, on_progress=None, on_finished=None) -> str:
         mode = validate_copy_mode(request.mode)
-        store, runner = self._runtime(session.snapshot.root)
-        if runner.is_active() or self._preparing:
-            raise ProjectError(Diagnostic("BUILD_ACTIVE", "для проекта уже выполняется сборка", session.snapshot.root))
-        self.projects.save_all(session)
-        recovery_diagnostics = store.recover()
+        root = session.snapshot.root.resolve()
+        if self._preparing or any(runtime.is_active() for runtime in self._runtimes.values()):
+            raise ProjectError(Diagnostic("BUILD_ACTIVE", "для проекта уже выполняется сборка", root))
+        self.save_all(session)
+        runtime = self._runtime(root)
+        recovery = runtime.recover(root)
         job_id = uuid4().hex
-        log_event("build.started", operation="build", status="started", job_id=job_id, phase="preparation", mode=mode)
-        job_directory = store.initialize(job_id, session.snapshot.model.id)
-        store.update(job_id, mode=mode)
-        token = CancellationToken()
-        self._preparing[job_id] = _Preparing(token, recovery_diagnostics, on_progress, on_finished, mode)
-        if on_progress is not None:
-            on_progress(BuildProgress(job_id, "preparing", 0, 0, tr("ui.build_prepare")))
-        self._preparation_pool.start(_PreparationTask(
-            self.snapshot_builder,
-            session.snapshot,
-            {
-                "job_id": job_id,
-                "job_directory": job_directory,
-                "component_ids": request.component_ids,
-                "mode": mode,
-                "print_settings": request.print_settings,
-                "memory_budget_bytes": request.memory_budget_bytes,
-                "max_render_workers": request.max_render_workers,
-                "defer_font_registration": True,
-            },
-            token,
-            self._preparation_signals,
-            job_id,
-        ))
+        token = self.cancellation_factory()
+        directory = runtime.accept(job_id, session.snapshot.model.id, mode)
+        pending = _Preparing(runtime, token, recovery, on_finished, on_progress, mode)
+        self._preparing[job_id] = pending
+        try:
+            self._progress(pending, BuildProgress(job_id, "preparing", 0, 0, self.prepare_message()))
+            runtime.prepare(session.snapshot, request, job_id, directory, token, lambda snapshot, error: self._prepared(job_id, snapshot, error))
+        except Exception as error:
+            if job_id in self._preparing:
+                self._finish(job_id, runtime.fail(job_id, None, error, mode))
         return job_id
 
-    def _prepared(self, payload) -> None:
-        job_id, snapshot, error = payload
-        pending = self._preparing.pop(job_id, None)
-        if pending is None or self._store is None or self._runner is None:
+    def _prepared(self, job_id: str, snapshot: BuildInputSnapshot | None, error: Exception | None) -> None:
+        pending = self._preparing.get(job_id)
+        if pending is None:
             return
         if error is None and pending.token.cancelled:
-            error = ProjectError(Diagnostic("BUILD_CANCELLED", "сборка отменена пользователем", self._store.root))
-        if error is None:
-            try:
-                # QFontDatabase is process-global: register the exact used set in
-                # this queued main-thread callback before any render task starts.
-                snapshot = self.snapshot_builder.register_snapshot_fonts(snapshot)
-            except Exception as exc:
-                error = exc
+            error = ProjectError(Diagnostic("BUILD_CANCELLED", "сборка отменена пользователем"))
         if error is not None:
-            if not isinstance(error, ProjectError):
-                incident_id = log_exception("build.preparation", error, operation="build", job_id=job_id, phase="preparation", mode=pending.mode)
-                error = ProjectError(Diagnostic("BUILD_PREPARATION_FAILED", "Preparation failed", incident_id=incident_id, message_key="error.preparation_failed"))
-            else:
-                log_event("build.preparation", operation="build", status="cancelled" if error.diagnostic.code == "BUILD_CANCELLED" else "failed", job_id=job_id, phase="preparation", mode=pending.mode, code=error.diagnostic.code)
-            try:
-                cleanup = cleanup_job_directory(self._store, job_id)
-            except Exception as exc:
-                incident_id = log_exception("build.preparation_cleanup", exc, operation="build", job_id=job_id, phase="cleanup", mode=pending.mode)
-                cleanup = (Diagnostic("CLEANUP_PENDING", "очистку подготовки повторит следующее открытие проекта", severity="warning", incident_id=incident_id),)
-            try:
-                self._store.release(job_id)
-            except Exception as exc:
-                log_exception("build.preparation_release", exc, operation="build", job_id=job_id, phase="lock_release", mode=pending.mode)
-            diagnostic = error.diagnostic
-            status = "cancelled" if diagnostic.code == "BUILD_CANCELLED" else "failed"
-            result = BuildResult(
-                job_id,
-                status,
-                diagnostics=(*pending.recovery_diagnostics, diagnostic, *cleanup),
-                cleanup_state="cleanup_pending" if cleanup else "done",
-                mode=pending.mode,
-            )
-            if pending.on_finished is not None:
-                try:
-                    pending.on_finished(result)
-                except Exception as exc:
-                    log_exception("build.preparation_callback", exc, operation="build", job_id=job_id, phase="completion", mode=pending.mode)
+            self._finish(job_id, pending.runtime.fail(job_id, snapshot, error, pending.mode))
             return
-
-        def finished(result: BuildResult) -> None:
-            cleanup_pending = any(item.code in {"CLEANUP_PENDING", "CLEANUP_REFUSED"} for item in pending.recovery_diagnostics)
-            merged = replace(
-                result,
-                diagnostics=(*pending.recovery_diagnostics, *result.diagnostics),
-                cleanup_state="cleanup_pending" if cleanup_pending else result.cleanup_state,
-            )
-            if pending.on_finished is not None:
-                pending.on_finished(merged)
-
         try:
-            self._runner.start(snapshot, pending.on_progress, finished)
-        except Exception as exc:
-            from PySide6.QtGui import QFontDatabase
+            snapshot = pending.runtime.register_fonts(snapshot)
+            self._progress(pending, BuildProgress(job_id, "preparing", 1, 1, self.prepare_message()))
+            pending.runtime.start(snapshot, pending.token, lambda value: self._progress(pending, value), lambda result: self._running_finished(job_id, result))
+        except Exception as start_error:
+            if job_id in self._preparing:
+                self._finish(job_id, pending.runtime.fail(job_id, snapshot, start_error, pending.mode))
 
-            for font_id in reversed(snapshot.registered_font_ids):
-                QFontDatabase.removeApplicationFont(font_id)
-            cleanup = cleanup_job_directory(self._store, job_id)
-            self._store.release(job_id)
-            diagnostic = exc.diagnostic if isinstance(exc, ProjectError) else Diagnostic("BUILD_START_FAILED", str(exc), self._store.root)
-            result = BuildResult(
-                job_id,
-                "failed",
-                diagnostics=(*pending.recovery_diagnostics, diagnostic, *cleanup),
-                cleanup_state="cleanup_pending" if cleanup else "done",
-                mode=pending.mode,
-            )
-            if pending.on_finished is not None:
-                try:
-                    pending.on_finished(result)
-                except Exception as exc:
-                    log_exception("build.completion_callback", exc, operation="build", job_id=job_id, phase="completion", mode=pending.mode)
+    def _running_finished(self, job_id: str, result: BuildResult) -> None:
+        pending = self._preparing.get(job_id)
+        if pending is not None:
+            self._finish(job_id, result)
 
-    def run(self, session: ProjectSession, request: BuildRequest, *, on_progress=None) -> BuildResult:
-        loop = QEventLoop()
-        result: BuildResult | None = None
-
-        def finished(value: BuildResult) -> None:
-            nonlocal result
-            result = value
-            loop.quit()
-
-        self.start(session, request, on_progress=on_progress, on_finished=finished)
-        loop.exec()
-        assert result is not None
-        return result
+    def _finish(self, job_id: str, result: BuildResult) -> None:
+        pending = self._preparing.pop(job_id, None)
+        if pending is None:
+            return
+        cleanup_pending = any(item.code in {"CLEANUP_PENDING", "CLEANUP_REFUSED"} for item in pending.recovery)
+        result = replace(
+            result,
+            diagnostics=(*pending.recovery, *result.diagnostics),
+            cleanup_state="cleanup_pending" if cleanup_pending else result.cleanup_state,
+        )
+        if pending.finished is not None:
+            try:
+                pending.finished(result)
+            except Exception:
+                pass
 
     def cancel(self, job_id: str) -> bool:
-        preparing = self._preparing.get(job_id)
-        if preparing is not None:
-            preparing.token.cancel()
-            log_event("build.cancel_requested", operation="build", status="cancelled", job_id=job_id, phase="preparation", mode=preparing.mode)
-            if self._store is not None:
-                try:
-                    self._store.update(job_id, phase="cancelling")
-                except ProjectError:
-                    pass
-            return True
-        cancelled = bool(self._runner and self._runner.cancel(job_id))
-        if cancelled:
-            log_event("build.cancel_requested", operation="build", status="cancelled", job_id=job_id, phase="rendering")
-        return cancelled
+        pending = self._preparing.get(job_id)
+        if pending is not None:
+            pending.token.cancel()
+            return pending.runtime.cancel(job_id, pending.token)
+        return False
 
     def is_active(self, job_id: str | None = None) -> bool:
-        if job_id is None:
-            return bool(self._preparing) or bool(self._runner and self._runner.is_active())
-        return job_id in self._preparing or bool(self._runner and self._runner.is_active(job_id))
+        return (bool(self._preparing) if job_id is None else job_id in self._preparing) or any(runtime.is_active(job_id) for runtime in self._runtimes.values())
+
+    @staticmethod
+    def _progress(pending: _Preparing, value: BuildProgress) -> None:
+        if pending.progress is not None:
+            try:
+                pending.progress(value)
+            except Exception:
+                pass

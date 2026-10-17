@@ -58,12 +58,16 @@ class ThreadBuildRunner(QObject):
         self.signals.progress.connect(self._deliver_progress, Qt.ConnectionType.QueuedConnection)
         self.signals.finished.connect(self._deliver_finished, Qt.ConnectionType.QueuedConnection)
 
-    def start(self, snapshot: BuildInputSnapshot, on_progress=None, on_finished=None) -> str:
+    def start(self, snapshot: BuildInputSnapshot, on_progress=None, on_finished=None, *, cancellation: Cancellation | None = None) -> str:
         if self._jobs:
             raise RuntimeError("для проекта уже выполняется сборка")
-        token = CancellationToken()
+        token = cancellation or CancellationToken()
         self._jobs[snapshot.job_id] = _RunningJob(snapshot, token, on_progress, on_finished)
-        self.coordinator_pool.start(_CoordinatorTask(BuildEngine(self.store), snapshot, token, self.signals))
+        try:
+            self.coordinator_pool.start(_CoordinatorTask(BuildEngine(self.store), snapshot, token, self.signals))
+        except Exception:
+            self._jobs.pop(snapshot.job_id, None)
+            raise
         return snapshot.job_id
 
     def cancel(self, job_id: str) -> bool:
