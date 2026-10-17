@@ -118,7 +118,7 @@ def test_icon_assets_are_declared_for_python_and_windows_packages() -> None:
     assert '"PySide6/translations") for language in ("ru", "en")' in spec
     expected_assets = {
         "settings.png", "add.png", "save.png", "undo.png", "redo.png", "remove.png", "group.png",
-        "ungroup.png", "zoom_up.png", "zoom_down.png", "by_screen.png", "cursor.png", "image.png",
+        "ungroup.png", "zoom_in.png", "zoom_out.png", "by_screen.png", "cursor.png", "image.png",
         "text.png", "condition.png", "rectangle.png", "ellipse.png", "line.png", "up.png", "down.png",
         "move.png", "delete.png", "left.png", "right.png", "real_size.png", "align_horizontal_left.png",
         "align_horizontal_center.png", "align_horizontal_right.png", "align_vertical_top.png",

@@ -11,10 +11,10 @@ from openpyxl import load_workbook
 import pytest
 
 from componentpress.application.contracts import BuildRequest
-from componentpress.application.png_archive import export_png_archive
-from componentpress.bootstrap import build_service, preview_service, project_repository, project_service
+from componentpress.bootstrap import build_service, export_png_archive, preview_service, project_repository, project_service
 from componentpress.data_sources import XlsxReader
 from componentpress.domain.diagnostics import ProjectError
+from componentpress.domain.diagnostics import Diagnostic
 from componentpress.editor.controllers import ProjectController
 from componentpress.editor.main_window import MainWindow
 from componentpress.execution.cancellation import CancellationToken
@@ -95,6 +95,61 @@ def test_invalid_mode_and_png_archive_conflict_are_rejected(tmp_path: Path) -> N
         export_png_archive(session.snapshot, target, mode="prod", component_ids=("forest-card",))
     assert error.value.diagnostic.code == "ARCHIVE_EXISTS"
     assert target.read_bytes() == b"keep"
+
+
+def test_late_png_zip_conflict_preserves_existing_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import componentpress.execution.png_archive_runtime as png_runtime
+
+    ensure_gui_application()
+    session = project_service().open_session(_copy_demo(tmp_path))
+    target = tmp_path / "raced.zip"
+    original_link = png_runtime.os.link
+
+    def race_link(temporary: Path, destination: Path) -> None:
+        destination.write_bytes(b"another process")
+        original_link(temporary, destination)
+
+    monkeypatch.setattr(png_runtime.os, "link", race_link)
+    with pytest.raises(ProjectError) as error:
+        export_png_archive(session.snapshot, target, component_ids=("forest-card",))
+    assert error.value.diagnostic.code == "ARCHIVE_EXISTS"
+    assert target.read_bytes() == b"another process"
+
+
+def test_cleanup_failure_after_publish_keeps_zip_and_reports_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import componentpress.execution.png_archive_runtime as png_runtime
+
+    ensure_gui_application()
+    session = project_service().open_session(_copy_demo(tmp_path))
+    target = tmp_path / "published.zip"
+    monkeypatch.setattr(
+        png_runtime, "cleanup_job_directory",
+        lambda *_args: (Diagnostic("CLEANUP_PENDING", "pending", severity="warning"),),
+    )
+    result = export_png_archive(session.snapshot, target, component_ids=("forest-card",))
+    assert target.is_file()
+    assert [item.code for item in result.diagnostics] == ["CLEANUP_PENDING"]
+    with zipfile.ZipFile(target) as archive:
+        assert archive.testzip() is None
+
+
+def test_png_zip_progress_callback_can_cancel_before_publication(tmp_path: Path) -> None:
+    ensure_gui_application()
+    session = project_service().open_session(_copy_demo(tmp_path))
+    cancellation = CancellationToken()
+    target = tmp_path / "cancelled-during-render.zip"
+
+    def cancel_after_first_render(progress) -> None:
+        if progress.phase == "render" and progress.completed:
+            cancellation.cancel()
+
+    with pytest.raises(ProjectError) as error:
+        export_png_archive(
+            session.snapshot, target, component_ids=("forest-card",),
+            cancellation=cancellation, on_progress=cancel_after_first_render,
+        )
+    assert error.value.diagnostic.code == "BUILD_CANCELLED"
+    assert not target.exists()
 
 
 def test_empty_selected_mode_and_cancelled_archive_publish_nothing(tmp_path: Path) -> None:

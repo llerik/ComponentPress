@@ -8,7 +8,7 @@ import sys
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QMessageBox
 
-from componentpress.bootstrap import project_service
+from componentpress.bootstrap import project_controller, project_service
 from componentpress.editor.controllers import ProjectController
 from componentpress.editor.main_window import MainWindow
 from componentpress.editor.qt_models import ID_ROLE
@@ -164,7 +164,7 @@ def test_release_smoke_exercises_saved_gui_workflow(tmp_path: Path, qtbot, monke
     from componentpress.diagnostics import logging as technical_log
 
     root = demo(tmp_path)
-    window = MainWindow(ProjectController(project_service()))
+    window = MainWindow(project_controller())
     qtbot.addWidget(window)
     warnings = []
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args: warnings.append(args)))

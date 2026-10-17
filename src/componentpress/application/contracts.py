@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping
+from typing import Literal, Mapping
 
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.diagnostics import Diagnostic
@@ -93,6 +93,22 @@ class BuildRequest:
     max_render_workers: int = 2
     memory_budget_bytes: int = 128 * 1024 * 1024
     mode: str = "prod"
+
+
+@dataclass(frozen=True)
+class PngArchiveProgress:
+    phase: Literal["render", "pack"]
+    completed: int
+    total: int
+
+
+@dataclass(frozen=True)
+class PngArchiveResult:
+    path: Path
+    mode: str
+    png_count: int
+    copies: int
+    diagnostics: tuple[Diagnostic, ...] = ()
 
 
 @dataclass(frozen=True)

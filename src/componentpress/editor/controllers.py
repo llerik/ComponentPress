@@ -11,10 +11,11 @@ from componentpress.domain.diagnostics import Diagnostic, ProjectError
 
 
 class ProjectController:
-    def __init__(self, service: ProjectService, preview: PreviewService | None = None, build: BuildService | None = None):
+    def __init__(self, service: ProjectService, preview: PreviewService | None = None, build: BuildService | None = None, png_archive_exporter=None):
         self.service = service
         self.preview = preview
         self.build = build
+        self.png_archive_exporter = png_archive_exporter
         self.session: ProjectSession | None = None
         self.recovery_diagnostics: tuple[Diagnostic, ...] = ()
 

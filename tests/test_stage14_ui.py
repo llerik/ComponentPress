@@ -222,16 +222,19 @@ def test_instance_export_uses_copy_switch_mode(tmp_path: Path, qtbot, monkeypatc
 
 
 @pytest.mark.parametrize("mode", ("prod", "test"))
-def test_png_zip_uses_copy_switch_mode_and_filename(tmp_path: Path, qtbot, monkeypatch, mode: str) -> None:
+@pytest.mark.parametrize("language", ("ru", "en"))
+def test_png_zip_uses_copy_switch_mode_and_filename(tmp_path: Path, qtbot, monkeypatch, mode: str, language: str) -> None:
     from types import SimpleNamespace
-    import componentpress.application.png_archive as png_archive
+    from componentpress.i18n import set_language, tr
 
+    set_language(language)
     _root, window, _service = make_window(tmp_path, qtbot)
     window.open_component("forest-card")
     window.data_mode.setChecked(mode == "test")
     window.save_all = lambda: True
     calls = []
     suggested_names = []
+    dialog_text = []
 
     class Choice:
         class ButtonRole:
@@ -243,9 +246,11 @@ def test_png_zip_uses_copy_switch_mode_and_filename(tmp_path: Path, qtbot, monke
         def __init__(self, _parent):
             self.active = None
 
-        def setWindowTitle(self, _value): pass
-        def setText(self, _value): pass
+        def setWindowTitle(self, value): dialog_text.append(value)
+        def setText(self, value): dialog_text.append(value)
         def addButton(self, _value, _role=None):
+            if isinstance(_value, str):
+                dialog_text.append(_value)
             button = object()
             if self.active is None:
                 self.active = button
@@ -254,23 +259,30 @@ def test_png_zip_uses_copy_switch_mode_and_filename(tmp_path: Path, qtbot, monke
         def clickedButton(self): return self.active
 
     monkeypatch.setattr(main_window_module, "QMessageBox", Choice)
-    def choose_archive(_parent, _title, suggested, _filter):
+    def choose_archive(_parent, title, suggested, _filter):
+        dialog_text.append(title)
         suggested_names.append(suggested)
         return str(tmp_path / "out.zip"), ""
 
     monkeypatch.setattr(main_window_module.QFileDialog, "getSaveFileName", choose_archive)
     monkeypatch.setattr(
-        png_archive, "export_png_archive",
+        window.controller, "png_archive_exporter",
         lambda _snapshot, path, **kwargs: (
             calls.append((Path(path), kwargs["mode"])),
-            SimpleNamespace(path=Path(path), png_count=1, copies=1, mode=kwargs["mode"]),
+            SimpleNamespace(path=Path(path), png_count=1, copies=1, mode=kwargs["mode"], diagnostics=()),
         )[1],
     )
 
     window._export_png_archive()
     assert calls == [(tmp_path / "out.zip", mode)]
     assert suggested_names == [f"forest-card-{mode}.zip"]
-    assert window.statusBar().currentMessage().find(mode) >= 0
+    assert dialog_text == [
+        tr("ui.png_export_title"), tr("ui.png_export_choice"),
+        tr("ui.png_active"), tr("ui.png_all"), tr("ui.png_save"),
+    ]
+    assert window.statusBar().currentMessage().startswith(
+        tr("ui.png_created", path=tmp_path / "out.zip", png_count=1, copies=1, mode=mode)
+    )
 
 
 def test_project_settings_action_tracks_project_and_tab_state(tmp_path: Path, qtbot) -> None:

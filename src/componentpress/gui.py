@@ -326,9 +326,8 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     test_report = json.loads(test_build.report_path.read_text(encoding="utf-8"))
     if test_report.get("mode") != "test" or test_report.get("counts", {}).get("png", 0) < 1:
         return _smoke_failure(root, inspect.currentframe().f_lineno)
-    from componentpress.application.png_archive import export_png_archive
     test_zip = root / ".componentpress" / "release-smoke-test.zip"
-    zip_result = export_png_archive(window.session.snapshot, test_zip, mode="test", component_ids=(first_id,))
+    zip_result = window.controller.png_archive_exporter(window.session.snapshot, test_zip, mode="test", component_ids=(first_id,))
     expected_test_pngs = 2 if window.session.documents[first_id].model.data is not None else 1
     if zip_result.png_count != expected_test_pngs or not test_zip.is_file():
         return _smoke_failure(root, inspect.currentframe().f_lineno)

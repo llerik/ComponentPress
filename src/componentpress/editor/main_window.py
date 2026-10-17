@@ -106,6 +106,12 @@ from componentpress.diagnostics import logging as technical_log
 import zipfile
 
 
+def _png_archive_status(result) -> str:
+    message = tr("ui.png_created", path=result.path, png_count=result.png_count, copies=result.copies, mode=result.mode)
+    warning = " " + tr("ui.png_cleanup_warning") if result.diagnostics else ""
+    return message + warning
+
+
 class MainWindow(QMainWindow):
     def __init__(self, controller: ProjectController, parent=None):
         super().__init__(parent)
@@ -2086,10 +2092,10 @@ class MainWindow(QMainWindow):
         if self.session is None or not self.save_all():
             return
         choice = QMessageBox(self)
-        choice.setWindowTitle("Экспорт PNG ZIP")
-        choice.setText("Какие компоненты включить в архив?")
-        active_button = choice.addButton("Активный компонент", QMessageBox.ButtonRole.AcceptRole) if self.active_tab is not None else None
-        project_button = choice.addButton("Весь проект", QMessageBox.ButtonRole.AcceptRole)
+        choice.setWindowTitle(tr("ui.png_export_title"))
+        choice.setText(tr("ui.png_export_choice"))
+        active_button = choice.addButton(tr("ui.png_active"), QMessageBox.ButtonRole.AcceptRole) if self.active_tab is not None else None
+        project_button = choice.addButton(tr("ui.png_all"), QMessageBox.ButtonRole.AcceptRole)
         choice.addButton(QMessageBox.StandardButton.Cancel)
         choice.exec()
         clicked = choice.clickedButton()
@@ -2097,28 +2103,28 @@ class MainWindow(QMainWindow):
             return
         component_ids = (self.active_tab.component_id,) if self.active_tab is not None and clicked is active_button else None
         target_name = f"{self.active_tab.component_id}-{self.data_mode.mode}.zip" if component_ids else f"{self.session.snapshot.model.id}-{self.data_mode.mode}.zip"
-        filename, _ = QFileDialog.getSaveFileName(self, "Сохранить PNG ZIP", target_name, "ZIP (*.zip)")
+        filename, _ = QFileDialog.getSaveFileName(self, tr("ui.png_save"), target_name, "ZIP (*.zip)")
         if not filename:
             return
         try:
-            from componentpress.application.png_archive import export_png_archive
             from componentpress.execution.cancellation import CancellationToken
 
             cancellation = CancellationToken()
             progress = QProgressDialog(tr("ui.archive_prepare"), tr("action.cancel_build"), 0, 0, self)
-            progress.setWindowTitle("Экспорт PNG ZIP")
+            progress.setWindowTitle(tr("ui.png_export_title"))
             progress.setAutoClose(False)
             progress.setAutoReset(False)
             progress.canceled.connect(cancellation.cancel)
             progress.show()
 
-            def update_progress(done: int, total: int, phase: str) -> None:
-                progress.setRange(0, max(total, 1))
-                progress.setValue(done)
-                progress.setLabelText(phase)
+            def update_progress(value) -> None:
+                progress.setRange(0, max(value.total, 1))
+                progress.setValue(value.completed)
+                phase = "ui.png_progress_render" if value.phase == "render" else "ui.png_progress_pack"
+                progress.setLabelText(tr(phase))
                 QApplication.processEvents()
 
-            result = export_png_archive(
+            result = self.controller.png_archive_exporter(
                 self.session.snapshot,
                 Path(filename),
                 mode=self.data_mode.mode,
@@ -2130,14 +2136,12 @@ class MainWindow(QMainWindow):
             if "progress" in locals():
                 progress.close()
             if exc.diagnostic.code == "BUILD_CANCELLED":
-                self.statusBar().showMessage("Экспорт PNG ZIP отменён", 5000)
+                self.statusBar().showMessage(tr("ui.png_cancelled"), 5000)
                 return
             self._show_error(exc)
             return
         progress.close()
-        self.statusBar().showMessage(
-            f"PNG ZIP создан: {result.path} ({result.png_count} PNG, {result.copies} копий, {result.mode})", 7000
-        )
+        self.statusBar().showMessage(_png_archive_status(result), 7000)
 
     def _start_build(self, active_only: bool) -> None:
         if self.session is None or self.controller.build is None or self._active_build_job is not None or self._version_task is not None or self._build_pending_active_only is not None:

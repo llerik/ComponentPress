@@ -43,19 +43,32 @@ class JobStore:
         if not lock.tryLock(0):
             raise ProjectError(Diagnostic("JOB_LOCKED", "задание занято другим владельцем", directory))
         self._locks[job_id] = lock
-        directory.mkdir(parents=True)
-        self.write(job_id, {
-            "metadata_version": self.METADATA_VERSION,
-            "job_id": job_id,
-            "project_id": project_id,
-            "session_id": f"{socket.gethostname()}-{os.getpid()}",
-            "owner": {"pid": os.getpid(), "host": socket.gethostname()},
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "phase": "preparing",
-            "cleanup_state": "pending",
-            "output_directory": None,
-        })
+        try:
+            directory.mkdir(parents=True)
+            self._write_initial_metadata(job_id, project_id)
+        except Exception:
+            self._discard_partial(job_id)
+            raise
         return directory
+
+    def _write_initial_metadata(self, job_id: str, project_id: str) -> None:
+        self.write(job_id, {
+            "metadata_version": self.METADATA_VERSION, "job_id": job_id,
+            "project_id": project_id, "session_id": f"{socket.gethostname()}-{os.getpid()}",
+            "owner": {"pid": os.getpid(), "host": socket.gethostname()},
+            "created_at": datetime.now(timezone.utc).isoformat(), "phase": "preparing",
+            "cleanup_state": "pending", "output_directory": None,
+        })
+
+    def _discard_partial(self, job_id: str) -> None:
+        try:
+            from .cleanup import cleanup_job_directory
+
+            cleanup_job_directory(self, job_id)
+        except Exception:
+            pass
+        finally:
+            self.release(job_id)
 
     def read(self, job_id: str) -> dict[str, Any]:
         path = self.job_directory(job_id) / "job.json"

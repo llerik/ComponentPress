@@ -1,140 +1,53 @@
-"""Validated, atomic PNG ZIP export for the selected copy mode."""
+"""Coordinate the synchronous PNG archive use case through an adapter."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-import hashlib
-import json
-import os
 from pathlib import Path
-import zipfile
+from typing import Callable
 from uuid import uuid4
 
-from PySide6.QtGui import QFontDatabase
-
-from componentpress.application.contracts import ProjectSnapshot
-from componentpress.application.ports import Cancellation
-from componentpress.build.input_snapshot import InputSnapshotBuilder
+from componentpress.application.contracts import PngArchiveProgress, PngArchiveResult, ProjectSnapshot
+from componentpress.application.ports import Cancellation, PngArchiveRuntime
 from componentpress.domain.copy_mode import validate_copy_mode
-from componentpress.domain.diagnostics import Diagnostic, ProjectError
-from componentpress.diagnostics.logging import log_event, log_exception
-from componentpress.execution.cancellation import CancellationToken
-from componentpress.execution.cleanup import cleanup_job_directory
-from componentpress.execution.job_store import JobStore
-from componentpress.i18n import tr
-from componentpress.execution.tasks import RenderInstanceTask
-
-
-@dataclass(frozen=True)
-class PngArchiveResult:
-    path: Path
-    mode: str
-    png_count: int
-    copies: int
+from componentpress.domain.diagnostics import Diagnostic
 
 
 def export_png_archive(
     source: ProjectSnapshot,
     target: Path,
     *,
+    runtime: PngArchiveRuntime,
+    cancellation: Cancellation,
     mode: str = "prod",
     component_ids: tuple[str, ...] | None = None,
-    cancellation: Cancellation | None = None,
-    snapshot_builder: InputSnapshotBuilder | None = None,
-    on_progress=None,
+    on_progress: Callable[[PngArchiveProgress], None] | None = None,
 ) -> PngArchiveResult:
     selected_mode = validate_copy_mode(mode)
-    log_event("project.png_export", operation="png_export", status="started", mode=selected_mode)
-    if target.exists():
-        raise ProjectError(Diagnostic("ARCHIVE_EXISTS", "ZIP уже существует; выберите другое имя", target))
-    if target.suffix.casefold() != ".zip":
-        raise ProjectError(Diagnostic("ARCHIVE_EXTENSION", "для PNG-архива выберите файл .zip", target))
-    token = cancellation or CancellationToken()
-    store = JobStore(source.root)
     job_id = uuid4().hex
-    job_directory = store.initialize(job_id, source.model.id)
-    registered_font_ids: tuple[int, ...] = ()
-    temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
     try:
-        store.update(job_id, operation="png_export", mode=selected_mode)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        builder = snapshot_builder or InputSnapshotBuilder()
-        snapshot = builder.create(
-            source,
-            job_id=job_id,
-            job_directory=job_directory,
-            component_ids=component_ids,
-            mode=selected_mode,
-            cancellation=token,
-            defer_font_registration=True,
-        )
-        snapshot = builder.register_snapshot_fonts(snapshot)
-        registered_font_ids = snapshot.registered_font_ids
-        if on_progress is not None:
-            on_progress(0, len(snapshot.instances), tr("ui.png_progress_render"))
-        for index, instance in enumerate(snapshot.instances, 1):
-            token.check()
-            errors: list[Exception] = []
-            RenderInstanceTask(snapshot, instance, token, lambda _index, error: errors.append(error) if error else None).run()
-            if errors:
-                error = errors[0]
-                if isinstance(error, ProjectError):
-                    raise error
-                raise ProjectError(Diagnostic("PNG_EXPORT_FAILED", str(error), instance.document_path)) from error
-            if on_progress is not None:
-                on_progress(index, len(snapshot.instances), tr("ui.png_progress_render"))
-
-        token.check()
-        png_records = []
-        with zipfile.ZipFile(temporary, "x", compression=zipfile.ZIP_DEFLATED) as archive:
-            for index, instance in enumerate(snapshot.instances, 1):
-                token.check()
-                source_png = snapshot.staging_directory / "images" / instance.png_name
-                data = source_png.read_bytes()
-                relative = f"images/{instance.png_name}"
-                digest = hashlib.sha256(data).hexdigest()
-                info = zipfile.ZipInfo(relative, date_time=(1980, 1, 1, 0, 0, 0))
-                info.compress_type = zipfile.ZIP_DEFLATED
-                archive.writestr(info, data)
-                png_records.append({
-                    "component_id": instance.component_id,
-                    "instance_id": instance.instance_id,
-                    "row_number": instance.row_number,
-                    "copies": instance.copies,
-                    "path": relative,
-                    "sha256": digest,
-                })
-                if on_progress is not None:
-                    on_progress(index, len(snapshot.instances), tr("ui.png_progress_pack"))
-            manifest = {
-                "manifest_version": 1,
-                "project_id": snapshot.project.id,
-                "mode": selected_mode,
-                "input_hashes": dict(sorted(snapshot.input_hashes.items())),
-                "counts": {"png": len(snapshot.instances), "copies": snapshot.total_copies},
-                "instances": png_records,
-            }
-            info = zipfile.ZipInfo("manifest.json", date_time=(1980, 1, 1, 0, 0, 0))
-            info.compress_type = zipfile.ZIP_DEFLATED
-            archive.writestr(info, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
-        token.check()
-        try:
-            os.link(temporary, target)
-        except FileExistsError as exc:
-            raise ProjectError(Diagnostic("ARCHIVE_EXISTS", "ZIP уже существует; выберите другое имя", target)) from exc
-        except OSError as exc:
-            raise ProjectError(Diagnostic("ARCHIVE_PUBLISH", f"не удалось атомарно опубликовать ZIP: {exc}", target)) from exc
-        log_event("project.png_export", operation="png_export", status="succeeded", mode=selected_mode)
-        return PngArchiveResult(target, selected_mode, len(snapshot.instances), snapshot.total_copies)
-    except ProjectError as exc:
-        log_event("project.png_export", operation="png_export", status="cancelled" if exc.diagnostic.code == "BUILD_CANCELLED" else "failed", mode=selected_mode, code=exc.diagnostic.code)
+        result = _export(runtime, source, target, job_id, selected_mode, component_ids, cancellation, on_progress)
+    except Exception as error:
+        _finish(runtime, job_id, False, error)
         raise
-    except (OSError, zipfile.BadZipFile) as exc:
-        incident_id = log_exception("project.png_export", exc, operation="png_export", status="failed", mode=selected_mode, code="ARCHIVE_WRITE")
-        raise ProjectError(Diagnostic("ARCHIVE_WRITE", "Не удалось создать ZIP-архив", target, incident_id=incident_id, message_key="error.png_export_failed")) from exc
-    finally:
-        temporary.unlink(missing_ok=True)
-        for font_id in reversed(registered_font_ids):
-            QFontDatabase.removeApplicationFont(font_id)
-        cleanup_job_directory(store, job_id)
-        store.release(job_id)
+    return _with_cleanup_warnings(result, _finish(runtime, job_id, True, None))
+
+
+def _export(runtime, source, target, job_id, mode, component_ids, cancellation, progress):
+    directory = runtime.begin(job_id, source, target, mode)
+    snapshot = runtime.prepare(source, directory, component_ids, mode, cancellation)
+    runtime.render(snapshot, cancellation, progress)
+    cancellation.check()
+    return runtime.publish(snapshot, target, cancellation, progress)
+
+
+def _finish(runtime, job_id, published, error):
+    try:
+        return runtime.finish(job_id, published, error)
+    except Exception:
+        return () if error is not None else (Diagnostic("CLEANUP_PENDING", "PNG ZIP cleanup failed", severity="warning"),)
+
+
+def _with_cleanup_warnings(result, diagnostics):
+    if not diagnostics:
+        return result
+    return PngArchiveResult(result.path, result.mode, result.png_count, result.copies, diagnostics)

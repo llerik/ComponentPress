@@ -9,6 +9,7 @@ from componentpress.application.project_service import ProjectService
 from componentpress.application.preview_service import PreviewService
 from componentpress.application.build_service import BuildService
 from componentpress.execution.build_runtime import QtBuildRuntime
+from componentpress.execution.png_archive_runtime import QtPngArchiveRuntime
 from componentpress.execution.cancellation import CancellationToken
 from componentpress.build.input_snapshot import InputSnapshotBuilder
 from componentpress.bindings.resolver import BindingResolver
@@ -41,7 +42,7 @@ def project_controller() -> "ProjectController":
     from componentpress.editor.controllers import ProjectController
 
     service = project_service()
-    return ProjectController(service, preview_service(), build_service(service))
+    return ProjectController(service, preview_service(), build_service(service), export_png_archive)
 
 
 def preview_service(reader=None) -> PreviewService:
@@ -55,4 +56,15 @@ def build_service(service=None) -> BuildService:
         lambda root: QtBuildRuntime(root, InputSnapshotBuilder(), ProjectWriteLock),
         CancellationToken,
         lambda: tr("ui.build_prepare"),
+    )
+
+
+def export_png_archive(source, target, *, mode="prod", component_ids=None, cancellation=None, on_progress=None):
+    from componentpress.application.png_archive import export_png_archive as run_export
+
+    return run_export(
+        source, target,
+        runtime=QtPngArchiveRuntime(source.root, InputSnapshotBuilder()),
+        cancellation=cancellation or CancellationToken(),
+        mode=mode, component_ids=component_ids, on_progress=on_progress,
     )
