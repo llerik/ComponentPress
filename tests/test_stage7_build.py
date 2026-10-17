@@ -23,6 +23,7 @@ from componentpress.execution.cancellation import CancellationToken
 from componentpress.execution.cleanup import cleanup_job_directory
 from componentpress.execution.job_store import JobStore
 from componentpress.execution.qt_wait import run_build
+from componentpress.execution.render_pool import render_instances
 from componentpress.execution.tasks import RenderInstanceTask
 from componentpress.editor.controllers import ProjectController
 from componentpress.domain.diagnostics import Diagnostic
@@ -290,7 +291,7 @@ def test_cancelled_build_does_not_publish_and_cleans_job(tmp_path: Path) -> None
     snapshot = InputSnapshotBuilder().create(source, job_id=job_id, job_directory=directory)
     token = CancellationToken()
     token.cancel()
-    result = BuildEngine(store).execute(snapshot, token, lambda _progress: None)
+    result = BuildEngine(store, render_instances).execute(snapshot, token, lambda _progress: None)
     for font_id in reversed(snapshot.registered_font_ids):
         QFontDatabase.removeApplicationFont(font_id)
     store.release(job_id)
@@ -323,7 +324,7 @@ def test_png_snapshot_failure_does_not_publish_or_remove_previous_build(tmp_path
         # managed copy makes the PNG phase fail after preparation has succeeded.
         resource = next(item for item in snapshot.resources.values() if item.copied_path is None)
         object.__setattr__(resource, "data", b"not an image")
-        result = BuildEngine(store).execute(snapshot, CancellationToken(), lambda _progress: None)
+        result = BuildEngine(store, render_instances).execute(snapshot, CancellationToken(), lambda _progress: None)
     finally:
         for font_id in reversed(snapshot.registered_font_ids):
             QFontDatabase.removeApplicationFont(font_id)
@@ -418,7 +419,7 @@ def test_post_publish_status_failure_keeps_successful_result(tmp_path: Path, mon
 
     monkeypatch.setattr(store, "update", failing_update)
     try:
-        result = BuildEngine(store).execute(snapshot, CancellationToken(), lambda _progress: None)
+        result = BuildEngine(store, render_instances).execute(snapshot, CancellationToken(), lambda _progress: None)
     finally:
         for font_id in reversed(snapshot.registered_font_ids):
             QFontDatabase.removeApplicationFont(font_id)
@@ -449,7 +450,7 @@ def test_post_publish_history_failure_is_successful_and_recoverable(
     )
     monkeypatch.setattr(store, "save_history", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("history busy")))
     try:
-        result = BuildEngine(store).execute(snapshot, CancellationToken(), lambda _progress: None)
+        result = BuildEngine(store, render_instances).execute(snapshot, CancellationToken(), lambda _progress: None)
     finally:
         for font_id in reversed(snapshot.registered_font_ids):
             QFontDatabase.removeApplicationFont(font_id)

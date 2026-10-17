@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 from componentpress.diagnostics import logging as diagnostics
 from componentpress.build import engine as build_engine_module
+from componentpress.execution import render_pool
 from componentpress.execution.cancellation import CancellationToken
 from componentpress.version import APPLICATION_VERSION
 
@@ -106,8 +107,8 @@ def test_progress_callback_failure_cannot_stall_render_barrier(monkeypatch) -> N
         def run(self) -> None:
             self.done(self.instance.index, None)
 
-    monkeypatch.setattr(build_engine_module, "QThreadPool", ImmediatePool)
-    monkeypatch.setattr(build_engine_module, "RenderInstanceTask", CompleteImmediately)
+    monkeypatch.setattr(render_pool, "QThreadPool", ImmediatePool)
+    monkeypatch.setattr(render_pool, "RenderInstanceTask", CompleteImmediately)
     snapshot = SimpleNamespace(
         max_render_workers=1,
         instances=(SimpleNamespace(index=0), SimpleNamespace(index=1)),
@@ -118,4 +119,4 @@ def test_progress_callback_failure_cannot_stall_render_barrier(monkeypatch) -> N
     def broken_progress(_value) -> None:
         raise RuntimeError("consumer failure")
 
-    build_engine_module.BuildEngine._render(snapshot, CancellationToken(), broken_progress)
+    render_pool.render_instances(snapshot, CancellationToken(), broken_progress)

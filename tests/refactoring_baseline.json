@@ -215,22 +215,6 @@
       "stage": "9а",
       "owner": "coder:src/componentpress/bindings"
     },
-    "src/componentpress/build/engine.py|BuildEngine.execute": {
-      "path": "src/componentpress/build/engine.py",
-      "name": "BuildEngine.execute",
-      "line": 36,
-      "length": 120,
-      "stage": "3в",
-      "owner": "coder:src/componentpress/build"
-    },
-    "src/componentpress/build/engine.py|BuildEngine._render": {
-      "path": "src/componentpress/build/engine.py",
-      "name": "BuildEngine._render",
-      "line": 165,
-      "length": 34,
-      "stage": "3в",
-      "owner": "coder:src/componentpress/build"
-    },
     "src/componentpress/build/imposition.py|cut_grid_lines": {
       "path": "src/componentpress/build/imposition.py",
       "name": "cut_grid_lines",

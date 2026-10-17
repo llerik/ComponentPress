@@ -15,6 +15,7 @@ from componentpress.domain.diagnostics import Diagnostic
 from componentpress.diagnostics.logging import log_exception
 from .cancellation import CancellationToken
 from .job_store import JobStore
+from .render_pool import render_instances
 from .signals import BuildSignals
 
 
@@ -64,7 +65,8 @@ class ThreadBuildRunner(QObject):
         token = cancellation or CancellationToken()
         self._jobs[snapshot.job_id] = _RunningJob(snapshot, token, on_progress, on_finished)
         try:
-            self.coordinator_pool.start(_CoordinatorTask(BuildEngine(self.store), snapshot, token, self.signals))
+            engine = BuildEngine(self.store, render_instances)
+            self.coordinator_pool.start(_CoordinatorTask(engine, snapshot, token, self.signals))
         except Exception:
             self._jobs.pop(snapshot.job_id, None)
             raise

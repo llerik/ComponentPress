@@ -18,9 +18,10 @@ from unittest.mock import patch
 from xml.etree import ElementTree as ET
 
 os.environ.setdefault("QT_QPA_PLATFORM", "windows")
-ROOT = Path(__file__).resolve().parent
-REPO = ROOT.parents[1]
-sys.path.insert(0, str(REPO / "src"))
+ROOT = Path(os.environ.get("COMPONENTPRESS_BENCHMARK_ROOT", Path(__file__).resolve().parent)).resolve()
+REPO = Path(os.environ.get("COMPONENTPRESS_BENCHMARK_REPO", ROOT.parents[1])).resolve()
+SOURCE_ROOT = Path(os.environ.get("COMPONENTPRESS_BENCHMARK_SOURCE_ROOT", REPO)).resolve()
+sys.path.insert(0, str(SOURCE_ROOT / "src"))
 
 from openpyxl import load_workbook
 from PySide6.QtCore import QSize
@@ -31,8 +32,8 @@ from componentpress.bootstrap import build_service
 from componentpress.application.contracts import BuildRequest
 from componentpress.application.preview_service import ValidationIssues
 from componentpress.bootstrap import preview_service, project_service
-from componentpress.build.engine import BuildEngine
 from componentpress.build.input_snapshot import InputSnapshotBuilder
+from componentpress.execution import thread_runner
 from componentpress.execution.qt_wait import run_build
 from componentpress.data_sources import XlsxReader
 from componentpress.i18n import set_language
@@ -60,12 +61,12 @@ def digest(path: Path) -> str:
 
 
 def source_fingerprint() -> dict[str, str]:
-    files = sorted((REPO / "src" / "componentpress").rglob("*.py"))
+    files = sorted((SOURCE_ROOT / "src" / "componentpress").rglob("*.py"))
     digest_builder = hashlib.sha256()
     for path in files:
-        digest_builder.update(path.relative_to(REPO).as_posix().encode())
+        digest_builder.update(path.relative_to(SOURCE_ROOT).as_posix().encode())
         digest_builder.update(path.read_bytes())
-    head = subprocess.run(
+    head = os.environ.get("COMPONENTPRESS_BENCHMARK_REVISION") or subprocess.run(
         ["git", "-C", str(REPO), "rev-parse", "HEAD"], check=True,
         capture_output=True, text=True,
     ).stdout.strip()
@@ -235,7 +236,7 @@ def main() -> None:
             xlsx_ms, validation_ms = timed_validation(snapshot, reader)
             phase_times: dict[str, float] = {}
             original_create = InputSnapshotBuilder.create
-            original_render = BuildEngine._render
+            original_render = thread_runner.render_instances
             import componentpress.build.engine as engine_module
             original_pdf = engine_module.write_print_pdf
 
@@ -263,7 +264,7 @@ def main() -> None:
             image_before = digest(XLSX)
             started = time.perf_counter()
             with patch.object(InputSnapshotBuilder, "create", timed_create), \
-                 patch.object(BuildEngine, "_render", staticmethod(timed_render)), \
+                 patch.object(thread_runner, "render_instances", timed_render), \
                  patch.object(engine_module, "write_print_pdf", timed_pdf):
                 result = run_build(builder, session, BuildRequest(mode=mode, max_render_workers=2))
             total_build_ms = (time.perf_counter() - started) * 1000
