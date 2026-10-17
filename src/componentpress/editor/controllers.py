@@ -5,7 +5,7 @@ from pathlib import Path
 from componentpress.application.project_service import ProjectService
 from componentpress.application.preview_service import PreviewService
 from componentpress.application.build_service import BuildService
-from componentpress.application.contracts import BuildRequest
+from componentpress.application.contracts import BuildRequest, ComponentHistoryEntry
 from componentpress.application.sessions import DocumentSession, ProjectSession
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 
@@ -68,10 +68,15 @@ class ProjectController:
             raise RuntimeError("проект не открыт")
         return self.service.remove_component_for_history(self.session, component_id, backup_path=backup_path)
 
-    def restore_component_from_history(self, component_id: str, **values: object):
+    def restore_component_from_history(self, entry: ComponentHistoryEntry, document: DocumentSession) -> None:
         if self.session is None:
             raise RuntimeError("проект не открыт")
-        return self.service.restore_component_from_history(self.session, component_id, **values)
+        self.service.restore_component_from_history(self.session, entry, document)
+
+    def component_history_entry(self, operation, component_id: str, document: DocumentSession) -> ComponentHistoryEntry:
+        if self.session is None:
+            raise RuntimeError("проект не открыт")
+        return self.service.component_history_entry(self.session, operation, component_id, document)
 
     def update_component(self, component_id: str, **changes: object) -> None:
         document = self.document(component_id)

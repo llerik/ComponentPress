@@ -6,7 +6,6 @@ from pathlib import Path
 import re
 from uuid import uuid4
 from types import MappingProxyType
-import hashlib
 
 from pydantic import ValidationError
 from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QSignalBlocker, QSize, QThreadPool, QTimer, Qt
@@ -42,6 +41,7 @@ from PySide6.QtWidgets import (
 )
 
 from componentpress.i18n import catalogs, tr
+from componentpress.application.contracts import ComponentHistoryEntry, ComponentOperation
 from componentpress.i18n.diagnostics import format_diagnostic
 from componentpress.application.sessions import ProjectSession
 from componentpress.application.contracts import ArchiveExportResult, BuildRequest, BuildResult, BuildProgress
@@ -94,6 +94,7 @@ from .preview_worker import (
     PreviewTask,
     PreviewTaskResult,
 )
+from .project_history import ComponentHistory
 from .version_worker import (
     ExportArchiveRequest,
     ImportImageFolderRequest,
@@ -142,8 +143,9 @@ class MainWindow(QMainWindow):
         self._version_cancellation: CancellationToken | None = None
         self._version_progress: QProgressDialog | None = None
         self.undo_group = QUndoGroup(self)
-        self._component_history: list[dict] = []
-        self._component_history_index = 0
+        self._component_history = ComponentHistory()
+        self._history_tabs: dict[str, DocumentTab | None] = {}
+        self._history_documents = {}
         self._project_history_focus = False
         self._theme_settings = theme_settings()
         self._theme = saved_theme(self._theme_settings)
@@ -846,8 +848,7 @@ class MainWindow(QMainWindow):
         self._clear_tabs(discard=True)
         self._preview_session_identity = uuid4().hex
         self.controller.set_session(session)
-        self._component_history.clear()
-        self._component_history_index = 0
+        self._clear_component_history()
         self._project_history_focus = False
         self._refresh_component_tree()
         self.setWindowTitle(f"{session.snapshot.model.name} — ComponentPress")
@@ -1191,7 +1192,7 @@ class MainWindow(QMainWindow):
         self._update_project_visibility()
         self.open_component(component_id)
         document = self.session.documents[component_id]
-        self._push_component_history("create", component_id, document)
+        self._push_component_history(ComponentOperation.CREATE, component_id, document)
         self._project_history_focus = True
         self._update_actions()
         return True
@@ -1212,7 +1213,7 @@ class MainWindow(QMainWindow):
         self._refresh_component_tree()
         self._update_project_visibility()
         self.open_component(component_id)
-        self._push_component_history("create", component_id, self.session.documents[component_id])
+        self._push_component_history(ComponentOperation.CREATE, component_id, self.session.documents[component_id])
         self._project_history_focus = True
         self.statusBar().showMessage("Компонент добавлен", 3000)
         return True
@@ -1238,186 +1239,185 @@ class MainWindow(QMainWindow):
         })
         self._commit_component("Изменить свойства компонента", updated)
 
-    def _make_component_history(self, operation: str, component_id: str, document) -> dict:
-        assert self.session is not None
-        ref_index = next(i for i, ref in enumerate(self.session.snapshot.model.components) if ref.id == component_id)
-        ref = self.session.snapshot.model.components[ref_index]
-        return {
-            "operation": operation, "component_id": component_id, "reference_path": ref.path,
-            "position": ref_index, "document": document, "tab": self._tabs.get(component_id),
-            "root": self.session.snapshot.root,
-            "component_hash": document.source.disk_hash,
-            "backup_path": f".componentpress/transactions/component-history/{uuid4().hex}.yaml",
-        }
+    def _make_component_history(self, operation, component_id, document) -> ComponentHistoryEntry:
+        return self.controller.component_history_entry(operation, component_id, document)
 
-    def _push_component_history(self, operation: str, component_id: str, document) -> None:
+    def _push_component_history(self, operation, component_id, document) -> None:
         if self.session is None:
             return
         entry = self._make_component_history(operation, component_id, document)
-        self._append_component_history(entry)
+        self._append_component_history(entry, self._tabs.get(component_id))
+        self._history_documents[entry.entry_id] = document
 
-    def _append_component_history(self, entry: dict) -> None:
-        while len(self._component_history) > self._component_history_index:
-            self._discard_history_backup(self._component_history.pop())
-        self._component_history.append(entry)
-        if len(self._component_history) > 64:
-            self._discard_history_backup(self._component_history.pop(0))
-        self._component_history_index = len(self._component_history)
+    def _append_component_history(self, entry, tab=None) -> None:
+        discarded = self._component_history.append(entry)
+        self._history_tabs[entry.entry_id] = tab
+        for old in discarded:
+            self._discard_history_entry(old)
 
-    def _discard_history_backup(self, entry: dict) -> None:
-        from componentpress.project_io.paths import resolve_project_path
-        try:
-            backup = resolve_project_path(entry["root"], entry["backup_path"])
-            if backup.is_file():
-                backup.unlink()
-        except (OSError, ProjectError):
-            pass
-        tab = entry.get("tab")
-        if tab is not None and self._tabs.get(entry["component_id"]) is not tab:
+    def _discard_history_entry(self, entry) -> None:
+        if self.session is not None:
+            self.controller.service.discard_component_history_backup(
+                self.session.snapshot.root, entry.backup_path
+            )
+        tab = self._history_tabs.pop(entry.entry_id, None)
+        self._history_documents.pop(entry.entry_id, None)
+        if tab is not None and tab not in self._tabs.values() and tab not in self._history_tabs.values():
             tab.deleteLater()
 
+    @property
+    def _component_history_index(self) -> int:
+        return self._component_history.index
+
+    @_component_history_index.setter
+    def _component_history_index(self, value: int) -> None:
+        self._component_history.index = value
+
+    def _clear_component_history(self) -> None:
+        for entry in self._component_history.clear():
+            self._discard_history_entry(entry)
+
     def delete_component(self, component_id: str, *, confirm: bool = True) -> bool:
-        if self.session is None or component_id not in self.session.documents:
-            return False
-        if len(self.session.documents) <= 1:
-            self.statusBar().showMessage("Нельзя удалить последний компонент проекта", 5000)
-            return False
-        if self._active_build_job is not None or self._version_task is not None:
-            self.statusBar().showMessage("Дождитесь завершения текущей операции", 5000)
+        if not self._component_deletion_ready(component_id):
             return False
         document = self.session.documents[component_id]
-        if confirm:
-            answer = QMessageBox.question(
-                self, "Удалить компонент", f"Удалить «{document.model.name}»? Операцию можно отменить.",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Cancel,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                return False
-        if document.draft_diagnostics:
-            answer = QMessageBox.warning(
-                self, "Черновик компонента", "В компоненте есть некорректный черновик. Он сохранится в истории отмены.",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Cancel,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                return False
-        entry = self._make_component_history("remove", component_id, document)
+        if confirm and not self._confirm_component_delete(document.model.name):
+            return False
+        if document.draft_diagnostics and not self._confirm_draft_delete():
+            return False
+        return self._delete_component_from_project(component_id, document)
+
+    def _component_deletion_ready(self, component_id: str) -> bool:
+        if self.session is None or component_id not in self.session.documents:
+            return False
+        if len(self.session.documents) > 1 and self._active_build_job is None and self._version_task is None:
+            return True
+        message = "Нельзя удалить последний компонент проекта" if len(self.session.documents) <= 1 else "Дождитесь завершения текущей операции"
+        self.statusBar().showMessage(message, 5000)
+        return False
+
+    def _confirm_component_delete(self, name: str) -> bool:
+        answer = QMessageBox.question(
+            self, "Удалить компонент", f"Удалить «{name}»? Операцию можно отменить.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _confirm_draft_delete(self) -> bool:
+        answer = QMessageBox.warning(
+            self, "Черновик компонента", "В компоненте есть некорректный черновик. Он сохранится в истории отмены.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _delete_component_from_project(self, component_id: str, document) -> bool:
+        entry = self._make_component_history(ComponentOperation.REMOVE, component_id, document)
+        self._history_documents[entry.entry_id] = document
         try:
             self._apply_component_membership(entry, remove=True)
         except (ProjectError, OSError) as exc:
+            self._history_documents.pop(entry.entry_id, None)
             self._show_error(exc)
             return False
-        self._append_component_history(entry)
+        self._append_component_history(entry, self._history_tabs.get(entry.entry_id))
         self._project_history_focus = True
         self.statusBar().showMessage("Компонент удалён; действие можно отменить", 4000)
         return True
 
-    def _apply_component_membership(self, entry: dict, *, remove: bool) -> None:
+    def _apply_component_membership(self, entry: ComponentHistoryEntry, *, remove: bool) -> None:
         assert self.session is not None
-        component_id = entry["component_id"]
         if remove:
-            session = self.session.documents[component_id]
-            tab = self._tabs.get(component_id)
-            snapshot, raw, position, path = self.controller.remove_component_for_history(
-                component_id, backup_path=entry["backup_path"]
-            )
-            if tab is not None:
-                tab.preview_timer.stop()
-                tab.preview_generation += 1
-                tab.canvas.release_preview()
-                index = self.tabs.indexOf(tab)
-                if index >= 0:
-                    self.tabs.removeTab(index)
-                self.undo_group.removeStack(tab.undo_stack)
-                self._tabs.pop(component_id, None)
-            entry["position"] = position
-            entry["reference_path"] = path
-            entry["component_hash"] = hashlib.sha256(raw).hexdigest()
-            entry["document"] = session
-            entry["tab"] = tab or entry.get("tab")
-            self.session.snapshot = snapshot
-            self.session.documents.pop(component_id, None)
-            if tab is not None:
-                self._preview_coordinator.discard_pending(tab.identity)
+            self._remove_history_component(entry)
         else:
-            snapshot = self.controller.restore_component_from_history(
-                component_id, reference_path=entry["reference_path"], backup_path=entry["backup_path"],
-                component_hash=entry["component_hash"], position=entry["position"],
-            )
-            self.session.snapshot = snapshot
-            self.session.documents[component_id] = entry["document"]
-            tab = entry.get("tab")
-            if tab is not None:
-                self._tabs[component_id] = tab
-                self.undo_group.addStack(tab.undo_stack)
-                self.tabs.addTab(tab, self.session.documents[component_id].model.name)
-                self._update_tab_title(component_id)
-            self._refresh_component_tree()
-            self._update_project_visibility()
+            self._restore_history_component(entry)
+        self._refresh_membership_ui()
+
+    def _remove_history_component(self, entry: ComponentHistoryEntry) -> None:
+        component_id = entry.component_id
+        tab = self._tabs.get(component_id)
+        result = self.controller.remove_component_for_history(component_id, backup_path=entry.backup_path)
+        entry.position, entry.reference_path = result.position, result.reference_path
+        entry.component_hash = result.component_hash
+        self._history_tabs[entry.entry_id] = tab or self._history_tabs.get(entry.entry_id)
+        self._detach_component_tab(component_id, tab)
+
+    def _restore_history_component(self, entry: ComponentHistoryEntry) -> None:
+        self.controller.restore_component_from_history(entry, self._history_documents[entry.entry_id])
+        tab = self._history_tabs.get(entry.entry_id)
+        if tab is not None:
+            self._tabs[entry.component_id] = tab
+            self.undo_group.addStack(tab.undo_stack)
+            self.tabs.addTab(tab, self._history_documents[entry.entry_id].model.name)
+            self._update_tab_title(entry.component_id)
+
+    def _refresh_membership_ui(self) -> None:
         self._refresh_component_tree()
+        self._update_project_visibility()
         self._active_tab_changed(self.tabs.currentIndex())
         self._update_actions()
+
+    def _detach_component_tab(self, component_id: str, tab) -> None:
+        if tab is None or self._tabs.get(component_id) is not tab:
+            return
+        tab.preview_timer.stop()
+        tab.preview_generation += 1
+        tab.canvas.release_preview()
+        index = self.tabs.indexOf(tab)
+        if index >= 0:
+            self.tabs.removeTab(index)
+        self.undo_group.removeStack(tab.undo_stack)
+        self._tabs.pop(component_id, None)
+        self._preview_coordinator.discard_pending(tab.identity)
 
     def _undo(self) -> None:
         tab = self.active_tab
         if (tab is not None and tab.mode == "text" and not self._project_history_focus
                 and tab.text_editor.document().isUndoAvailable()):
             tab.text_editor.undo()
-        elif self._project_history_focus and self._component_history_index > 0:
-            entry = self._component_history[self._component_history_index - 1]
-            try:
-                self._apply_component_membership(entry, remove=entry["operation"] == "create")
-            except (ProjectError, OSError) as exc:
-                self._show_error(exc)
-                return
-            self._component_history_index -= 1
-            self._project_history_focus = True
+        elif self._project_history_focus and self._component_history.undo_entry():
+            self._undo_component_history()
         elif tab is not None and tab.undo_stack.canUndo():
             tab.undo_stack.undo()
             self._project_history_focus = False
-        elif self._component_history_index > 0:
-            entry = self._component_history[self._component_history_index - 1]
-            try:
-                self._apply_component_membership(entry, remove=entry["operation"] == "create")
-            except (ProjectError, OSError) as exc:
-                self._show_error(exc)
-                return
-            self._component_history_index -= 1
-            self._project_history_focus = True
-        elif tab is not None:
-            tab.undo_stack.undo()
+        elif self._component_history.undo_entry():
+            self._undo_component_history()
         self._update_actions()
+
+    def _undo_component_history(self) -> None:
+        entry = self._component_history.undo_entry()
+        if self._apply_history_entry(entry, remove=entry.operation is ComponentOperation.CREATE):
+            self._component_history.accept_undo()
+            self._project_history_focus = True
 
     def _redo(self) -> None:
         tab = self.active_tab
         if (tab is not None and tab.mode == "text" and not self._project_history_focus
                 and tab.text_editor.document().isRedoAvailable()):
             tab.text_editor.redo()
-        elif self._project_history_focus and self._component_history_index < len(self._component_history):
-            entry = self._component_history[self._component_history_index]
-            try:
-                self._apply_component_membership(entry, remove=entry["operation"] == "remove")
-            except (ProjectError, OSError) as exc:
-                self._show_error(exc)
-                return
-            self._component_history_index += 1
-            self._project_history_focus = True
+        elif self._project_history_focus and self._component_history.redo_entry():
+            self._redo_component_history()
         elif tab is not None and tab.undo_stack.canRedo():
             tab.undo_stack.redo()
             self._project_history_focus = False
-        elif self._component_history_index < len(self._component_history):
-            entry = self._component_history[self._component_history_index]
-            try:
-                self._apply_component_membership(entry, remove=entry["operation"] == "remove")
-            except (ProjectError, OSError) as exc:
-                self._show_error(exc)
-                return
-            self._component_history_index += 1
-            self._project_history_focus = True
-        elif tab is not None:
-            tab.undo_stack.redo()
+        elif self._component_history.redo_entry():
+            self._redo_component_history()
         self._update_actions()
+
+    def _redo_component_history(self) -> None:
+        entry = self._component_history.redo_entry()
+        if self._apply_history_entry(entry, remove=entry.operation is ComponentOperation.REMOVE):
+            self._component_history.accept_redo()
+            self._project_history_focus = True
+
+    def _apply_history_entry(self, entry, *, remove: bool) -> bool:
+        try:
+            self._apply_component_membership(entry, remove=remove)
+        except (ProjectError, OSError) as exc:
+            self._show_error(exc)
+            return False
+        return True
 
     def _open_component_index(self, index: QModelIndex) -> None:
         component_id = index.data(ID_ROLE)
@@ -1437,6 +1437,17 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentWidget(existing)
             return existing
         tab = DocumentTab(component_id)
+        self._connect_tab_signals(tab)
+        self.undo_group.addStack(tab.undo_stack)
+        self._tabs[component_id] = tab
+        self._install_component_tab(tab, component_id)
+        return tab
+
+    def _connect_tab_signals(self, tab: DocumentTab) -> None:
+        self._connect_tab_preview(tab)
+        self._connect_canvas_signals(tab)
+
+    def _connect_tab_preview(self, tab: DocumentTab) -> None:
         tab.zoomChanged.connect(self._zoom_changed)
         tab.previewResolutionRequested.connect(self._request_visible_preview_resolution)
         tab.previewRequested.connect(lambda item=tab: self._preview_requested(item))
@@ -1446,6 +1457,8 @@ class MainWindow(QMainWindow):
         tab.preview_last.clicked.connect(lambda: self._step_preview(1, endpoint="last"))
         tab.previewError.connect(lambda message: (self.statusBar().showMessage(message, 7000), self._add_events((Diagnostic("PREVIEW_ERROR", message),))))
         tab.modeRequested.connect(lambda mode, item=tab: self._request_mode(item, mode))
+
+    def _connect_canvas_signals(self, tab: DocumentTab) -> None:
         tab.canvas.selectionChanged.connect(self._canvas_selection_changed)
         tab.canvas.nodeContextMenuRequested.connect(self._canvas_context_menu)
         tab.canvas.moveRequested.connect(self._move_selected)
@@ -1456,8 +1469,8 @@ class MainWindow(QMainWindow):
         tab.canvas.drawRequested.connect(self._draw_element)
         tab.canvas.toolCancelled.connect(self._tool_cancelled)
         tab.canvas.deleteRequested.connect(self.delete_selected)
-        self.undo_group.addStack(tab.undo_stack)
-        self._tabs[component_id] = tab
+
+    def _install_component_tab(self, tab: DocumentTab, component_id: str) -> None:
         # Seed the editor before adding it to the tab widget: palette events can
         # rehighlight it synchronously, and must not turn an empty editor into a draft.
         tab.set_text(self.session.documents[component_id].current_text)
@@ -1466,7 +1479,6 @@ class MainWindow(QMainWindow):
         self._update_tab_title(component_id)
         self.tabs.setCurrentIndex(index)
         self._refresh_preview(tab, fit=True)
-        return tab
 
     def _active_tab_changed(self, _index: int) -> None:
         for candidate in self._tabs.values():
@@ -2566,6 +2578,9 @@ class MainWindow(QMainWindow):
         document = self.session.documents[tab.component_id]
         if updated == document.model:
             return False
+        return self._push_component_command(tab, document, label, updated, selected)
+
+    def _push_component_command(self, tab, document, label, updated, selected) -> bool:
         component_id = tab.component_id
         try:
             after = self.controller.prepare_model(component_id, updated)
@@ -3131,9 +3146,9 @@ class MainWindow(QMainWindow):
         tab.preview_generation += 1
         self._preview_coordinator.discard_pending(tab.identity)
         self._tabs.pop(tab.component_id, None)
-        for entry in self._component_history:
-            if entry.get("tab") is tab:
-                entry["tab"] = None
+        for entry_id, retained in self._history_tabs.items():
+            if retained is tab:
+                self._history_tabs[entry_id] = None
         self.undo_group.removeStack(tab.undo_stack)
         self.tabs.removeTab(index)
         tab.deleteLater()
@@ -3179,10 +3194,7 @@ class MainWindow(QMainWindow):
         return QMessageBox.StandardButton(box.exec())
 
     def _clear_tabs(self, *, discard: bool = False) -> None:
-        for entry in self._component_history:
-            self._discard_history_backup(entry)
-        self._component_history.clear()
-        self._component_history_index = 0
+        self._clear_component_history()
         self._project_history_focus = False
         if discard and self.session is not None:
             for component_id in tuple(self.session.documents):
@@ -3191,6 +3203,7 @@ class MainWindow(QMainWindow):
             tab.preview_timer.stop()
             tab.preview_generation += 1
             self.undo_group.removeStack(tab.undo_stack)
+            tab.deleteLater()
         self.tabs.clear()
         self._tabs.clear()
         self._preview_coordinator.discard_pending()
@@ -3251,8 +3264,8 @@ class MainWindow(QMainWindow):
         visual = has_tab and self.active_tab.mode == "layout" and self._build_pending_active_only is None
         active_stack = self.active_tab.undo_stack if self.active_tab is not None else None
         # In text mode Ctrl+Z/Ctrl+Y belong to QPlainTextEdit's local history.
-        project_undo = self._component_history_index > 0
-        project_redo = self._component_history_index < len(self._component_history)
+        project_undo = self._component_history.undo_entry() is not None
+        project_redo = self._component_history.redo_entry() is not None
         document_undo = bool(visual and active_stack and active_stack.canUndo())
         document_redo = bool(visual and active_stack and active_stack.canRedo())
         text_mode = bool(has_tab and self.active_tab.mode == "text")

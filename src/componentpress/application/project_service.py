@@ -11,11 +11,12 @@ from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.project import CopiesColumns, DataSource
 import re
 import unicodedata
+from uuid import uuid4
 from componentpress.domain.tree import locations
-from .contracts import ArchiveExportResult, ProjectSnapshot
+from .contracts import ArchiveExportResult, ComponentHistoryEntry, ProjectSnapshot
 from .identifiers import IdentifierGenerator
 from .ports import ProjectRepository, ResourceRepository, WriteLockFactory
-from .sessions import ProjectSession
+from .sessions import DocumentSession, ProjectSession
 from .version_service import VersionService
 
 
@@ -89,17 +90,48 @@ class ProjectService:
         component_id = component_id or self.identifiers.create(name, snapshot.documents, prefix="component")
         return self.projects.add_component(snapshot, component_id, name)
 
+    @_logged("add_component")
     def add_to_session(self, session: ProjectSession, name: str, component_id: str | None = None, *, width_mm: float = 63, height_mm: float = 88, data=None) -> str:
         component_id = component_id or self.identifiers.create(name, session.documents, prefix="component")
         snapshot = self.projects.add_component(session.snapshot, component_id, name, width_mm=width_mm, height_mm=height_mm, data=data)
         session.replace_snapshot(snapshot)
         return component_id
 
+    @_logged("remove_component")
     def remove_component_for_history(self, session: ProjectSession, component_id: str, *, backup_path: str):
-        return self.projects.remove_component(session.snapshot, component_id, backup_path=backup_path)
+        result = self.projects.remove_component(session.snapshot, component_id, backup_path=backup_path)
+        session.snapshot = result.snapshot
+        session.documents.pop(component_id)
+        return result
 
-    def restore_component_from_history(self, session: ProjectSession, component_id: str, **values: object):
-        return self.projects.restore_component(session.snapshot, component_id, **values)
+    @_logged("restore_component")
+    def restore_component_from_history(
+        self, session: ProjectSession, entry: ComponentHistoryEntry, document: DocumentSession,
+    ) -> None:
+        snapshot = self.projects.restore_component(
+            session.snapshot, entry.component_id, reference_path=entry.reference_path,
+            backup_path=entry.backup_path, component_hash=entry.component_hash, position=entry.position,
+        )
+        session.snapshot = snapshot
+        session.documents[entry.component_id] = document
+
+    def component_history_entry(
+        self, session: ProjectSession, operation, component_id: str, document: DocumentSession,
+    ) -> ComponentHistoryEntry:
+        references = session.snapshot.model.components
+        position = next(index for index, ref in enumerate(references) if ref.id == component_id)
+        backup_path = f".componentpress/transactions/component-history/{uuid4().hex}.yaml"
+        return ComponentHistoryEntry(
+            uuid4().hex, operation, component_id, document.source, backup_path,
+            references[position].path, document.source.disk_hash, position,
+        )
+
+    @_logged("discard_component_history_backup")
+    def discard_component_history_backup(self, root: Path, backup_path: str) -> bool:
+        try:
+            return self.projects.discard_component_history_backup(root, backup_path)
+        except (OSError, ProjectError):
+            return False
 
     def node_id(self, session: ProjectSession, component_id: str, name: str, prefix: str) -> str:
         existing = locations(session.documents[component_id].model)

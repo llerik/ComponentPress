@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Literal, Mapping
 
@@ -23,6 +24,31 @@ class ProjectSnapshot:
     model: ProjectDefinition
     documents: Mapping[str, DocumentSnapshot]
 
+
+@dataclass(frozen=True)
+class RemovedComponent:
+    snapshot: ProjectSnapshot
+    reference_path: str
+    backup_path: str
+    component_hash: str
+    position: int
+
+
+class ComponentOperation(Enum):
+    CREATE = "create"
+    REMOVE = "remove"
+
+
+@dataclass
+class ComponentHistoryEntry:
+    entry_id: str
+    operation: ComponentOperation
+    component_id: str
+    document: DocumentSnapshot
+    backup_path: str
+    reference_path: str
+    component_hash: str
+    position: int
 
 @dataclass(frozen=True)
 class FileFingerprint:

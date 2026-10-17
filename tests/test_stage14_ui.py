@@ -901,6 +901,9 @@ def test_component_creation_and_deletion_round_trip_preserves_draft_and_tab(tmp_
 def test_failed_component_delete_does_not_hide_tab_or_advance_history(tmp_path: Path, qtbot, monkeypatch) -> None:
     root, window, _service = make_window(tmp_path, qtbot)
     tab = window.open_component("forest-card")
+    assert window.add_component("branch", "Branch")
+    window._undo()
+    redo_entry = window._component_history.redo_entry()
     before = window._component_history_index
     (root / "project.yaml").write_text("external change\n", encoding="utf-8")
     errors = []
@@ -908,6 +911,7 @@ def test_failed_component_delete_does_not_hide_tab_or_advance_history(tmp_path: 
 
     assert not window.delete_component("forest-card", confirm=False)
     assert window._component_history_index == before
+    assert window._component_history.redo_entry() is redo_entry
     assert window.tabs.indexOf(tab) >= 0
     assert (root / "components" / "forest-card.yaml").exists()
     assert errors

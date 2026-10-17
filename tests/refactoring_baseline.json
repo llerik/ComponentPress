@@ -551,46 +551,6 @@
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
     },
-    "src/componentpress/editor/main_window.py|MainWindow.delete_component": {
-      "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow.delete_component",
-      "line": 1249,
-      "length": 36,
-      "stage": "5а",
-      "owner": "coder:src/componentpress/editor"
-    },
-    "src/componentpress/editor/main_window.py|MainWindow._apply_component_membership": {
-      "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow._apply_component_membership",
-      "line": 1286,
-      "length": 45,
-      "stage": "5а",
-      "owner": "coder:src/componentpress/editor"
-    },
-    "src/componentpress/editor/main_window.py|MainWindow._undo": {
-      "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow._undo",
-      "line": 1332,
-      "length": 29,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
-    },
-    "src/componentpress/editor/main_window.py|MainWindow._redo": {
-      "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow._redo",
-      "line": 1362,
-      "length": 29,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
-    },
-    "src/componentpress/editor/main_window.py|MainWindow.open_component": {
-      "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow.open_component",
-      "line": 1402,
-      "length": 38,
-      "stage": "5а",
-      "owner": "coder:src/componentpress/editor"
-    },
     "src/componentpress/editor/main_window.py|MainWindow._active_tab_changed": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._active_tab_changed",
@@ -685,14 +645,6 @@
       "line": 2351,
       "length": 48,
       "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
-    },
-    "src/componentpress/editor/main_window.py|MainWindow._commit_component": {
-      "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow._commit_component",
-      "line": 2464,
-      "length": 22,
-      "stage": "5а",
       "owner": "coder:src/componentpress/editor"
     },
     "src/componentpress/editor/main_window.py|MainWindow._document_changed": {

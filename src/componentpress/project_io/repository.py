@@ -7,7 +7,7 @@ from types import MappingProxyType
 import re
 import unicodedata
 
-from componentpress.application.contracts import DocumentSnapshot, ProjectSnapshot
+from componentpress.application.contracts import DocumentSnapshot, ProjectSnapshot, RemovedComponent
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.html_resources import html_image_sources
@@ -32,6 +32,13 @@ def _read_text(path: Path) -> tuple[str, str]:
         raise ProjectError(Diagnostic("TEXT_ENCODING", "файл должен быть UTF-8", path)) from exc
     except OSError as exc:
         raise ProjectError(Diagnostic("FILE_READ", str(exc), path)) from exc
+
+
+def _journal_uses_backup(journal: Path, backup_path: str) -> bool:
+    try:
+        return json.loads(journal.read_text(encoding="utf-8")).get("backup") == backup_path
+    except (OSError, ValueError, AttributeError):
+        return True
 
 
 class FileProjectRepository:
@@ -252,7 +259,7 @@ class FileProjectRepository:
             register_component(snapshot.root, path, component_text.encode("utf-8"), project_text.encode("utf-8"), snapshot.disk_hash)
         return self.open(snapshot.root)
 
-    def remove_component(self, snapshot: ProjectSnapshot, component_id: str, *, backup_path: str) -> tuple[ProjectSnapshot, bytes, int, str]:
+    def remove_component(self, snapshot: ProjectSnapshot, component_id: str, *, backup_path: str) -> RemovedComponent:
         reference = next((item for item in snapshot.model.components if item.id == component_id), None)
         document = snapshot.documents.get(component_id)
         if reference is None or document is None:
@@ -282,7 +289,19 @@ class FileProjectRepository:
             snapshot.root, new_text, hashlib.sha256(new_text.encode("utf-8")).hexdigest(),
             checked_project, MappingProxyType(documents),
         )
-        return committed, raw, position, reference.path
+        return RemovedComponent(committed, reference.path, backup_path, digest, position)
+
+    def discard_component_history_backup(self, root: Path, backup_path: str) -> bool:
+        backup = resolve_project_path(root, backup_path)
+        history = resolve_project_path(root, ".componentpress/transactions/component-history")
+        if not backup.is_relative_to(history) or backup == history:
+            raise ProjectError(Diagnostic("COMPONENT_HISTORY", "недопустимый путь резервной копии", backup))
+        journal = root / ".componentpress" / "transactions" / "component-membership.json"
+        if journal.exists() and _journal_uses_backup(journal, backup_path):
+            return False
+        if backup.is_file():
+            backup.unlink()
+        return True
 
     def restore_component(self, snapshot: ProjectSnapshot, component_id: str, *, reference_path: str,
                           backup_path: str, component_hash: str, position: int) -> ProjectSnapshot:
