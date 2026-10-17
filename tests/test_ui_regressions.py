@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtCore import QPoint, QRect, QSettings, QSize, Qt
 from PySide6.QtGui import QColor, QFontDatabase, QIcon, QImage, QPixmap
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QColorDialog, QComboBox, QDialog, QMessageBox, QPushButton
 
 from componentpress.application.contracts import DocumentSnapshot, ProjectSnapshot
@@ -397,6 +398,59 @@ def test_build_reservation_rejects_project_switch_methods(make_editor, monkeypat
     assert not window.create_path(tmp_path, "blocked")
     assert window.session is session
     assert window._build_pending_active_only is False
+
+
+def test_preparation_freezes_text_commands_until_snapshot_acceptance(make_editor):
+    window, _root, _errors = make_editor()
+    tab = window.active_tab
+    document = window.session.documents[tab.component_id]
+    tab.set_mode("text")
+    tab.text_editor.insertPlainText("\n# draft")
+    before_draft = document.draft_text
+    before_history = tab.undo_stack.count()
+    window._active_build_job = "preparing-job"
+    window.controller.build = SimpleNamespace(
+        is_preparing=lambda job_id: job_id == "preparing-job", cancel=lambda _job_id: True,
+    )
+    window._update_actions()
+
+    assert tab.text_editor.isReadOnly()
+    assert not window._apply_tree("blocked", lambda model: model)
+    window._draft_changed(tab, "changed during preparation")
+    window._undo()
+    assert document.draft_text == before_draft
+    assert tab.undo_stack.count() == before_history
+
+    window.controller.build.is_preparing = lambda _job_id: False
+    window._update_actions()
+    assert not tab.text_editor.isReadOnly()
+    assert window.save_all_action.isEnabled()
+    window._active_build_job = None
+    window._update_actions()
+
+
+def test_text_undo_shortcut_does_not_fall_through_to_document_history(make_editor, qtbot):
+    from componentpress.editor.project_history import ComponentHistory
+
+    window, _root, _errors = make_editor()
+    window.open_component("forest-card")
+    tab = window.active_tab
+    document = window.session.documents[tab.component_id]
+    window._set_selection(("heading",), source="test")
+    window._move_selected(("heading",), 1, 0)
+    after_edit = document.model
+    assert tab.undo_stack.canUndo()
+    tab.set_text(document.current_text)
+    tab.set_mode("text")
+    window._component_history = ComponentHistory()
+    window._project_history_focus = False
+    window._update_actions()
+    assert not window.undo_action.isEnabled()
+
+    QTest.keyClick(tab.text_editor, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+
+    assert document.model == after_edit
+    assert tab.undo_stack.canUndo()
 
 
 def test_cancelled_close_releases_build_reservation_and_resumes_preview(make_editor, monkeypatch):

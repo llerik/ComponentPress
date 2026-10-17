@@ -866,6 +866,22 @@ def test_delete_selected_requires_confirmation_and_is_one_undo(tmp_path: Path, q
     assert "heading" in locations(document.model)
 
 
+def test_group_confirmation_rejects_a_changed_selection(tmp_path: Path, qtbot, monkeypatch) -> None:
+    _root, window, _service = make_window(tmp_path, qtbot)
+    window.open_component("forest-card")
+    window._set_selection(("heading", "caption"), source="test")
+    before = window.session.documents["forest-card"].model
+
+    def change_selection(*_args, **_kwargs):
+        window._set_selection(("heading",), source="test")
+        return "Group", True
+
+    monkeypatch.setattr(main_window_module.QInputDialog, "getText", change_selection)
+    assert not window.group_selected()
+    assert window.session.documents["forest-card"].model == before
+    assert not any(node.type == "group" and node.name == "Group" for node in before.elements)
+
+
 def test_component_creation_and_deletion_round_trip_preserves_draft_and_tab(tmp_path: Path, qtbot, monkeypatch) -> None:
     root, window, service = make_window(tmp_path, qtbot)
     errors = []

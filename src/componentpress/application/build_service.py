@@ -22,6 +22,7 @@ class _Preparing:
     finished: Callable | None
     progress: Callable | None
     mode: str
+    snapshot_accepted: bool = False
 
 
 class BuildService:
@@ -72,6 +73,7 @@ class BuildService:
         if error is not None:
             self._finish(job_id, pending.runtime.fail(job_id, snapshot, error, pending.mode))
             return
+        pending.snapshot_accepted = True
         try:
             snapshot = pending.runtime.register_fonts(snapshot)
             self._progress(pending, BuildProgress(job_id, "preparing", 1, 1, self.prepare_message()))
@@ -110,6 +112,10 @@ class BuildService:
 
     def is_active(self, job_id: str | None = None) -> bool:
         return (bool(self._preparing) if job_id is None else job_id in self._preparing) or any(runtime.is_active(job_id) for runtime in self._runtimes.values())
+
+    def is_preparing(self, job_id: str) -> bool:
+        pending = self._preparing.get(job_id)
+        return pending is not None and not pending.snapshot_accepted
 
     @staticmethod
     def _progress(pending: _Preparing, value: BuildProgress) -> None:

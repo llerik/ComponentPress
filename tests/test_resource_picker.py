@@ -137,6 +137,7 @@ def test_main_window_html_insert_uses_picker_path_and_updates_only_after_accepta
     calls = []
     fake_window = SimpleNamespace(
         _selected_ids=lambda: ("heading",),
+        _user_editing_allowed=lambda: True,
         session=SimpleNamespace(snapshot=SimpleNamespace(root=root), documents={"forest-card": document}),
         active_tab=SimpleNamespace(component_id="forest-card"),
         element_properties=SimpleNamespace(
@@ -172,6 +173,7 @@ def test_main_window_html_insert_cancel_preserves_html_and_history(tmp_path: Pat
     edits = []
     fake_window = SimpleNamespace(
         _selected_ids=lambda: ("heading",),
+        _user_editing_allowed=lambda: True,
         session=SimpleNamespace(snapshot=SimpleNamespace(root=root), documents={"forest-card": document}),
         active_tab=SimpleNamespace(component_id="forest-card"),
         element_properties=SimpleNamespace(

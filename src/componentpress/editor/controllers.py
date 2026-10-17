@@ -135,3 +135,7 @@ class ProjectController:
 
     def cancel_build(self, job_id: str) -> bool:
         return bool(self.build and self.build.cancel(job_id))
+
+    def is_build_preparing(self, job_id: str | None) -> bool:
+        check = getattr(self.build, "is_preparing", None)
+        return bool(job_id and check and check(job_id))

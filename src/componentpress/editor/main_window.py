@@ -61,6 +61,7 @@ from componentpress.domain.tree import (
     TreeOperationError,
     align_nodes,
     effectively_locked_ids,
+    contains_locked_node,
     add_node,
     drop_nodes,
     duplicate_nodes,
@@ -78,6 +79,7 @@ from componentpress.domain.tree import (
 )
 
 from .controllers import ProjectController
+from .action_policy import BuildContext, EditingContext, HistoryContext, HistoryTarget, build_actions, editing_actions, history_target
 from .commands import ReplaceComponentCommand
 from .dialogs import HtmlAddDialog, ImageAddDialog, ImageManagerDialog, ResourcePickerDialog, format_error
 from .build_dialog import BuildOptionsDialog
@@ -364,12 +366,29 @@ class MainWindow(QMainWindow):
                 child.installEventFilter(self)
 
     def eventFilter(self, watched, event) -> bool:
+        if self._route_text_history_shortcut(watched, event):
+            return True
         if event.type() == QEvent.Type.MouseButtonPress:
             tab = getattr(self, "active_tab", None)
             if tab is not None and tab.canvas.active_tool is not None:
                 tab.canvas.cancel_tool()
                 return True
         return super().eventFilter(watched, event)
+
+    def _route_text_history_shortcut(self, watched, event) -> bool:
+        tab = self.active_tab
+        if tab is None or watched is not tab.text_editor or event.type() != QEvent.Type.KeyPress:
+            return False
+        if not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            return False
+        key, modifiers = event.key(), event.modifiers()
+        if key == Qt.Key.Key_Z:
+            self._redo() if modifiers & Qt.KeyboardModifier.ShiftModifier else self._undo()
+            return True
+        if key == Qt.Key.Key_Y:
+            self._redo()
+            return True
+        return False
 
     def _left_panel(self) -> QWidget:
         panel = QWidget(self)
@@ -1086,7 +1105,7 @@ class MainWindow(QMainWindow):
         self._resource_images_changed()
 
     def project_settings_dialog(self) -> None:
-        if self.session is None:
+        if self.session is None or not self._user_editing_allowed():
             return
         model = self.session.snapshot.model
         dialog = ProjectSettingsDialog(self.session, self.controller.preview, self)
@@ -1179,7 +1198,7 @@ class MainWindow(QMainWindow):
             return ()
 
     def _create_component(self, values: dict, component_id: str | None = None) -> bool:
-        if self.session is None:
+        if self.session is None or not self._user_editing_allowed():
             return False
         try:
             component_id = self.controller.add_component(
@@ -1198,8 +1217,8 @@ class MainWindow(QMainWindow):
         return True
 
     def add_component(self, component_id: str | None = None, name: str | None = None) -> bool:
-        # The two-argument form remains available to automated legacy scenarios;
-        # the UI always supplies only a display name and receives an automatic ID.
+        if not self._user_editing_allowed():
+            return False
         if name is None:
             name, component_id = component_id, None
         if not name or not name.strip():
@@ -1278,6 +1297,8 @@ class MainWindow(QMainWindow):
             self._discard_history_entry(entry)
 
     def delete_component(self, component_id: str, *, confirm: bool = True) -> bool:
+        if not self._user_editing_allowed():
+            return False
         if not self._component_deletion_ready(component_id):
             return False
         document = self.session.documents[component_id]
@@ -1290,7 +1311,8 @@ class MainWindow(QMainWindow):
     def _component_deletion_ready(self, component_id: str) -> bool:
         if self.session is None or component_id not in self.session.documents:
             return False
-        if len(self.session.documents) > 1 and self._active_build_job is None and self._version_task is None:
+        if (len(self.session.documents) > 1 and self._active_build_job is None
+                and self._build_pending_active_only is None and self._version_task is None):
             return True
         message = "Нельзя удалить последний компонент проекта" if len(self.session.documents) <= 1 else "Дождитесь завершения текущей операции"
         self.statusBar().showMessage(message, 5000)
@@ -1372,18 +1394,25 @@ class MainWindow(QMainWindow):
         self._preview_coordinator.discard_pending(tab.identity)
 
     def _undo(self) -> None:
-        tab = self.active_tab
-        if (tab is not None and tab.mode == "text" and not self._project_history_focus
-                and tab.text_editor.document().isUndoAvailable()):
-            tab.text_editor.undo()
-        elif self._project_history_focus and self._component_history.undo_entry():
+        if not self._user_editing_allowed():
+            return
+        target = self._history_target(redo=False)
+        if target is HistoryTarget.TEXT and self.active_tab is not None:
+            self.active_tab.text_editor.undo()
+        elif target is HistoryTarget.PROJECT:
             self._undo_component_history()
-        elif tab is not None and tab.undo_stack.canUndo():
-            tab.undo_stack.undo()
+        elif target is HistoryTarget.DOCUMENT and self.active_tab is not None:
+            self.active_tab.undo_stack.undo()
             self._project_history_focus = False
-        elif self._component_history.undo_entry():
-            self._undo_component_history()
         self._update_actions()
+
+    def _history_target(self, *, redo: bool) -> HistoryTarget:
+        tab = self.active_tab
+        text_available = bool(tab and (tab.text_editor.document().isRedoAvailable() if redo else tab.text_editor.document().isUndoAvailable()))
+        document_available = bool(tab and (tab.undo_stack.canRedo() if redo else tab.undo_stack.canUndo()))
+        project_available = bool(self._component_history.redo_entry() if redo else self._component_history.undo_entry())
+        return history_target(HistoryContext(bool(tab and tab.mode == "text"), self._project_history_focus,
+                                             text_available, document_available, project_available))
 
     def _undo_component_history(self) -> None:
         entry = self._component_history.undo_entry()
@@ -1392,17 +1421,16 @@ class MainWindow(QMainWindow):
             self._project_history_focus = True
 
     def _redo(self) -> None:
-        tab = self.active_tab
-        if (tab is not None and tab.mode == "text" and not self._project_history_focus
-                and tab.text_editor.document().isRedoAvailable()):
-            tab.text_editor.redo()
-        elif self._project_history_focus and self._component_history.redo_entry():
+        if not self._user_editing_allowed():
+            return
+        target = self._history_target(redo=True)
+        if target is HistoryTarget.TEXT and self.active_tab is not None:
+            self.active_tab.text_editor.redo()
+        elif target is HistoryTarget.PROJECT:
             self._redo_component_history()
-        elif tab is not None and tab.undo_stack.canRedo():
-            tab.undo_stack.redo()
+        elif target is HistoryTarget.DOCUMENT and self.active_tab is not None:
+            self.active_tab.undo_stack.redo()
             self._project_history_focus = False
-        elif self._component_history.redo_entry():
-            self._redo_component_history()
         self._update_actions()
 
     def _redo_component_history(self) -> None:
@@ -1474,6 +1502,7 @@ class MainWindow(QMainWindow):
         # Seed the editor before adding it to the tab widget: palette events can
         # rehighlight it synchronously, and must not turn an empty editor into a draft.
         tab.set_text(self.session.documents[component_id].current_text)
+        tab.text_editor.installEventFilter(self)
         tab.draftChanged.connect(lambda text, item=tab: self._draft_changed(item, text))
         index = self.tabs.addTab(tab, "")
         self._update_tab_title(component_id)
@@ -2175,15 +2204,14 @@ class MainWindow(QMainWindow):
     def _start_build(self, active_only: bool) -> None:
         if self.session is None or self.controller.build is None or self._active_build_job is not None or self._version_task is not None or self._build_pending_active_only is not None:
             return
+        if not self.save_all():
+            return
         self._build_pending_active_only = active_only
         for tab in self._tabs.values():
             tab.preview_timer.stop()
             tab.preview_deferred = tab.preview_arguments is not None
         self._preview_coordinator.discard_pending()
         self._update_actions()
-        if not self.save_all():
-            self._cancel_pending_build()
-            return
         if self._preview_coordinator.active is not None:
             self.statusBar().showMessage("Предпросмотр завершает работу; сборка начнётся сразу после неё")
             return
@@ -2270,6 +2298,8 @@ class MainWindow(QMainWindow):
         self._build_progress.setRange(0, max(progress.total, 1))
         self._build_progress.setValue(progress.completed)
         self._build_progress.setLabelText(progress.message or progress.phase)
+        if progress.phase == "preparing" and progress.total and progress.completed >= progress.total:
+            self._update_actions()
 
     def _accept_build_progress(self, progress: BuildProgress) -> bool:
         previous = self._last_build_progress
@@ -2323,7 +2353,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Не удалось открыть: {target}", 7000)
 
     def _request_mode(self, tab: DocumentTab, mode: str) -> None:
-        if self.session is None:
+        if self.session is None or not self._user_editing_allowed():
             return
         if mode == "text":
             tab.canvas.cancel_tool()
@@ -2338,7 +2368,7 @@ class MainWindow(QMainWindow):
         self._active_tab_changed(self.tabs.currentIndex())
 
     def _draft_changed(self, tab: DocumentTab, text: str) -> None:
-        if self.session is None:
+        if self.session is None or not self._user_editing_allowed():
             return
         document = self.session.documents[tab.component_id]
         try:
@@ -2353,7 +2383,7 @@ class MainWindow(QMainWindow):
         self._update_actions()
 
     def _apply_draft(self, component_id: str) -> bool:
-        if self.session is None:
+        if self.session is None or not self._user_editing_allowed():
             return False
         document = self.session.documents[component_id]
         if document.draft_text is None:
@@ -2525,13 +2555,15 @@ class MainWindow(QMainWindow):
     def _pick_background_color(self) -> None:
         if self.session is None or self.active_tab is None:
             return
+        token = self._selection_token()
         current = self.session.documents[self.active_tab.component_id].model.background
         color = QColorDialog.getColor(QColor(current), self, tr("ui.dialog_background_color"))
-        if color.isValid():
+        if color.isValid() and self._selection_token_is_current(token):
             self._edit_active(background=color.name(QColor.NameFormat.HexRgb).upper())
 
     def _pick_node_color(self, current: str) -> None:
         ids = self._selected_ids()
+        token = self._selection_token()
         node = locations(self.session.documents[self.active_tab.component_id].model).get(ids[0]).node if ids and self.session and self.active_tab else None
         field = {"shapeFill": "fill", "shapeStroke": "stroke"}.get(current, "color")
         value = getattr(node, field, "#111111") if node is not None else current
@@ -2540,7 +2572,7 @@ class MainWindow(QMainWindow):
             initial = QColor("#111111")
         title = tr("ui.dialog_text_color") if field == "color" else tr("ui.dialog_fill_color") if field == "fill" else tr("ui.dialog_stroke_color")
         color = QColorDialog.getColor(initial, self, title, QColorDialog.ColorDialogOption.ShowAlphaChannel)
-        if color.isValid():
+        if color.isValid() and self._selection_token_is_current(token):
             self._edit_selected_node({field: color.name(QColor.NameFormat.HexArgb).upper() if color.alpha() < 255 else color.name(QColor.NameFormat.HexRgb).upper()})
 
     def _component_property_sheet_changed(self, sheet: object) -> None:
@@ -2555,7 +2587,7 @@ class MainWindow(QMainWindow):
 
     def _edit_active(self, **changes: object) -> None:
         tab = self.active_tab
-        if tab is None or self.session is None:
+        if tab is None or self.session is None or not self._visual_editing_allowed():
             return
         if "background" in changes and not QColor(str(changes["background"])).isValid():
             QMessageBox.warning(self, "Некорректное значение", "Фон должен иметь вид #RRGGBB")
@@ -2573,7 +2605,7 @@ class MainWindow(QMainWindow):
 
     def _commit_component(self, label: str, updated: ComponentDefinition, *, selected: tuple[str, ...] | None = None) -> bool:
         tab = self.active_tab
-        if tab is None or self.session is None:
+        if tab is None or self.session is None or not self._visual_editing_allowed():
             return False
         document = self.session.documents[tab.component_id]
         if updated == document.model:
@@ -2644,9 +2676,21 @@ class MainWindow(QMainWindow):
             if index.data(ID_ROLE) is not None
         )
 
+    def _selection_token(self) -> tuple | None:
+        if self.session is None or self.active_tab is None:
+            return None
+        document = self.session.documents.get(self.active_tab.component_id)
+        return None if document is None else (
+            id(self.session), self.active_tab.identity, document.component_id,
+            document.revision, self._selected_ids(),
+        )
+
+    def _selection_token_is_current(self, token: tuple | None) -> bool:
+        return token is not None and self._selection_token() == token and self._user_editing_allowed()
+
     def _apply_tree(self, label: str, operation, *args, selected: tuple[str, ...] | None = None, **kwargs) -> bool:
         tab = self.active_tab
-        if tab is None or self.session is None:
+        if tab is None or self.session is None or not self._visual_editing_allowed():
             return False
         try:
             updated = operation(self.session.documents[tab.component_id].model, *args, **kwargs)
@@ -2742,30 +2786,26 @@ class MainWindow(QMainWindow):
         if not ids or self.active_tab is None or self.session is None:
             return
         index = locations(self.session.documents[self.active_tab.component_id].model)
-        locked = effectively_locked_ids(self.session.documents[self.active_tab.component_id].model)
         selected = [index[node_id].node for node_id in ids]
-        def contains_lock(node: Node) -> bool:
-            return node.locked or isinstance(node, GroupNode) and any(contains_lock(child) for child in node.children)
+        self._open_element_context_menu(global_point, ids, selected, editing_actions(self._editing_context()))
 
-        safe = not any(node_id in locked for node_id in ids) and not any(contains_lock(node) for node in selected)
-        visual = self.active_tab.mode == "layout" and self._active_build_job is None and self._version_task is None
+    def _open_element_context_menu(self, point, ids, selected, actions) -> None:
         menu = QMenu(self)
         duplicate = menu.addAction(tr("ui.duplicate"))
-        duplicate.setEnabled(visual and safe)
+        duplicate.setEnabled(actions.layout and actions.duplicate)
         duplicate.triggered.connect(lambda: self.duplicate_selected())
         delete = menu.addAction(tr("ui.context_delete"))
-        delete.setEnabled(visual and safe)
+        delete.setEnabled(actions.layout and actions.delete)
         delete.triggered.connect(lambda: self.delete_selected())
         if len(ids) > 1:
             group = menu.addAction(tr("ui.group_create"))
-            groupable = safe and len({index[node_id].parent_id for node_id in ids}) == 1
-            group.setEnabled(visual and groupable)
+            group.setEnabled(actions.layout and actions.group)
             group.triggered.connect(lambda: self.group_selected())
         elif isinstance(selected[0], GroupNode):
             ungroup = menu.addAction(tr("ui.ungroup"))
-            ungroup.setEnabled(visual and safe)
+            ungroup.setEnabled(actions.layout and actions.ungroup)
             ungroup.triggered.connect(lambda: self.ungroup_selected())
-        menu.exec(global_point)
+        menu.exec(point)
 
     def _resize_selected(self, node_id: str, width_mm: float, height_mm: float, anchor_x: float = 0.0, anchor_y: float = 0.0) -> None:
         self._apply_tree("Изменить размер элемента", resize_node, node_id, width_mm, height_mm, (anchor_x, anchor_y), selected=(node_id,))
@@ -2801,10 +2841,11 @@ class MainWindow(QMainWindow):
 
     def delete_selected(self) -> bool:
         ids = self._selected_ids()
-        if not ids:
+        if not ids or not editing_actions(self._editing_context()).delete:
             return False
         if self.active_tab is None or self.session is None:
             return False
+        token = self._selection_token()
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
         box.setWindowTitle(tr("ui.delete_confirm_title"))
@@ -2814,7 +2855,7 @@ class MainWindow(QMainWindow):
         box.setDefaultButton(cancel_button)
         box.setEscapeButton(cancel_button)
         box.exec()
-        if box.clickedButton() is not delete_button:
+        if box.clickedButton() is not delete_button or not self._selection_token_is_current(token):
             return False
         return self._apply_tree(tr("action.delete"), remove_nodes, ids, selected=())
 
@@ -2863,10 +2904,13 @@ class MainWindow(QMainWindow):
         ids = self._selected_ids()
         if len(ids) < 2 or self.session is None or self.active_tab is None:
             return False
+        if not editing_actions(self._editing_context()).group:
+            return False
+        token = self._selection_token()
         component = self.session.documents[self.active_tab.component_id].model
         if name is None:
             name, accepted = QInputDialog.getText(self, tr("ui.group_create"), tr("ui.name"), text=self._next_default_name("group"))
-            if not accepted:
+            if not accepted or not self._selection_token_is_current(token):
                 return False
         if not name.strip():
             return False
@@ -2929,7 +2973,7 @@ class MainWindow(QMainWindow):
         return data.headers if data is not None else ()
 
     def _place_element(self, tool: str, x_mm: float, y_mm: float) -> None:
-        if self.session is None:
+        if self.session is None or not self._visual_editing_allowed():
             return
         root = self.session.snapshot.root
         accepted = True
@@ -3021,7 +3065,7 @@ class MainWindow(QMainWindow):
         source_column: str | None = None,
         node_id: str | None = None,
     ) -> bool:
-        if self.session is None or self.active_tab is None:
+        if self.session is None or self.active_tab is None or not self._visual_editing_allowed():
             return False
         component = self.session.documents[self.active_tab.component_id].model
         name = name or self._next_default_name("image")
@@ -3049,7 +3093,7 @@ class MainWindow(QMainWindow):
         content_column: str | None = None,
         node_id: str | None = None,
     ) -> bool:
-        if self.session is None or self.active_tab is None:
+        if self.session is None or self.active_tab is None or not self._visual_editing_allowed():
             return False
         component = self.session.documents[self.active_tab.component_id].model
         name = name or self._next_default_name("html")
@@ -3070,7 +3114,7 @@ class MainWindow(QMainWindow):
 
     def insert_html_image(self) -> None:
         ids = self._selected_ids()
-        if len(ids) != 1 or self.session is None or self.active_tab is None:
+        if len(ids) != 1 or self.session is None or self.active_tab is None or not self._user_editing_allowed():
             return
         found = locations(self.session.documents[self.active_tab.component_id].model)[ids[0]].node
         if not isinstance(found, HtmlNode):
@@ -3097,6 +3141,8 @@ class MainWindow(QMainWindow):
         return self._save_component(tab.component_id)
 
     def _save_component(self, component_id: str) -> bool:
+        if not self._user_editing_allowed():
+            return False
         if self.session is None or not self.session.documents[component_id].dirty:
             return True
         if not self._apply_draft(component_id):
@@ -3113,8 +3159,13 @@ class MainWindow(QMainWindow):
         return True
 
     def save_all(self) -> bool:
+        if not self._user_editing_allowed():
+            return False
         if self.session is None:
             return True
+        return self._save_all_documents()
+
+    def _save_all_documents(self) -> bool:
         for component_id in tuple(self.session.documents):
             if not self._apply_draft(component_id):
                 tab = self._tabs.get(component_id)
@@ -3258,82 +3309,98 @@ class MainWindow(QMainWindow):
         if self.sender() is self.active_tab:
             self.status_zoom.setText(tr("ui.zoom_status", percent=percent))
 
+    def _editing_context(self) -> EditingContext:
+        tab = self.active_tab
+        selected = self._selected_ids()
+        model = self.session.documents[tab.component_id].model if tab is not None and self.session else None
+        index = locations(model) if model is not None else {}
+        found = [index.get(node_id) for node_id in selected]
+        valid = bool(selected) and all(item is not None for item in found)
+        locks = effectively_locked_ids(model) if model is not None else frozenset()
+        nodes = [item.node for item in found if item is not None]
+        return EditingContext(
+            tab is not None, bool(tab and tab.mode == "text"),
+            self._build_pending_active_only is not None or self.controller.is_build_preparing(self._active_build_job),
+            self._version_task is not None, len(selected) if valid else 0,
+            valid and all(node_id not in locks for node_id in selected),
+            valid and all(not contains_locked_node(node) for node in nodes),
+            valid and len({item.parent_id for item in found if item is not None}) == 1,
+            len(nodes) == 1 and isinstance(nodes[0], GroupNode),
+        )
+
+    def _user_editing_allowed(self) -> bool:
+        context = self._editing_context()
+        return not context.reserved and not context.version_busy
+
+    def _visual_editing_allowed(self) -> bool:
+        return editing_actions(self._editing_context()).layout
+
     def _update_actions(self) -> None:
-        has_project = self.session is not None
-        has_tab = self.active_tab is not None
-        visual = has_tab and self.active_tab.mode == "layout" and self._build_pending_active_only is None
-        active_stack = self.active_tab.undo_stack if self.active_tab is not None else None
-        # In text mode Ctrl+Z/Ctrl+Y belong to QPlainTextEdit's local history.
-        project_undo = self._component_history.undo_entry() is not None
-        project_redo = self._component_history.redo_entry() is not None
-        document_undo = bool(visual and active_stack and active_stack.canUndo())
-        document_redo = bool(visual and active_stack and active_stack.canRedo())
-        text_mode = bool(has_tab and self.active_tab.mode == "text")
+        context = self._editing_context()
+        decisions = editing_actions(context)
+        build = build_actions(BuildContext(
+            self.session is not None, context.has_tab, self._active_build_job is not None,
+            context.version_busy, context.reserved,
+        ))
         self.undo_action.setText(tr("action.undo"))
         self.redo_action.setText(tr("action.redo"))
-        text_undo = bool(text_mode and self.active_tab.text_editor.document().isUndoAvailable())
-        text_redo = bool(text_mode and self.active_tab.text_editor.document().isRedoAvailable())
-        self.undo_action.setEnabled(bool(text_undo or project_undo or document_undo))
-        self.redo_action.setEnabled(bool(text_redo or project_redo or document_redo))
-        idle = self._active_build_job is None and self._version_task is None and self._build_pending_active_only is None
-        self.add_component_action.setEnabled(has_project and idle)
-        self.project_settings_action.setEnabled(has_project and idle)
-        self.image_manager_action.setEnabled(has_project and self._active_build_job is None and self._version_task is None and self._build_pending_active_only is None)
-        self.delete_component_action.setEnabled(has_project and has_tab and len(self.session.documents) > 1 and idle)
-        self.build_all_action.setEnabled(has_project and idle)
-        self.build_active_action.setEnabled(has_tab and idle)
-        self.validate_all_action.setEnabled(has_project and idle)
-        self.validate_active_action.setEnabled(has_tab and idle)
-        self.data_validate_all.setEnabled(has_project and idle)
-        self.data_validate.setEnabled(has_tab and idle)
-        build_running = self._active_build_job is not None
-        self.cancel_build_action.setEnabled(build_running)
-        self.delete_widget_action.setVisible(bool(visual and self._selected_ids()))
+        self.undo_action.setEnabled(self._history_target(redo=False) is not HistoryTarget.NONE and self._user_editing_allowed())
+        self.redo_action.setEnabled(self._history_target(redo=True) is not HistoryTarget.NONE and self._user_editing_allowed())
+        self._apply_project_actions(context, build)
         self._update_build_toolbar()
-        self._update_file_actions(has_project, has_tab, idle, visual)
+        self._apply_editing_actions(decisions)
+
+    def _apply_project_actions(self, context: EditingContext, build) -> None:
+        has_project = self.session is not None
+        self.add_component_action.setEnabled(has_project and build.idle)
+        self.project_settings_action.setEnabled(has_project and build.idle)
+        self.image_manager_action.setEnabled(has_project and build.idle)
+        self.delete_component_action.setEnabled(has_project and context.has_tab and len(self.session.documents) > 1 and build.idle)
+        self.build_all_action.setEnabled(build.build_all)
+        self.build_active_action.setEnabled(build.build_active)
+        self.validate_all_action.setEnabled(build.validate_all)
+        self.validate_active_action.setEnabled(build.validate_active)
+        self.data_validate_all.setEnabled(build.validate_all)
+        self.data_validate.setEnabled(build.validate_active)
+        self.cancel_build_action.setEnabled(self._active_build_job is not None)
+        self._update_file_actions(has_project, context.has_tab, build.idle, context, not context.reserved and not context.version_busy)
+
+    def _apply_editing_actions(self, actions) -> None:
         selected = self._selected_ids()
-        has_selection = bool(selected)
-        locked_selection = False
-        if has_tab and self.session is not None and selected:
-            component = self.session.documents[self.active_tab.component_id].model
-            locked_selection = any(node_id in effectively_locked_ids(component) for node_id in selected)
-        # Reordering another layer across a locked sibling is explicitly allowed;
-        # operations that target the selected locked node are disabled.
-        for widget in (self.layer_up, self.layer_down):
-            widget.setEnabled(visual and has_selection)
+        self.delete_widget_action.setVisible(bool(actions.layout and selected))
+        for tab in self._tabs.values():
+            tab.text_editor.setReadOnly(not actions.text if tab is self.active_tab else not self._user_editing_allowed())
+            tab.layout_mode.setEnabled(self._user_editing_allowed())
+            tab.text_mode.setEnabled(self._user_editing_allowed())
+        self.element_tree.setEnabled(actions.layout)
+        self.properties.setEnabled(actions.layout)
+        self.element_properties.setEnabled(actions.layout and bool(selected))
+        self.delete_action.setEnabled(actions.layout and actions.delete)
+        for button in (self.layer_up, self.layer_down):
+            button.setEnabled(actions.layout and actions.layer_order)
         for button in self.align_buttons.values():
-            button.setEnabled(visual and len(selected) >= 2 and not locked_selection)
-        self.element_tree.setEnabled(bool(visual))
-        self.properties.setEnabled(bool(visual))
-        self.element_properties.setEnabled(bool(visual and has_selection))
-        self.delete_action.setEnabled(visual and idle and has_selection and not locked_selection)
-        groupable = len(selected) > 1 and not locked_selection
-        if groupable and self.session is not None and self.active_tab is not None:
-            index = locations(self.session.documents[self.active_tab.component_id].model)
-            groupable = len({index[node_id].parent_id for node_id in selected}) == 1
-        self.group_action.setEnabled(bool(visual and idle and groupable))
-        self.group_button.setEnabled(bool(visual and idle and groupable))
-        can_ungroup = False
-        if has_tab and len(selected) == 1 and self.session is not None:
-            node = locations(self.session.documents[self.active_tab.component_id].model).get(selected[0])
-            can_ungroup = bool(node and isinstance(node.node, GroupNode))
-        can_ungroup = can_ungroup and not locked_selection
-        self.ungroup_action.setEnabled(bool(visual and idle and can_ungroup))
-        self.ungroup_button.setEnabled(bool(visual and idle and can_ungroup))
+            button.setEnabled(actions.layout and actions.align)
+        self._apply_group_actions(actions)
         self._sync_tool_buttons()
 
-    def _update_file_actions(self, has_project: bool, has_tab: bool, idle: bool, visual: bool) -> None:
+    def _apply_group_actions(self, actions) -> None:
+        self.group_action.setEnabled(actions.layout and actions.group)
+        self.group_button.setEnabled(actions.layout and actions.group)
+        self.ungroup_action.setEnabled(actions.layout and actions.ungroup)
+        self.ungroup_button.setEnabled(actions.layout and actions.ungroup)
+
+    def _update_file_actions(self, has_project: bool, has_tab: bool, idle: bool, context: EditingContext, save_allowed: bool) -> None:
         ready = self._last_build_result is not None
         self.open_build_action.setEnabled(ready)
         self.open_pdf_action.setEnabled(ready)
-        self.save_all_action.setEnabled(has_project and idle and bool(self.session and self.session.dirty))
-        self.save_action.setEnabled(has_tab and idle and bool(self.session and self.active_tab)
+        self.save_all_action.setEnabled(has_project and save_allowed and bool(self.session and self.session.dirty))
+        self.save_action.setEnabled(has_tab and save_allowed and bool(self.session and self.active_tab)
                                     and self.session.documents[self.active_tab.component_id].dirty)
         self.close_tab_action.setEnabled(has_tab and idle)
         for action in (self.zoom_in_action, self.zoom_out_action, self.fit_action, self.actual_size_action):
-            action.setEnabled(visual)
+            action.setEnabled(context.has_tab and not context.text_mode)
         for button in self.drawing_tools.values():
-            button.setEnabled(visual)
+            button.setEnabled(context.has_tab and not context.text_mode and not context.reserved and not context.version_busy)
         self.export_png_zip_action.setEnabled(has_project and idle)
         self.export_project_archive_action.setEnabled(has_project and idle)
         self.import_project_archive_action.setEnabled(idle)

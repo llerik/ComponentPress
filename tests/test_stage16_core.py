@@ -34,9 +34,11 @@ def _png(path: Path, color: str = "#FF0000") -> bytes:
 
 def test_group_resize_rotate_ungroup_preserves_children_world_geometry():
     component = _component((ShapeNode(id="shape", name="Shape", type="rectangle", x_mm=4, y_mm=7,
-                                     width_mm=8, height_mm=6),))
+                                     width_mm=8, height_mm=6),
+                           ShapeNode(id="other", name="Other", type="rectangle", x_mm=5, y_mm=8,
+                                     width_mm=1, height_mm=1)))
     before = locations(component)["shape"].world
-    grouped = group_nodes(component, ["shape"], "group", "Group")
+    grouped = group_nodes(component, ["shape", "other"], "group", "Group")
     assert grouped.elements[0].frame.width_mm > 0
     resized = resize_node(grouped, "group", 16, 12)
     resized_again = resize_node(resized, "group", 16, 12)

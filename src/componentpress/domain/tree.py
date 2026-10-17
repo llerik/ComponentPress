@@ -334,13 +334,7 @@ def place_nodes(component: ComponentDefinition, node_ids: Iterable[str], target_
 
 
 def group_nodes(component: ComponentDefinition, node_ids: Iterable[str], group_id: str, name: str) -> ComponentDefinition:
-    if group_id in locations(component):
-        raise TreeOperationError(f"ID {group_id!r} уже используется")
-    selected, parent_id = _selection(component, node_ids)
-    _ensure_unlocked_selection(component, (item.node.id for item in selected), "сгруппировать")
-    _ensure_unprotected_subtrees(component, (item.node.id for item in selected), "сгруппировать")
-    nodes = list(parent_nodes(component, parent_id))
-    ids = {item.node.id for item in selected}
+    selected, parent_id, nodes, ids = _group_selection(component, node_ids, group_id)
     ordered = [node for node in nodes if node.id in ids]
     group_x, group_y = ordered[0].x_mm, ordered[0].y_mm
     offset = Affine(1, 0, 0, 1, -group_x, -group_y)
@@ -358,6 +352,17 @@ def group_nodes(component: ComponentDefinition, node_ids: Iterable[str], group_i
     insertion = sum(1 for index, node in enumerate(nodes) if index <= top_index and node.id not in ids)
     remaining.insert(insertion, group)
     return _refresh_frames(_replace_children(component, parent_id, tuple(remaining)))
+
+
+def _group_selection(component: ComponentDefinition, node_ids: Iterable[str], group_id: str):
+    if group_id in locations(component):
+        raise TreeOperationError(f"ID {group_id!r} уже используется")
+    selected, parent_id = _selection(component, node_ids)
+    if len(selected) < 2:
+        raise TreeOperationError("для группировки выберите не менее двух элементов")
+    _ensure_unlocked_selection(component, (item.node.id for item in selected), "сгруппировать")
+    _ensure_unprotected_subtrees(component, (item.node.id for item in selected), "сгруппировать")
+    return selected, parent_id, list(parent_nodes(component, parent_id)), {item.node.id for item in selected}
 
 
 def ungroup_node(component: ComponentDefinition, group_id: str) -> ComponentDefinition:
@@ -465,7 +470,16 @@ def _has_locked_ancestor(component: ComponentDefinition, node_id: str) -> bool:
 
 
 def effectively_locked_ids(component: ComponentDefinition) -> frozenset[str]:
-    return frozenset(node_id for node_id in locations(component) if _is_effectively_locked(component, node_id))
+    result: set[str] = set()
+    def visit(nodes: tuple[Node, ...], parent_locked: bool) -> None:
+        for node in nodes:
+            locked = parent_locked or node.locked
+            if locked:
+                result.add(node.id)
+            if isinstance(node, GroupNode):
+                visit(node.children, locked)
+    visit(component.elements, False)
+    return frozenset(result)
 
 
 def _ensure_unlocked_selection(component: ComponentDefinition, node_ids: Iterable[str], action: str) -> None:
@@ -476,12 +490,14 @@ def _ensure_unlocked_selection(component: ComponentDefinition, node_ids: Iterabl
 
 def _ensure_unprotected_subtrees(component: ComponentDefinition, node_ids: Iterable[str], action: str) -> None:
     index = locations(component)
-
-    def has_locked_descendant(node: Node) -> bool:
-        return node.locked or (isinstance(node, GroupNode) and any(has_locked_descendant(child) for child in node.children))
-
-    if any(has_locked_descendant(index[node_id].node) for node_id in node_ids):
+    if any(contains_locked_node(index[node_id].node) for node_id in node_ids):
         raise TreeOperationError(f"нельзя {action}: в группе есть заблокированный элемент")
+
+
+def contains_locked_node(node: Node) -> bool:
+    return node.locked or isinstance(node, GroupNode) and any(
+        contains_locked_node(child) for child in node.children
+    )
 
 
 def align_nodes(component: ComponentDefinition, node_ids: Iterable[str], edge: str) -> ComponentDefinition:

@@ -1,5 +1,5 @@
 {
-  "source_revision": "4fb6e09",
+  "source_revision": "903e299",
   "limit": 20,
   "test_collection_before_guards": 417,
   "test_collection_after_guards": 479,
@@ -268,14 +268,6 @@
       "name": "duplicate_nodes",
       "line": 261,
       "length": 35,
-      "stage": "7",
-      "owner": "coder:src/componentpress/domain"
-    },
-    "src/componentpress/domain/tree.py|group_nodes": {
-      "path": "src/componentpress/domain/tree.py",
-      "name": "group_nodes",
-      "line": 336,
-      "length": 25,
       "stage": "7",
       "owner": "coder:src/componentpress/domain"
     },
@@ -663,14 +655,6 @@
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
     },
-    "src/componentpress/editor/main_window.py|MainWindow._show_element_context_menu": {
-      "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow._show_element_context_menu",
-      "line": 2627,
-      "length": 29,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
-    },
     "src/componentpress/editor/main_window.py|MainWindow._layer_drop": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._layer_drop",
@@ -716,22 +700,6 @@
       "name": "MainWindow.insert_html_image",
       "line": 2958,
       "length": 21,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
-    },
-    "src/componentpress/editor/main_window.py|MainWindow.save_all": {
-      "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow.save_all",
-      "line": 3002,
-      "length": 21,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
-    },
-    "src/componentpress/editor/main_window.py|MainWindow._update_actions": {
-      "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow._update_actions",
-      "line": 3150,
-      "length": 80,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
     },

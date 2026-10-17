@@ -113,6 +113,19 @@ def test_submit_failure_finishes_accepted_job_once_and_ignores_callback_failure(
     assert not service.is_active()
 
 
+def test_build_preparation_ends_when_snapshot_is_accepted(tmp_path):
+    runtime = FakeRuntime()
+    service = _service(runtime)
+    runtime.prepare = lambda _session, _request, job_id, _directory, _token, done: runtime.callbacks.__setitem__(job_id, done)
+    job_id = service.start(_session(tmp_path), BuildRequest())
+    assert service.is_preparing(job_id)
+
+    runtime.callbacks[job_id](object(), None)
+
+    assert not service.is_preparing(job_id)
+    assert not service.is_active(job_id)
+
+
 def test_application_build_service_imports_without_qt_or_adapters(tmp_path):
     source = Path(__file__).resolve().parents[1] / "src"
     script = (

@@ -13,6 +13,7 @@ from componentpress.domain.component import ComponentDefinition, SizeMM
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, ShapeNode
 from componentpress.i18n import language, set_language
 from componentpress.domain.tree import (
+    TreeOperationError,
     add_node,
     duplicate_nodes,
     drop_nodes,
@@ -47,6 +48,14 @@ def simple_component() -> ComponentDefinition:
             HtmlNode(id="other", name="Другой", type="html", x_mm=1, y_mm=2, width_mm=10, height_mm=5, font_family="Arial", font_size_pt=8, html="x"),
         ),
     )
+
+
+def test_grouping_rejects_a_single_node() -> None:
+    try:
+        group_nodes(simple_component(), ("back",), "group", "Group")
+    except TreeOperationError:
+        return
+    raise AssertionError("grouping one node must be rejected")
 
 
 def test_group_ungroup_move_and_reparent_preserve_global_geometry() -> None:
