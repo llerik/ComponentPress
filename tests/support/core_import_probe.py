@@ -164,11 +164,12 @@ if sys.argv[3:] == ["componentpress.application.preview_service"]:
     assert resolver.validate_resources is False
     service.invalidate(root)
 if sys.argv[3:] == ["componentpress.application.version_service"]:
+    from componentpress.application.contracts import ArchiveExportResult
     from componentpress.application.version_service import VersionService
 
     class Archive:
         def export(self, snapshot, target, **options):
-            return (target, "0.1.1", True, None)
+            return ArchiveExportResult(target, "0.1.1", True)
 
         def restore_path(self, archive_path, destination, **options):
             return destination
@@ -178,7 +179,7 @@ if sys.argv[3:] == ["componentpress.application.version_service"]:
             return root
 
     service = VersionService(Archive(), Projects())
-    assert service.export(object(), "archive.zip")[1:] == ("0.1.1", True, None)
+    assert service.export(object(), "archive.zip") == ArchiveExportResult("archive.zip", "0.1.1", True)
     assert service.restore("archive.zip", "restored") == "restored"
 if all(module.startswith("componentpress.domain.") for module in sys.argv[3:]):
     assert not any(name.startswith("componentpress.application.") for name in sys.modules), "domain imported application"

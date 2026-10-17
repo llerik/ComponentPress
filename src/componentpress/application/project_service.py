@@ -12,7 +12,7 @@ from componentpress.domain.project import CopiesColumns, DataSource
 import re
 import unicodedata
 from componentpress.domain.tree import locations
-from .contracts import ProjectSnapshot
+from .contracts import ArchiveExportResult, ProjectSnapshot
 from .identifiers import IdentifierGenerator
 from .ports import ProjectRepository, ResourceRepository, WriteLockFactory
 from .sessions import ProjectSession
@@ -214,7 +214,7 @@ class ProjectService:
         updated = self.projects.save_project(session.snapshot, name=name, version=version)
         session.replace_snapshot(updated)
 
-    def export_project_version(self, session: ProjectSession, target: Path, *, replace: bool = False, cancellation=None, on_progress=None) -> tuple[Path, str, bool, str | None]:
+    def export_project_version(self, session: ProjectSession, target: Path, *, replace: bool = False, cancellation=None, on_progress=None) -> ArchiveExportResult:
         self.save_all(session)
         result = self.versions.export(session.snapshot, target, replace=replace, cancellation=cancellation, on_progress=on_progress)
         refreshed = self.projects.open(session.snapshot.root)

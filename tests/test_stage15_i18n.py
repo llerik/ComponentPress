@@ -24,6 +24,15 @@ def test_catalogs_have_matching_keys_and_placeholders() -> None:
     set_language("ru")
 
 
+def test_archive_task_messages_are_translated_in_both_catalogs() -> None:
+    values = {key: tr(key, locale="ru", path="/game", version="0.1.1", detail="") for key in (
+        "archive.export_title", "archive.import_title", "archive.exists_title",
+        "archive.replace_confirm", "archive.export_succeeded",
+    )}
+    for key, russian in values.items():
+        assert russian != tr(key, locale="en", path="/game", version="0.1.1", detail="")
+
+
 def test_unsaved_alert_and_about_close_buttons_use_both_catalogs(tmp_path: Path, qtbot) -> None:
     from test_stage14_ui import make_window
 

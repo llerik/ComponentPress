@@ -543,22 +543,6 @@
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
     },
-    "src/componentpress/editor/main_window.py|MainWindow._export_project_archive": {
-      "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow._export_project_archive",
-      "line": 919,
-      "length": 21,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
-    },
-    "src/componentpress/editor/main_window.py|MainWindow._version_task_finished": {
-      "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow._version_task_finished",
-      "line": 972,
-      "length": 85,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
-    },
     "src/componentpress/editor/main_window.py|MainWindow.project_settings_dialog": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow.project_settings_dialog",
@@ -907,7 +891,7 @@
       "path": "src/componentpress/gui.py",
       "name": "_run_release_smoke",
       "line": 35,
-      "length": 358,
+      "length": 360,
       "stage": "9г",
       "owner": "coder:src/componentpress"
     },

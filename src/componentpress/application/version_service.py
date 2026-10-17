@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from componentpress.application.contracts import ProjectSnapshot
+from componentpress.application.contracts import ArchiveExportResult, ProjectSnapshot
 from componentpress.application.ports import ArchiveRepository, ProjectRepository
 
 
@@ -11,7 +11,7 @@ class VersionService:
         self.archives = archives
         self.projects = projects
 
-    def export(self, snapshot: ProjectSnapshot, target: Path, *, replace: bool = False, cancellation=None, on_progress=None):
+    def export(self, snapshot: ProjectSnapshot, target: Path, *, replace: bool = False, cancellation=None, on_progress=None) -> ArchiveExportResult:
         return self.archives.export(
             snapshot, target, replace=replace, cancellation=cancellation, on_progress=on_progress,
         )

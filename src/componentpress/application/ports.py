@@ -6,7 +6,7 @@ from componentpress.domain.diagnostics import Diagnostic
 from componentpress.domain.project import DataSource, ProjectDefinition
 from componentpress.domain.render_plan import ResolvedComponent
 from componentpress.domain.values import DataRow, DataSheetSnapshot
-from .contracts import BuildInputSnapshot, BuildProgress, BuildRequest, BuildResult, DocumentSnapshot, FileFingerprint, PngArchiveProgress, PngArchiveResult, ProjectSnapshot, RenderResult
+from .contracts import ArchiveExportResult, BuildInputSnapshot, BuildProgress, BuildRequest, BuildResult, DocumentSnapshot, FileFingerprint, PngArchiveProgress, PngArchiveResult, ProjectSnapshot, RenderResult
 
 
 class Cancellation(Protocol):
@@ -39,7 +39,7 @@ class ResourceRepository(Protocol):
 
 class ArchiveRepository(Protocol):
     """Project-version archive contract, separate from PNG build archives."""
-    def export(self, snapshot: ProjectSnapshot, target: Path, *, replace: bool = False, cancellation=None, on_progress=None) -> tuple[Path, str, bool, str | None]: ...
+    def export(self, snapshot: ProjectSnapshot, target: Path, *, replace: bool = False, cancellation=None, on_progress=None) -> ArchiveExportResult: ...
     def restore_path(self, archive_path: Path, destination: Path, *, cancellation=None, on_progress=None) -> Path: ...
 
 

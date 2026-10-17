@@ -44,7 +44,7 @@ from PySide6.QtWidgets import (
 from componentpress.i18n import catalogs, tr
 from componentpress.i18n.diagnostics import format_diagnostic
 from componentpress.application.sessions import ProjectSession
-from componentpress.application.contracts import BuildRequest, BuildResult, BuildProgress
+from componentpress.application.contracts import ArchiveExportResult, BuildRequest, BuildResult, BuildProgress
 from componentpress.domain.component import ComponentDefinition, SizeMM
 from componentpress.domain.component import DataBinding
 from componentpress.application.preview_service import ValidationIssues
@@ -94,7 +94,14 @@ from .preview_worker import (
     PreviewTask,
     PreviewTaskResult,
 )
-from .version_worker import VersionTask
+from .version_worker import (
+    ExportArchiveRequest,
+    ImportImageFolderRequest,
+    RestoreArchiveRequest,
+    VersionTask,
+    VersionTaskCompletion,
+    VersionTaskRequest,
+)
 from .qt_models import ID_ROLE, LayerTreeView, component_model, element_model
 from .component_dialog import ComponentDialog
 from .ui_state import UiState
@@ -131,8 +138,7 @@ class MainWindow(QMainWindow):
         self._version_pool = QThreadPool(self)
         self._version_pool.setMaxThreadCount(1)
         self._version_task = None
-        self._version_task_kind: str | None = None
-        self._version_task_payload = None
+        self._version_request: VersionTaskRequest | None = None
         self._version_cancellation: CancellationToken | None = None
         self._version_progress: QProgressDialog | None = None
         self.undo_group = QUndoGroup(self)
@@ -899,35 +905,40 @@ class MainWindow(QMainWindow):
             self.open_path(Path(folder))
 
     def _import_project_archive(self) -> None:
-        filename, _ = QFileDialog.getOpenFileName(self, "Импорт архива проекта", "", "Архив проекта (*.zip)")
+        filename, _ = QFileDialog.getOpenFileName(self, tr("archive.import_title"), "", tr("archive.filter"))
         if not filename:
             return
-        parent = QFileDialog.getExistingDirectory(self, "Папка для восстановления архива")
+        parent = QFileDialog.getExistingDirectory(self, tr("archive.restore_directory"))
         if not parent:
             return
-        folder_name, accepted = QInputDialog.getText(self, "Имя восстановленного проекта", "Новая папка проекта")
+        folder_name, accepted = QInputDialog.getText(self, tr("archive.restored_name"), tr("archive.restored_folder_name"))
         if not accepted or not folder_name.strip():
             return
-        try:
-            validate_relative_path(folder_name)
-            if "/" in folder_name:
-                raise ValueError("нужно указать имя одной папки")
-        except (ProjectError, ValueError) as exc:
-            self._show_error(exc)
+        if not self._valid_archive_folder_name(folder_name):
             return
         destination = Path(parent) / folder_name.strip()
         if destination.exists():
-            QMessageBox.warning(self, "Импорт архива", f"Папка уже существует:\n{destination}")
+            QMessageBox.warning(self, tr("archive.import_title"), tr("archive.destination_exists", path=destination))
             return
         if not self.save_all():
             return
+        request = RestoreArchiveRequest(Path(filename), destination)
         self._start_version_task(
-            "import",
-            (Path(filename), destination),
+            request,
             lambda cancellation, progress: self.controller.service.versions.restore_path(
-                Path(filename), destination, cancellation=cancellation, on_progress=progress
-            ),
+                request.archive_path, request.destination, cancellation=cancellation, on_progress=progress),
         )
+
+    def _valid_archive_folder_name(self, folder_name: str) -> bool:
+        try:
+            validate_relative_path(folder_name)
+        except (ProjectError, ValueError) as exc:
+            self._show_error(exc)
+            return False
+        if "/" in folder_name:
+            QMessageBox.warning(self, tr("archive.import_title"), tr("archive.single_folder"))
+            return False
+        return True
 
     def _export_project_archive(self) -> None:
         if self.session is None or self._active_build_job is not None or self._version_task is not None:
@@ -937,30 +948,28 @@ class MainWindow(QMainWindow):
         version = self.session.snapshot.model.version
         default_name = f"{self.session.snapshot.model.id}-{version}.zip"
         filename, _ = QFileDialog.getSaveFileName(
-            self, "Архив версии проекта", str(self.session.snapshot.root / "archive" / default_name), "ZIP (*.zip)"
+            self, tr("archive.export_title"),
+            str(self.session.snapshot.root / "archive" / default_name), tr("archive.filter"),
         )
         if not filename:
             return
-        target = Path(filename)
-        snapshot = self.session.snapshot
+        request = ExportArchiveRequest(self.session.snapshot, Path(filename))
         self._start_version_task(
-            "export",
-            (snapshot, target, False),
+            request,
             lambda cancellation, progress: self.controller.service.versions.export(
-                snapshot, target, cancellation=cancellation, on_progress=progress
+                request.snapshot, request.target, cancellation=cancellation, on_progress=progress
             ),
         )
 
-    def _start_version_task(self, kind: str, payload, operation) -> None:
+    def _start_version_task(self, request: VersionTaskRequest, operation) -> None:
         if self._version_task is not None:
             return
         cancellation = CancellationToken()
-        task = VersionTask(operation, cancellation, kind, locale=language())
+        task = VersionTask(request, operation, cancellation, locale=language())
         task.signals.progress.connect(self._version_task_progress, Qt.ConnectionType.QueuedConnection)
         task.signals.finished.connect(self._version_task_finished, Qt.ConnectionType.QueuedConnection)
         self._version_task = task
-        self._version_task_kind = kind
-        self._version_task_payload = payload
+        self._version_request = request
         self._version_cancellation = cancellation
         self._version_progress = QProgressDialog(tr("ui.archive_prepare"), tr("action.cancel_build"), 0, 0, self)
         self._version_progress.setWindowTitle(tr("ui.archive_title"))
@@ -975,98 +984,105 @@ class MainWindow(QMainWindow):
     def _version_task_progress(self, completed: int, total: int, phase: str) -> None:
         if self._version_progress is None:
             return
-        label = tr("ui.import_progress", completed=completed, total=total) if self._version_task_kind == "image_import" else phase
+        label = tr("ui.import_progress", completed=completed, total=total) if isinstance(self._version_request, ImportImageFolderRequest) else phase
         self._version_progress.setLabelText(label)
         self._version_progress.setRange(0, max(1, total))
         self._version_progress.setValue(min(completed, max(1, total)))
-        if self._version_task_kind == "image_import" and getattr(self, "_image_manager_dialog", None) is not None:
+        if isinstance(self._version_request, ImportImageFolderRequest) and getattr(self, "_image_manager_dialog", None) is not None:
             self._image_manager_dialog.set_import_progress(completed, total, label)
 
-    def _version_task_finished(self, result, error, error_message=None) -> None:
-        kind, payload = self._version_task_kind, self._version_task_payload
+    def _version_task_finished(self, completion: VersionTaskCompletion) -> None:
         if self._version_progress is not None:
             self._version_progress.close()
         self._version_progress = None
         self._version_task = None
-        self._version_task_kind = None
-        self._version_task_payload = None
+        self._version_request = None
         self._version_cancellation = None
         self._update_actions()
-        if isinstance(error, ProjectError):
-            if kind == "image_import":
-                dialog = getattr(self, "_image_manager_dialog", None)
-                if dialog is not None:
-                    dialog.finish_import(None, error, error_message)
-                return
-            if kind == "export" and error.diagnostic.code in {"ARCHIVE_EXISTS", "ARCHIVE_VERSION_EXISTS"}:
-                _snapshot, target, _replace = payload
-                replace_target = error.diagnostic.path or target
-                answer = QMessageBox.question(
-                    self,
-                    "Архив уже существует",
-                    f"Архив проекта уже существует:\n{replace_target}\n\nЗаменить его после проверки нового архива?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                    QMessageBox.StandardButton.Cancel,
-                )
-                if answer == QMessageBox.StandardButton.Yes and self.session is not None:
-                    snapshot = self.session.snapshot
-                    self._start_version_task(
-                        "export",
-                        (snapshot, replace_target, True),
-                        lambda cancellation, progress: self.controller.service.versions.export(
-                            snapshot, replace_target, replace=True, cancellation=cancellation, on_progress=progress
-                        ),
-                    )
-                return
-            if error.diagnostic.code == "BUILD_CANCELLED":
-                self.statusBar().showMessage("Операция с архивом отменена", 5000)
-            else:
-                self._show_error(error)
+        if completion.error is not None:
+            self._version_task_failed(completion)
             return
-        if error is not None:
-            if kind == "image_import":
-                dialog = getattr(self, "_image_manager_dialog", None)
-                if dialog is not None:
-                    dialog.finish_import(None, error)
-                return
-            self._show_error(error)
-            return
-        if kind == "image_import":
+        request, result = completion.request, completion.result
+        if isinstance(request, ExportArchiveRequest) and isinstance(result, ArchiveExportResult):
+            self._archive_export_finished(request, result)
+        elif isinstance(request, RestoreArchiveRequest) and isinstance(result, Path):
+            self._archive_restore_finished(result)
+        elif isinstance(request, ImportImageFolderRequest) and isinstance(result, tuple):
+            self._image_folder_import_finished(result)
+
+    def _version_task_failed(self, completion: VersionTaskCompletion) -> None:
+        error = completion.error
+        assert error is not None
+        request = completion.request
+        if isinstance(request, ImportImageFolderRequest):
             dialog = getattr(self, "_image_manager_dialog", None)
             if dialog is not None:
-                dialog.finish_import(tuple(result), None)
-            self._resource_images_changed()
+                dialog.finish_import(None, error, completion.error_message)
+        elif isinstance(request, ExportArchiveRequest) and error.diagnostic.code in {"ARCHIVE_EXISTS", "ARCHIVE_VERSION_EXISTS"}:
+            self._confirm_archive_replacement(request, error)
+        elif error.diagnostic.code == "BUILD_CANCELLED":
+            self.statusBar().showMessage(tr("archive.cancelled"), 5000)
+        elif completion.error_message:
+            self._show_prepared_version_error(completion.error_message)
+        else:
+            self._show_error(error)
+
+    def _confirm_archive_replacement(self, request: ExportArchiveRequest, error: ProjectError) -> None:
+        target = error.diagnostic.path or request.target
+        answer = QMessageBox.question(
+            self, tr("archive.exists_title"), tr("archive.replace_confirm", path=target),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes or self.session is None:
             return
-        if kind == "import":
-            try:
-                session = self.controller.open(result)
-            except ProjectError as exc:
-                self._show_error(exc)
-                self.statusBar().showMessage(f"Архив восстановлен в {result}; предыдущая сессия сохранена", 12000)
-                return
-            self.load_session(session)
+        replacement = ExportArchiveRequest(self.session.snapshot, target, replace=True)
+        self._start_version_task(
+            replacement,
+            lambda cancellation, progress: self.controller.service.versions.export(
+                replacement.snapshot, replacement.target, replace=True,
+                cancellation=cancellation, on_progress=progress,
+            ),
+        )
+
+    def _show_prepared_version_error(self, message: str) -> None:
+        QMessageBox.critical(self, tr("error.title"), message)
+        self.statusBar().showMessage(message, 7000)
+
+    def _archive_restore_finished(self, root: Path) -> None:
+        try:
+            session = self.controller.open(root)
+        except ProjectError as exc:
+            self._show_error(exc)
+            self.statusBar().showMessage(tr("archive.restored_open_failed", path=root), 12000)
             return
-        if kind == "export":
-            archive_path, next_version, patched, patch_error = result
-            try:
-                snapshot = self.controller.service.projects.open(payload[0].root)
-                if self.session is not None and self.session.snapshot.root == snapshot.root:
-                    self.session.replace_snapshot(snapshot, saved=set(snapshot.documents))
-                self._refresh_component_tree()
-                self._active_tab_changed(self.tabs.currentIndex())
-            except ProjectError as exc:
-                self._show_error(exc)
-            if not patched:
-                current_version = self.session.snapshot.model.version if self.session is not None else "неизвестна"
-                QMessageBox.warning(
-                    self,
-                    "Архив создан",
-                    f"Архив сохранён: {archive_path}\nТекущая версия проекта: {current_version}. Журнал операции будет сверён при следующем открытии.\n{patch_error or ''}",
-                )
-                return
-            assert self.session is not None
-            self.setWindowTitle(f"{self.session.snapshot.model.name} — ComponentPress")
-            self.statusBar().showMessage(f"Архив {archive_path} сохранён; версия проекта повышена до {next_version}", 10000)
+        self.load_session(session)
+
+    def _archive_export_finished(self, request: ExportArchiveRequest, result: ArchiveExportResult) -> None:
+        try:
+            snapshot = self.controller.service.open(request.snapshot.root)
+            if self.session is not None and self.session.snapshot.root == snapshot.root:
+                self.session.replace_snapshot(snapshot, saved=set(snapshot.documents))
+            self._refresh_component_tree()
+            self._active_tab_changed(self.tabs.currentIndex())
+        except ProjectError as exc:
+            self._show_error(exc)
+        if not result.postprocessing_complete:
+            version = self.session.snapshot.model.version if self.session is not None else tr("archive.unknown_version")
+            QMessageBox.warning(
+                self, tr("archive.published_title"),
+                tr("archive.postprocessing_pending", path=result.path, version=version, detail=result.detail or ""),
+            )
+            return
+        assert self.session is not None
+        self.setWindowTitle(f"{self.session.snapshot.model.name} — ComponentPress")
+        self.statusBar().showMessage(tr("archive.export_succeeded", path=result.path, version=result.next_version), 10000)
+
+    def _image_folder_import_finished(self, paths: tuple[str, ...]) -> None:
+        dialog = getattr(self, "_image_manager_dialog", None)
+        if dialog is not None:
+            dialog.finish_import(paths, None)
+        self._resource_images_changed()
 
     def project_settings_dialog(self) -> None:
         if self.session is None:
@@ -1134,10 +1150,11 @@ class MainWindow(QMainWindow):
         if self._version_task is not None or self._active_build_job is not None:
             return
         dialog.folder_button.setEnabled(False)
+        request = ImportImageFolderRequest(root, source, folder)
         self._start_version_task(
-            "image_import", (root, source, folder),
+            request,
             lambda cancellation, progress: self.controller.service.import_image_folder(
-                root, source, folder, cancellation=cancellation, on_progress=progress
+                request.root, request.source, request.folder, cancellation=cancellation, on_progress=progress
             ),
         )
 

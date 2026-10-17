@@ -16,7 +16,7 @@ import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from componentpress.application.contracts import ProjectSnapshot
+from componentpress.application.contracts import ArchiveExportResult, ProjectSnapshot
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.project_io.archive_snapshots import snapshot_sources, verify_source_inventory, _is_reparse
 from componentpress.project_io.archive_snapshots import EXCLUDED_ROOTS
@@ -485,16 +485,16 @@ def _patch_published_version(state):
     return result
 
 
-def _publish_archive(state):
+def _publish_archive(state) -> ArchiveExportResult:
     _validate_publication(state)
     journal = _write_publication_journal(state)
     _replace_archive(state)
     try:
         _patch_published_version(state)
         journal.unlink(missing_ok=True)
-        return state.target, state.new_version, True, None
+        return ArchiveExportResult(state.target, state.new_version, True)
     except ProjectError as exc:
-        return state.target, state.new_version, False, state.diagnostic_formatter(exc.diagnostic)
+        return ArchiveExportResult(state.target, state.new_version, False, state.diagnostic_formatter(exc.diagnostic))
 
 
 def _cleanup_export(state):
@@ -507,18 +507,18 @@ def _cleanup_export(state):
     _log_phase("project.archive.cleanup", "cleanup", "succeeded", state.operation_id)
 
 
-def _handle_project_export_error(state, error):
+def _handle_project_export_error(state, error: ProjectError) -> ArchiveExportResult:
     if not state.published:
         _discard_export_journal(state)
         raise error
-    return state.target, state.new_version, False, state.diagnostic_formatter(error.diagnostic)
+    return ArchiveExportResult(state.target, state.new_version, False, state.diagnostic_formatter(error.diagnostic))
 
 
-def _handle_io_export_error(state, error):
+def _handle_io_export_error(state, error: OSError | zipfile.BadZipFile | ValueError) -> ArchiveExportResult:
     if not state.published:
         _discard_export_journal(state)
         raise ProjectError(Diagnostic("ARCHIVE_EXPORT", f"ошибка создания архива: {error}", state.target)) from error
-    return state.target, state.new_version, False, f"не удалось обновить версию проекта: {error}"
+    return ArchiveExportResult(state.target, state.new_version, False, f"не удалось обновить версию проекта: {error}")
 
 
 def _discard_export_journal(state):
@@ -528,7 +528,7 @@ def _discard_export_journal(state):
         pass
 
 
-def export_project_version(snapshot, target, *, replace=False, cancellation=None, on_progress=None, diagnostic_formatter, operation_id):
+def export_project_version(snapshot, target, *, replace=False, cancellation=None, on_progress=None, diagnostic_formatter, operation_id) -> ArchiveExportResult:
     state = _new_export(snapshot, target, replace, cancellation, on_progress, diagnostic_formatter, operation_id)
     try:
         _check_cancel(cancellation)
@@ -688,7 +688,7 @@ class ZipArchiveRepository:
 
     @staticmethod
     def _log_export_result(result, operation_id):
-        if not result[2]:
+        if not result.postprocessing_complete:
             _safe_log("project.archive.version_patch", operation="archive", phase="publishing", status="failed", code="VERSION_PATCH", operation_id=operation_id)
         _safe_log("project.archive", operation="archive", phase="finished", status="succeeded", operation_id=operation_id)
 

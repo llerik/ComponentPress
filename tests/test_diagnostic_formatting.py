@@ -67,8 +67,9 @@ def test_dialog_error_adapter_formats_project_error(locale: str, tmp_path: Path)
         set_language(original)
 
 
-def test_version_worker_freezes_project_error_before_queued_delivery() -> None:
-    from componentpress.editor.version_worker import VersionTask
+def test_version_worker_freezes_project_error_before_queued_delivery(monkeypatch) -> None:
+    from componentpress.editor import version_worker
+    from componentpress.editor.version_worker import RestoreArchiveRequest, VersionTask
 
     original = language()
     received = []
@@ -77,12 +78,15 @@ def test_version_worker_freezes_project_error_before_queued_delivery() -> None:
         raise ProjectError(Diagnostic("ARCHIVE_READ", "Архив недоступен"))
 
     try:
+        monkeypatch.setattr(version_worker, "log_event", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("log sink")))
         set_language("ru")
-        task = VersionTask(fail, object(), locale=language())
-        task.signals.finished.connect(lambda *result: received.append(result))
+        request = RestoreArchiveRequest(Path("game.zip"), Path("restored"))
+        task = VersionTask(request, fail, object(), locale=language())
+        task.signals.finished.connect(received.append)
         set_language("en")
         task.run()
-        assert received[0][2].endswith("Архив недоступен")
-        assert format_diagnostic(received[0][1].diagnostic).endswith("The operation needs attention (ARCHIVE_READ).")
+        assert received[0].request is request
+        assert received[0].error_message.endswith("Архив недоступен")
+        assert format_diagnostic(received[0].error.diagnostic).endswith("The operation needs attention (ARCHIVE_READ).")
     finally:
         set_language(original)

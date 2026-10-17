@@ -15,7 +15,7 @@ import pytest
 
 from componentpress.application.version_service import VersionService
 from componentpress.bootstrap import project_controller, project_service
-from componentpress.domain.diagnostics import ProjectError
+from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.i18n.diagnostics import format_diagnostic
 from componentpress.i18n import set_language
 from componentpress.editor.main_window import MainWindow
@@ -56,10 +56,9 @@ def test_export_then_restore_preserves_all_project_bytes_and_version(tmp_path: P
     snapshot = repository.open(root)
     archive_path = root / "archive" / "game-0.1.0.zip"
 
-    path, next_version, patched, error = _versions(repository).export(snapshot, archive_path)
+    result = _versions(repository).export(snapshot, archive_path)
 
-    assert path == archive_path
-    assert (next_version, patched, error) == ("0.1.1", True, None)
+    assert (result.path, result.next_version, result.postprocessing_complete, result.detail) == (archive_path, "0.1.1", True, None)
     assert repository.open(root).model.version == "0.1.1"
     assert _source_files(root)["project.yaml"] != before["project.yaml"]
     with zipfile.ZipFile(archive_path) as archive:
@@ -151,8 +150,8 @@ def test_recovery_finishes_only_the_patch_after_published_archive(tmp_path: Path
     monkeypatch.setattr(module, "atomic_write", fail_project_patch)
     archive_path = root / "archive" / "game-0.1.0.zip"
     result = _versions(repository, lambda diagnostic: f"external:{diagnostic.code}").export(source_snapshot, archive_path)
-    assert result[2] is False
-    assert result[3] == "external:FILE_WRITE"
+    assert result.postprocessing_complete is False
+    assert result.detail == "external:FILE_WRITE"
     assert archive_path.is_file()
     actual_recovery_write = recovery_module.atomic_write
 
@@ -171,7 +170,7 @@ def test_recovery_finishes_only_the_patch_after_published_archive(tmp_path: Path
 import sys
 from pathlib import Path
 from componentpress.project_io.repository import FileProjectRepository
-from componentpress.domain.diagnostics import ProjectError
+from componentpress.domain.diagnostics import Diagnostic, ProjectError
 try:
     FileProjectRepository().open(Path(sys.argv[1]))
 except ProjectError as error:
@@ -224,7 +223,7 @@ def test_recovery_cleans_only_marked_orphan_snapshots(tmp_path: Path) -> None:
 @pytest.mark.parametrize("locale", ["ru", "en"])
 def test_gui_archive_export_and_import_run_without_blocking_the_window(tmp_path: Path, qtbot, monkeypatch, locale: str) -> None:
     from PySide6.QtCore import QTimer
-    from PySide6.QtWidgets import QFileDialog, QInputDialog
+    from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox, QPushButton
 
     root = tmp_path / "game"
     _project(root)
@@ -235,6 +234,7 @@ def test_gui_archive_export_and_import_run_without_blocking_the_window(tmp_path:
     window = MainWindow(project_controller())
     qtbot.addWidget(window)
     window.load_session(project_service().open_session(root))
+    original_session = window.session
     assert window.export_project_archive_action.isEnabled()
     assert window.import_project_archive_action.isEnabled()
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *_args, **_kwargs: (str(archive_path), "ZIP (*.zip)"))
@@ -245,6 +245,7 @@ def test_gui_archive_export_and_import_run_without_blocking_the_window(tmp_path:
     qtbot.waitUntil(lambda: window._version_task is None, timeout=15000)
     assert heartbeat
     assert archive_path.is_file()
+    assert window.session is original_session
     assert window.session.snapshot.model.version == "0.1.1"
 
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *_args, **_kwargs: (str(archive_path), "ZIP (*.zip)"))
@@ -255,3 +256,34 @@ def test_gui_archive_export_and_import_run_without_blocking_the_window(tmp_path:
     assert window.session.snapshot.root == parent / "restored"
     assert window.session.snapshot.model.version == "0.1.0"
     assert root.joinpath("project.yaml").is_file()
+
+    source = tmp_path / "images"
+    imported = ("assets/images/from-folder/leaf.png",)
+    monkeypatch.setattr(window.controller.service, "import_image_folder", lambda *_args, **_kwargs: imported)
+
+    class ImportCapture:
+        folder_button = QPushButton()
+
+        def finish_import(self, paths, error, message=None):
+            self.finished = (paths, error, message)
+
+        def set_import_progress(self, *_args):
+            pass
+
+    capture = ImportCapture()
+    window._image_manager_dialog = capture
+    window._start_image_folder_import(capture, window.session.snapshot.root, source, "from-folder")
+    qtbot.waitUntil(lambda: window._version_task is None, timeout=15000)
+    assert capture.finished[1] is None, capture.finished[1].diagnostic
+    assert capture.finished == (imported, None, None)
+
+    active_session = window.session
+    errors = []
+    monkeypatch.setattr(QMessageBox, "critical", lambda *_args: errors.append(_args))
+    monkeypatch.setattr(
+        window.controller.service, "open_session",
+        lambda _root: (_ for _ in ()).throw(ProjectError(Diagnostic("PROJECT_READ", "Cannot open project"))),
+    )
+    window._archive_restore_finished(tmp_path / "unreadable-restored-project")
+    assert window.session is active_session
+    assert errors

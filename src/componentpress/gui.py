@@ -339,7 +339,11 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     version_zip = archive_directory / "release-smoke-0.1.0.zip"
     original_snapshot = window.session.snapshot
     version_result = window.controller.service.versions.export(original_snapshot, version_zip)
-    if version_result[1:] != ("0.1.1", True, None) or not version_zip.is_file():
+    if (
+        version_result.path != version_zip or version_result.next_version != "0.1.1"
+        or not version_result.postprocessing_complete or version_result.detail is not None
+        or not version_zip.is_file()
+    ):
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     promoted_snapshot = window.controller.service.projects.open(root)
     if promoted_snapshot.model.version != "0.1.1":

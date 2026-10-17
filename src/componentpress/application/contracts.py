@@ -112,6 +112,16 @@ class PngArchiveResult:
 
 
 @dataclass(frozen=True)
+class ArchiveExportResult:
+    """Archive location and whether version patch and journal removal completed."""
+
+    path: Path
+    next_version: str
+    postprocessing_complete: bool
+    detail: str | None = None
+
+
+@dataclass(frozen=True)
 class BuildProgress:
     job_id: str
     phase: str
