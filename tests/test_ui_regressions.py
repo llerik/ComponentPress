@@ -20,6 +20,7 @@ from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNod
 from componentpress.domain.project import DataSource, ProjectDefinition
 from componentpress.domain.tree import locations
 from componentpress.domain.values import CellValue, DataRow, DataSheetSnapshot
+from componentpress.i18n import set_language
 from componentpress.editor.dialogs import HtmlAddDialog
 from componentpress.editor.main_window import MainWindow
 from componentpress.editor.canvas import ComponentCanvas
@@ -236,6 +237,22 @@ def test_active_static_validation_ignores_missing_project_excel_and_checks_resou
     messages = [window.event_list.item(i).text() for i in range(window.event_list.count())]
     assert any("RESOURCE_MISSING" in item and "missing-image" in item for item in messages)
     assert not any("DATA_SOURCE_MISSING" in item for item in messages)
+
+
+@pytest.mark.parametrize(("locale", "expected"), (
+    ("ru", "изображение не найдено"),
+    ("en", "The operation needs attention (RESOURCE_MISSING)."),
+))
+def test_static_validation_after_cache_invalidation_shows_localized_diagnostic(make_editor, locale, expected):
+    set_language(locale)
+    window, root, _errors = make_editor()
+    (root / "assets/images/animals/enemy/leaf.png").unlink()
+
+    window.controller.preview.invalidate(root)
+    window._validate_all()
+
+    messages = [window.event_list.item(i).text() for i in range(window.event_list.count())]
+    assert any("RESOURCE_MISSING" in item and expected in item for item in messages)
 
 
 @pytest.mark.parametrize("changes", [{"height_mm": 0.1}, {"width_mm": 0.1}])

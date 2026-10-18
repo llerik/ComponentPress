@@ -55,7 +55,10 @@ def project_controller() -> "ProjectController":
 
 
 def preview_service(reader=None) -> PreviewService:
-    return PreviewService(reader or XlsxReader(), PreviewValidationStore(), BindingResolver, render_component)
+    return PreviewService(
+        reader or XlsxReader(), PreviewValidationStore(), BindingResolver, render_component,
+        event_logger=log_event,
+    )
 
 
 def build_service(service=None) -> BuildService:

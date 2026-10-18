@@ -149,8 +149,12 @@ if sys.argv[3:] == ["componentpress.application.preview_service"]:
         resolver.validate_resources = validate_resources
         return resolver
 
-    service = PreviewService(Reader(), store, resolver_factory, lambda *args, **kwargs: None)
+    events = []
+    service = PreviewService(Reader(), store, resolver_factory, lambda *args, **kwargs: None,
+                             event_logger=lambda event, **context: events.append((event, context)))
     assert service.validate_all(snapshot) == ()
+    assert events[0][0] == "preview.validation" and events[0][1]["status"] == "started"
+    assert events[-1][1]["status"] == "succeeded"
 
     bound = component.model_copy(update={"data": DataBinding(sheet="Sheet")})
     source_project = project.model_copy(update={"data_source": DataSource(path="source.xlsx")})
@@ -160,6 +164,7 @@ if sys.argv[3:] == ["componentpress.application.preview_service"]:
     cached = service.cached_data(source_snapshot, "card")
     assert cached is not None and len(cached.rows) == 1
     assert store.stored[3] == ["card"]
+    assert all(not any(key in context for key in ("path", "root", "model")) for _, context in events)
     assert service.select_row(source_snapshot, "card", validate_resources=False).component is bound
     assert resolver.validate_resources is False
     service.invalidate(root)

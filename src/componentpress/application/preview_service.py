@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from collections.abc import Callable
+from uuid import uuid4
 
 from componentpress.application.contracts import (
     DocumentSnapshot, FileFingerprint, ProjectSnapshot, RenderResult,
@@ -56,6 +58,7 @@ class _ValidationPlan:
     source_path: Path | None
     fingerprint: FileFingerprint | None
     requests: dict[str, int]
+    operation_id: str
 
 
 @dataclass
@@ -95,26 +98,29 @@ class PreviewService:
     def __init__(
         self, reader: DataSourceReader, state_store: ValidationStateStore,
         resolver_factory: BindingResolverFactory, renderer: ComponentRenderer,
+        *, event_logger: Callable[..., None],
     ):
         self.reader = reader
         self._state_store = state_store
         self._resolver_factory = resolver_factory
         self._renderer = renderer
+        self._event_logger = event_logger
         self._data: dict[CacheKey, _CachedData] = {}
         self._validated_models: dict[tuple[Path, str], ModelSignature] = {}
         self._failures: dict[CacheKey, _ValidationFailure] = {}
         self._fingerprints: dict[SourceKey, FileFingerprint] = {}
         self._persisted_validation: dict[SourceKey, _PersistedValidation] = {}
         self._requested: dict[RequestKey, int] = {}
+        self._request_counter = 0
 
     def invalidate(self, root: Path | None = None) -> None:
         if root is None:
             self._clear_all()
             return
         resolved = self._state_store.canonical_root(root)
-        self._clear_data_for_root(resolved)
-        self._clear_sources_for_root(resolved)
-        self._clear_requests_for_root(resolved)
+        for cache in (self._data, self._validated_models, self._failures,
+                      self._fingerprints, self._persisted_validation, self._requested):
+            self._clear_root(cache, resolved)
 
     def _clear_all(self) -> None:
         self._data.clear()
@@ -124,28 +130,17 @@ class PreviewService:
         self._persisted_validation.clear()
         self._requested.clear()
 
-    def _clear_data_for_root(self, root: Path) -> None:
-        for key in tuple(self._data):
+    @staticmethod
+    def _clear_root(cache: dict, root: Path) -> None:
+        for key in tuple(cache):
             if key[0] == root:
-                self._data.pop(key, None)
-                self._validated_models.pop(key, None)
-                self._failures.pop(key, None)
-
-    def _clear_sources_for_root(self, root: Path) -> None:
-        for key in tuple(self._fingerprints):
-            if key[0] == root:
-                self._fingerprints.pop(key, None)
-                self._persisted_validation.pop(key, None)
-
-    def _clear_requests_for_root(self, root: Path) -> None:
-        for key in tuple(self._requested):
-            if key[0] == root:
-                self._requested.pop(key, None)
+                cache.pop(key)
 
     def begin_refresh(self, root: Path, component_id: str) -> int:
         key = self._request_key(root, component_id)
-        self._requested[key] = self._requested.get(key, 0) + 1
-        return self._requested[key]
+        self._request_counter += 1
+        self._requested[key] = self._request_counter
+        return self._request_counter
 
     def _request_key(self, root: Path, component_id: str) -> RequestKey:
         return self._state_store.canonical_root(root), component_id
@@ -180,21 +175,57 @@ class PreviewService:
     def _validation_plan(
         self, snapshot: ProjectSnapshot, *, component_ids: tuple[str, ...] | None,
         component_overrides: dict[str, ComponentDefinition] | None,
+        operation_id: str, request_ids: dict[str, int] | None = None,
     ) -> tuple[_ValidationPlan | None, Diagnostic | None]:
-        source = snapshot.model.data_source
         root = self._state_store.canonical_root(snapshot.root)
         all_ids = tuple(dict.fromkeys((*(item.id for item in snapshot.model.components), *snapshot.documents)))
         ids = component_ids or all_ids
-        static_only = self._static_only(snapshot, ids, component_overrides)
-        source_key = None if static_only else self._source_key(snapshot)
+        requests = {
+            item: (request_ids or {}).get(item) or self.begin_refresh(root, item)
+            for item in ids
+        }
+        plan = _ValidationPlan(snapshot.model.data_source, None, root, ids, None, None, requests, operation_id)
+        self._log_validation(plan, "started")
+        if self._stale_request(plan):
+            return plan, self._stale_diagnostic(root)
+        return self._prepare_validation_source(snapshot, plan, all_ids, component_overrides)
+
+    def _prepare_validation_source(self, snapshot, plan, all_ids, component_overrides):
         try:
-            source_path, fingerprint = self._source_state(snapshot, source, static_only)
+            return self._plan_source(snapshot, plan, all_ids, component_overrides)
         except ProjectError as exc:
-            return None, exc.diagnostic
+            self._log_validation(plan, "failed", exc.diagnostic.code)
+            raise
+        except Exception:
+            self._log_validation(plan, "failed", "PREVIEW_ERROR")
+            raise
+
+    def _plan_source(self, snapshot, plan, all_ids, component_overrides):
+        static_only = self._static_only(snapshot, plan.component_ids, component_overrides)
+        source_key = None if static_only else self._source_key(snapshot)
+        self._log_validation(plan, "started", phase="preparation")
+        if self._stale_request(plan):
+            return plan, self._stale_diagnostic(plan.root)
+        try:
+            source_path, fingerprint = self._source_state(snapshot, plan.source, static_only)
+        except ProjectError as exc:
+            return self._source_error(plan, exc.diagnostic)
+        if self._stale_request(plan):
+            return plan, self._stale_diagnostic(plan.root)
+        return self._complete_plan(plan, source_key, source_path, fingerprint, all_ids)
+
+    def _source_error(self, plan, diagnostic):
+        return (plan, self._stale_diagnostic(plan.root) if self._stale_request(plan) else diagnostic)
+
+    def _complete_plan(self, plan, source_key, source_path, fingerprint, all_ids):
         if source_key is not None and self._fingerprints.get(source_key) != fingerprint:
-            ids = all_ids
-        requests = {item: self.begin_refresh(root, item) for item in ids}
-        return _ValidationPlan(source, source_key, root, ids, source_path, fingerprint, requests), None
+            requests = dict(plan.requests)
+            for item in all_ids:
+                if item not in requests:
+                    requests[item] = self.begin_refresh(plan.root, item)
+            plan = replace(plan, component_ids=all_ids, requests=requests)
+        return replace(plan, source_key=source_key, source_path=source_path,
+                       fingerprint=fingerprint), None
 
     @staticmethod
     def _static_only(
@@ -219,12 +250,10 @@ class PreviewService:
     ) -> DataSheetSnapshot | None:
         document, model = self._model(snapshot, component_id, component)
         self._reject_stale(snapshot.root, component_id, request_id, document.path)
-        if model.data is None:
-            self.validate_all(snapshot, manual=True, component_ids=(component_id,))
-            return None
         diagnostics = self.validate_all(
             snapshot, manual=True, component_ids=(component_id,),
             component_overrides={component_id: model},
+            _request_ids={component_id: request_id} if request_id is not None else None,
         )
         if diagnostics:
             raise ValidationIssues(diagnostics)
@@ -232,25 +261,88 @@ class PreviewService:
 
     def _reject_stale(self, root: Path, component_id: str, request_id: int | None, path: Path) -> None:
         current = self._requested.get(self._request_key(root, component_id), 0)
-        if request_id is not None and request_id < current:
-            raise ProjectError(Diagnostic("DATA_REFRESH_STALE", "устаревший результат обновления данных отброшен", path))
+        if request_id is not None and request_id != current:
+            raise ProjectError(self._stale_diagnostic(root))
+
+    @staticmethod
+    def _stale_diagnostic(root: Path) -> Diagnostic:
+        return Diagnostic("DATA_REFRESH_STALE", "устаревший результат обновления данных отброшен", root)
+
+    def _stale_request(self, plan: _ValidationPlan) -> bool:
+        return any(self._requested.get(self._request_key(plan.root, item)) != request
+                   for item, request in plan.requests.items())
+
+    def _log_validation(
+        self, plan: _ValidationPlan, status: str, code: str | None = None,
+        *, phase: str = "preparation",
+    ) -> None:
+        try:
+            self._event_logger("preview.validation", operation="preview", operation_id=plan.operation_id,
+                               phase=phase, status=status, code=code)
+        except Exception:
+            pass
 
     def validate_all(
         self, snapshot: ProjectSnapshot, *, force_read: bool = False, manual: bool = True,
         component_ids: tuple[str, ...] | None = None,
         component_overrides: dict[str, ComponentDefinition] | None = None,
+        _request_ids: dict[str, int] | None = None,
     ) -> tuple[Diagnostic, ...]:
+        operation_id = uuid4().hex
         plan, diagnostic = self._validation_plan(
             snapshot, component_ids=component_ids, component_overrides=component_overrides,
+            operation_id=operation_id, request_ids=_request_ids,
         )
-        if diagnostic is not None:
+        if diagnostic is not None or plan is None:
+            if plan is not None:
+                self._log_validation(plan, "cancelled" if diagnostic.code == "DATA_REFRESH_STALE" else "failed", diagnostic.code)
+            assert diagnostic is not None
             return (diagnostic,)
-        batch = self._stage_validation(snapshot, plan, force_read, manual, component_overrides)
-        stale = self._stale_source(plan)
+        return self._validate_plan(snapshot, plan, force_read, manual, component_overrides)
+
+    def _validate_plan(self, snapshot, plan, force_read, manual, component_overrides):
+        try:
+            batch = self._stage_validation(snapshot, plan, force_read, manual, component_overrides)
+        except ProjectError as exc:
+            self._log_validation(plan, "failed", exc.diagnostic.code)
+            raise
+        except Exception:
+            self._log_validation(plan, "failed", "PREVIEW_ERROR")
+            raise
+        return self._finish_validation(snapshot, plan, batch)
+
+    def _finish_validation(self, snapshot, plan, batch):
+        stale = self._checked_stale_source(plan)
         if stale is not None:
+            self._log_validation(plan, "cancelled", stale.code)
             return (stale,)
-        self._publish(snapshot, plan, batch)
+        stale = self._publish_logged(snapshot, plan, batch)
+        if stale is not None:
+            self._log_validation(plan, "cancelled", stale.code)
+            return (stale,)
+        self._log_validation(plan, "failed" if batch.diagnostics else "succeeded",
+                             batch.diagnostics[0].code if batch.diagnostics else None)
         return tuple(batch.diagnostics)
+
+    def _checked_stale_source(self, plan):
+        try:
+            return self._stale_source(plan)
+        except ProjectError as exc:
+            self._log_validation(plan, "failed", exc.diagnostic.code)
+            raise
+        except Exception:
+            self._log_validation(plan, "failed", "PREVIEW_ERROR")
+            raise
+
+    def _publish_logged(self, snapshot, plan, batch):
+        try:
+            return self._publish(snapshot, plan, batch)
+        except ProjectError as exc:
+            self._log_validation(plan, "failed", exc.diagnostic.code)
+            raise
+        except Exception:
+            self._log_validation(plan, "failed", "PREVIEW_ERROR")
+            raise
 
     def _stage_validation(
         self, snapshot: ProjectSnapshot, plan: _ValidationPlan, force_read: bool,
@@ -261,6 +353,9 @@ class PreviewService:
             document = snapshot.documents.get(component_id)
             if document is None:
                 continue
+            self._log_validation(plan, "started")
+            if self._stale_request(plan):
+                break
             model = (overrides or {}).get(component_id, document.model)
             self._stage_component(snapshot, plan, batch, component_id, document, model, force_read, manual)
         return batch
@@ -390,12 +485,12 @@ class PreviewService:
         batch.failures[key] = _ValidationFailure(fingerprint, signature, diagnostics)
 
     def _stale_source(self, plan: _ValidationPlan) -> Diagnostic | None:
-        if any(self._requested.get(self._request_key(plan.root, item)) != request
-               for item, request in plan.requests.items()):
-            return Diagnostic("DATA_REFRESH_STALE", "устаревший результат обновления данных отброшен", plan.root)
+        if self._stale_request(plan):
+            return self._stale_diagnostic(plan.root)
         if plan.source_path is None or plan.fingerprint is None:
             return None
-        return self._changed_source_diagnostic(plan.source_path, plan.fingerprint)
+        diagnostic = self._changed_source_diagnostic(plan.source_path, plan.fingerprint)
+        return self._stale_diagnostic(plan.root) if self._stale_request(plan) else diagnostic
 
     def _changed_source_diagnostic(self, path: Path, fingerprint: FileFingerprint) -> Diagnostic | None:
         try:
@@ -405,27 +500,44 @@ class PreviewService:
             pass
         return Diagnostic("FILE_CHANGED_EXTERNALLY", "книга Excel изменилась во время проверки", path)
 
-    def _publish(self, snapshot: ProjectSnapshot, plan: _ValidationPlan, batch: _ValidationBatch) -> None:
+    def _publish(self, snapshot: ProjectSnapshot, plan: _ValidationPlan, batch: _ValidationBatch) -> Diagnostic | None:
+        if plan.source_key is not None and plan.fingerprint is not None and batch.checked_ids:
+            diagnostic = self._publish_source_state(snapshot, plan, batch)
+            if diagnostic is not None and diagnostic.code == "DATA_REFRESH_STALE":
+                return diagnostic
+            if diagnostic is not None:
+                batch.diagnostics.append(diagnostic)
+        if self._stale_request(plan):
+            return self._stale_diagnostic(plan.root)
         self._data.update(batch.cached)
         self._validated_models.update(batch.static)
         self._failures.update(batch.failures)
-        if plan.source_key is not None and plan.fingerprint is not None and batch.checked_ids:
-            self._publish_source_state(snapshot, plan, batch)
+        return None
 
-    def _publish_source_state(self, snapshot: ProjectSnapshot, plan: _ValidationPlan, batch: _ValidationBatch) -> None:
+    def _publish_source_state(self, snapshot: ProjectSnapshot, plan: _ValidationPlan, batch: _ValidationBatch) -> Diagnostic | None:
         key, fingerprint = plan.source_key, plan.fingerprint
         assert key is not None and fingerprint is not None and plan.source is not None
-        self._fingerprints[key] = fingerprint
         previous = self._persisted_validation.get(key)
         prior_ids = previous.component_ids if previous and previous.fingerprint == fingerprint else frozenset()
         ids = prior_ids.union(batch.checked_ids)
         if previous is not None and (previous.fingerprint, previous.component_ids) == (fingerprint, ids):
-            return
+            self._fingerprints[key] = fingerprint
+            return None
+        return self._store_validation(snapshot, plan, key, fingerprint, ids)
+
+    def _store_validation(self, snapshot, plan, key, fingerprint, ids):
+        self._log_validation(plan, "started", phase="publishing")
+        if self._stale_request(plan):
+            return self._stale_diagnostic(plan.root)
         error = self._state_store.store_validation(snapshot.root, plan.source.path, fingerprint, list(ids))
+        if self._stale_request(plan):
+            return self._stale_diagnostic(plan.root)
+        self._fingerprints[key] = fingerprint
         if error is None:
             self._persisted_validation[key] = _PersistedValidation(fingerprint, ids)
         else:
-            batch.diagnostics.append(error)
+            return error
+        return None
 
     def data(
         self, snapshot: ProjectSnapshot, component_id: str, *,
