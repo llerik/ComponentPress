@@ -13,6 +13,7 @@ import pytest
 _SUPPORT = Path(__file__).parent / "support"
 sys.path.insert(0, str(_SUPPORT))
 _SETTINGS_ROOT = Path(tempfile.mkdtemp(prefix="componentpress-tests-"))
+_UI_FIXTURES = {"qapp", "qtbot"}
 os.environ["COMPONENTPRESS_TEST_SETTINGS_ROOT"] = str(_SETTINGS_ROOT)
 os.environ["COMPONENTPRESS_LOG_DIR"] = str(_SETTINGS_ROOT / "logs")
 os.environ["PYTHONPATH"] = os.pathsep.join(
@@ -22,6 +23,17 @@ os.environ["PYTHONPATH"] = os.pathsep.join(
 from isolate_settings import install, set_test_id
 
 install()
+
+
+def _mark_ui_tests(items):
+    for item in items:
+        if set(item.fixturenames).intersection(_UI_FIXTURES) and item.get_closest_marker("ui") is None:
+            item.add_marker(pytest.mark.ui)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(items):
+    _mark_ui_tests(items)
 
 
 @pytest.hookimpl(tryfirst=True)

@@ -15,7 +15,8 @@ _TEST_ID = os.environ.get("COMPONENTPRESS_TEST_SETTINGS_ID", "pytest-startup")
 
 
 def _settings_path(scope: _QSettings.Scope) -> Path:
-    return _ROOT / _TEST_ID / f"process-{os.getpid()}" / scope.name.lower()
+    root = Path(os.environ.get("COMPONENTPRESS_TEST_SETTINGS_ROOT", str(_ROOT)))
+    return root / _TEST_ID / f"process-{os.getpid()}" / scope.name.lower()
 
 
 def set_test_id(value: str) -> None:
