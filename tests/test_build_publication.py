@@ -19,6 +19,7 @@ class ManualPool:
         self.tasks = []
         self.attempts = 0
         self.failed = threading.Event()
+        self.ready = threading.Event()
 
     def setMaxThreadCount(self, count):
         self.max_workers = count
@@ -29,9 +30,27 @@ class ManualPool:
             self.failed.set()
             raise OSError("pool rejected task")
         self.tasks.append(task)
+        if len(self.tasks) == self.max_workers:
+            self.ready.set()
 
     def waitForDone(self):
         pass
+
+
+class ImmediatePool:
+    def __init__(self):
+        self.attempts = 0
+        self.waited = False
+
+    def setMaxThreadCount(self, count):
+        self.max_workers = count
+
+    def start(self, task):
+        self.attempts += 1
+        task.run()
+
+    def waitForDone(self):
+        self.waited = True
 
 
 class ManualTask:
@@ -116,6 +135,38 @@ def test_first_render_error_survives_cancellation_errors_from_other_tasks(monkey
     assert errors[0].diagnostic.code == "PRIMARY_RENDER"
 
 
+def test_primary_render_error_survives_progress_and_logging_failures(monkeypatch):
+    pool = ManualPool()
+    primary = ProjectError(Diagnostic("PRIMARY_RENDER", "render failed"))
+
+    class PrimaryThenCancelledTask(ManualTask):
+        def run(self):
+            error = primary if self.instance.index == 0 else ProjectError(Diagnostic("BUILD_CANCELLED", "cancelled"))
+            self.done(self.instance.index, error)
+
+    monkeypatch.setattr(render_pool, "QThreadPool", lambda: pool)
+    monkeypatch.setattr(render_pool, "RenderInstanceTask", PrimaryThenCancelledTask)
+    monkeypatch.setattr(render_pool, "log_exception", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("log unavailable")))
+    errors = []
+
+    def fail_first(_value):
+        raise RuntimeError("consumer failure")
+
+    thread = threading.Thread(
+        target=lambda: _capture(errors, render_pool.render_instances, _snapshot(Path(".")), CancellationToken(), fail_first),
+        daemon=True,
+    )
+    thread.start()
+    assert pool.ready.wait(timeout=2)
+    assert len(pool.tasks) == 2
+    pool.tasks.pop(0).run()
+    pool.tasks.pop(0).run()
+    thread.join(timeout=2)
+
+    assert not thread.is_alive()
+    assert errors == [primary]
+
+
 def _capture(errors, function, *args):
     try:
         function(*args)
@@ -145,6 +196,55 @@ def test_cancel_before_initial_reservation_finishes_render_queue(monkeypatch):
     assert not thread.is_alive()
     assert errors[0].diagnostic.code == "BUILD_CANCELLED"
     assert pool.attempts == 0
+
+
+@pytest.mark.parametrize("workers", [1, 2, 4])
+@pytest.mark.parametrize("failure", ["translation", "construction", "callback"])
+def test_notification_failures_do_not_interrupt_render_queue(monkeypatch, workers, failure):
+    pool = ImmediatePool()
+    monkeypatch.setattr(render_pool, "QThreadPool", lambda: pool)
+    monkeypatch.setattr(render_pool, "RenderInstanceTask", ManualTask)
+    log_attempts = []
+
+    def broken_log(*_args, **_kwargs):
+        log_attempts.append(True)
+        raise OSError("log unavailable")
+
+    monkeypatch.setattr(render_pool, "log_exception", broken_log)
+    if failure == "translation":
+        monkeypatch.setattr(render_pool, "tr", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("translation failed")))
+    elif failure == "construction":
+        monkeypatch.setattr(render_pool, "BuildProgress", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("construction failed")))
+
+    snapshot = _snapshot(Path("."), count=workers + 2, workers=workers)
+
+    def notify(_value):
+        if failure == "callback":
+            raise RuntimeError("consumer failure")
+
+    render_pool.render_instances(snapshot, CancellationToken(), notify)
+
+    assert pool.attempts == workers + 2
+    assert len(log_attempts) == workers + 2
+    assert pool.waited
+    assert pool.max_workers == workers
+
+
+def test_progress_callback_cancellation_prevents_starting_next_png(monkeypatch):
+    pool = ImmediatePool()
+    monkeypatch.setattr(render_pool, "QThreadPool", lambda: pool)
+    monkeypatch.setattr(render_pool, "RenderInstanceTask", ManualTask)
+    token = CancellationToken()
+    snapshot = _snapshot(Path("."), count=3, workers=1)
+
+    def cancel(_value):
+        token.cancel()
+
+    with pytest.raises(ProjectError) as caught:
+        render_pool.render_instances(snapshot, token, cancel)
+
+    assert caught.value.diagnostic.code == "BUILD_CANCELLED"
+    assert pool.attempts == 1
 
 
 def test_build_runner_cancel_only_sets_thread_safe_token(tmp_path):

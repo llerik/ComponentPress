@@ -83,13 +83,16 @@ class _RenderQueue:
             self.cancellation.cancel()
 
     def _report_progress(self, done):
-        value = BuildProgress(self.snapshot.job_id, "rendering", done, len(self.snapshot.instances),
-                              tr("ui.png_build_progress", completed=done, total=len(self.snapshot.instances)))
         try:
+            value = BuildProgress(self.snapshot.job_id, "rendering", done, len(self.snapshot.instances),
+                                  tr("ui.png_build_progress", completed=done, total=len(self.snapshot.instances)))
             self.progress(value)
         except Exception as error:
-            log_exception("build.progress", error, operation="build", job_id=self.snapshot.job_id,
-                          phase="rendering", mode=self.snapshot.mode)
+            try:
+                log_exception("build.progress", error, operation="build", job_id=self.snapshot.job_id,
+                              phase="rendering", mode=self.snapshot.mode)
+            except Exception:
+                pass
 
     def _start_next(self):
         instance = self._reserve()
