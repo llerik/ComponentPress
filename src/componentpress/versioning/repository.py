@@ -56,6 +56,12 @@ def _log_phase(event: str, phase: str, status: str, operation_id: str, code=None
     _safe_log(event, **context)
 
 
+def _recover_pending_registration(root: Path) -> None:
+    from componentpress.project_io.transactions import recover_add_component
+
+    recover_add_component(root)
+
+
 def _digest(stream, cancellation=None) -> tuple[str, int]:
     hasher = hashlib.sha256()
     size = 0
@@ -475,6 +481,7 @@ def _replace_archive(state):
 
 
 def _patch_published_version(state):
+    _recover_pending_registration(state.root)
     model, _ = parse_project(state.project_path.read_text(encoding="utf-8"), state.project_path)
     _original, tree = parse_project(state.project_path.read_text(encoding="utf-8"), state.project_path)
     updated = model.model_copy(update={"version": state.new_version})
@@ -650,6 +657,7 @@ class ZipArchiveRepository:
         _safe_log("project.archive", operation="archive", phase="export", status="started", operation_id=operation_id)
         try:
             with self.write_lock(snapshot.root.resolve()):
+                _recover_pending_registration(snapshot.root)
                 result = export_project_version(
                     snapshot, target, replace=replace, cancellation=cancellation,
                     on_progress=on_progress, diagnostic_formatter=self.diagnostic_formatter,

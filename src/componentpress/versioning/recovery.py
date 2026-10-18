@@ -181,6 +181,9 @@ def _apply_version_patch(project_path: Path, record: dict) -> Diagnostic | None:
 
 
 def _patch_project_version(project_path: Path, record: dict) -> None:
+    from componentpress.versioning.repository import _recover_pending_registration
+
+    _recover_pending_registration(project_path.parent)
     _model, tree = parse_project(project_path.read_text(encoding="utf-8"), project_path)
     model, _ = parse_project(project_path.read_text(encoding="utf-8"), project_path)
     if model.id != record["project_id"] or model.version != record["project_version"]:

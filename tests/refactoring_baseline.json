@@ -911,14 +911,6 @@
       "stage": "9б",
       "owner": "coder:src/componentpress/project_io"
     },
-    "src/componentpress/project_io/transactions.py|recover": {
-      "path": "src/componentpress/project_io/transactions.py",
-      "name": "recover",
-      "line": 21,
-      "length": 26,
-      "stage": "9б",
-      "owner": "coder:src/componentpress/project_io"
-    },
     "src/componentpress/project_io/transactions.py|recover_component_membership": {
       "path": "src/componentpress/project_io/transactions.py",
       "name": "recover_component_membership",
@@ -932,14 +924,6 @@
       "name": "change_component_membership",
       "line": 103,
       "length": 35,
-      "stage": "9б",
-      "owner": "coder:src/componentpress/project_io"
-    },
-    "src/componentpress/project_io/transactions.py|register_component": {
-      "path": "src/componentpress/project_io/transactions.py",
-      "name": "register_component",
-      "line": 140,
-      "length": 22,
       "stage": "9б",
       "owner": "coder:src/componentpress/project_io"
     },

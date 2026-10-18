@@ -100,6 +100,7 @@ class ProjectService:
         size = document.model.size_mm.model_copy(update={"width": width_mm, "height": height_mm})
         return self.projects.save_component(snapshot, component_id, size_mm=size)
 
+    @_logged("register")
     def register(self, root: Path, component_id: str | None, name: str) -> ProjectSnapshot:
         snapshot = self.projects.open(root)
         component_id = component_id or self.identifiers.create(name, snapshot.documents, prefix="component")

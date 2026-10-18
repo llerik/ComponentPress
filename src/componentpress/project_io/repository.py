@@ -1,5 +1,6 @@
 """Project creation, strict opening and comment-preserving saves."""
 
+from contextlib import contextmanager
 from pathlib import Path
 import hashlib
 import json
@@ -18,7 +19,7 @@ from componentpress.bindings.grammar import parse_references
 from componentpress.platforms.services import ProjectWriteLock
 from .files import atomic_create, atomic_write, file_hash
 from .paths import check_case_collisions, check_exact_case, resolve_project_path
-from .transactions import change_component_membership, recover, recover_component_membership, register_component
+from .transactions import change_component_membership, recover, recover_add_component, register_component
 from .migrations import migrate_v1_to_v2, migration_required, recover_migration, recovery_required
 from .schema_checks import preflight_project_schemas
 from .yaml_codec import _load, dump_yaml, parse_component, parse_project, update_tree
@@ -39,6 +40,39 @@ def _journal_uses_backup(journal: Path, backup_path: str) -> bool:
         return json.loads(journal.read_text(encoding="utf-8")).get("backup") == backup_path
     except (OSError, ValueError, AttributeError):
         return True
+
+
+def _registration_journal(root: Path) -> Path:
+    return root / ".componentpress" / "transactions" / "add-component.json"
+
+
+def _assert_snapshot_current(snapshot: ProjectSnapshot) -> None:
+    project = snapshot.root / "project.yaml"
+    _assert_file_hash(project, snapshot.disk_hash, "описание проекта изменено после чтения")
+    for document in snapshot.documents.values():
+        _assert_file_hash(document.path, document.disk_hash, "компонент изменён после чтения")
+
+
+def _assert_file_hash(path: Path, expected: str, message: str) -> None:
+    try:
+        unchanged = file_hash(path) == expected
+    except OSError:
+        unchanged = False
+    if not unchanged:
+        raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", message, path))
+
+
+def _recover_registration_before_open(root: Path) -> None:
+    if _registration_journal(root).exists():
+        with _registration_write_lock(root):
+            pass
+
+
+@contextmanager
+def _registration_write_lock(root: Path):
+    with ProjectWriteLock(root):
+        recover_add_component(root)
+        yield
 
 
 class FileProjectRepository:
@@ -80,8 +114,9 @@ class FileProjectRepository:
         root = root.resolve()
         project_path = root / "project.yaml"
         preflight_project_schemas(root)
-        from componentpress.versioning.recovery import recover_project_versions
+        _recover_registration_before_open(root)
 
+        from componentpress.versioning.recovery import recover_project_versions
         self.version_recovery_diagnostics = recover_project_versions(root)
         if recovery_required(root):
             with ProjectWriteLock(root):
@@ -94,14 +129,10 @@ class FileProjectRepository:
                 "schema_version",
             ))
         resource_journals = root / ".componentpress" / "transactions" / "resource-imports"
-        if ((root / ".componentpress" / "transactions" / "add-component.json").exists()
-                or (root / ".componentpress" / "transactions" / "component-membership.json").exists()
+        if ((root / ".componentpress" / "transactions" / "component-membership.json").exists()
                 or (resource_journals.exists() and any(resource_journals.glob("*.json")))):
             with ProjectWriteLock(root):
                 recover(root)
-        if (root / ".componentpress" / "transactions" / "component-membership.json").exists():
-            with ProjectWriteLock(root):
-                recover_component_membership(root)
         check_case_collisions(root)
         text, disk_hash = _read_text(project_path)
         model, _ = parse_project(text, project_path)
@@ -171,7 +202,7 @@ class FileProjectRepository:
             checked, _ = parse_component(document.text, document.path, validated.variables)
             if checked.data and validated.data_source is None:
                 raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", "задайте XLSX в настройках проекта", document.path, "data.sheet"))
-        with ProjectWriteLock(snapshot.root):
+        with _registration_write_lock(snapshot.root):
             atomic_write(snapshot.root / "project.yaml", text.encode("utf-8"), snapshot.disk_hash)
         return self.open(snapshot.root)
 
@@ -185,7 +216,7 @@ class FileProjectRepository:
         checked, _ = parse_component(text, document.path, project_model.variables)
         if checked.data and project_model.data_source is None:
             raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", "задайте XLSX в настройках проекта", document.path, "data.sheet"))
-        with ProjectWriteLock(snapshot.root):
+        with _registration_write_lock(snapshot.root):
             if file_hash(snapshot.root / "project.yaml") != snapshot.disk_hash:
                 raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "описание проекта изменено после чтения", snapshot.root / "project.yaml"))
             atomic_write(document.path, text.encode("utf-8"), document.disk_hash)
@@ -224,7 +255,7 @@ class FileProjectRepository:
         document: DocumentSnapshot,
     ) -> ProjectSnapshot:
         checked = self.prepare_text(snapshot, component_id, document.text)
-        with ProjectWriteLock(snapshot.root):
+        with _registration_write_lock(snapshot.root):
             if file_hash(snapshot.root / "project.yaml") != snapshot.disk_hash:
                 raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "описание проекта изменено после чтения", snapshot.root / "project.yaml"))
             atomic_write(checked.path, checked.text.encode("utf-8"), snapshot.documents[component_id].disk_hash)
@@ -249,15 +280,26 @@ class FileProjectRepository:
         from io import StringIO
         stream = StringIO()
         YAML().dump(component.model_dump(mode="json", exclude_none=True), stream)
-        component_text = stream.getvalue()
+        candidate = self._prepare_added_component(snapshot, component_id, path, stream.getvalue())
+        with _registration_write_lock(snapshot.root):
+            _assert_snapshot_current(snapshot)
+            register_component(snapshot.root, path, candidate.documents[component_id].text.encode("utf-8"), candidate.text.encode("utf-8"), snapshot.disk_hash)
+        return candidate
+
+    @staticmethod
+    def _prepare_added_component(snapshot: ProjectSnapshot, component_id: str, path: str, component_text: str) -> ProjectSnapshot:
+        component_path = snapshot.root / path
         project_model, tree = parse_project(snapshot.text, snapshot.root / "project.yaml")
-        parse_component(component_text, snapshot.root / path, project_model.variables)
+        component_model, _ = parse_component(component_text, component_path, project_model.variables)
+        if component_model.data and project_model.data_source is None:
+            raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", "задайте XLSX в настройках проекта", component_path, "data.sheet"))
         tree["components"].append({"id": component_id, "path": path})
         project_text = dump_yaml(tree)
-        parse_project(project_text, snapshot.root / "project.yaml")
-        with ProjectWriteLock(snapshot.root):
-            register_component(snapshot.root, path, component_text.encode("utf-8"), project_text.encode("utf-8"), snapshot.disk_hash)
-        return self.open(snapshot.root)
+        validated_project, _ = parse_project(project_text, snapshot.root / "project.yaml")
+        document = DocumentSnapshot(component_path, component_text, hashlib.sha256(component_text.encode("utf-8")).hexdigest(), component_model)
+        documents = dict(snapshot.documents)
+        documents[component_id] = document
+        return ProjectSnapshot(snapshot.root, project_text, hashlib.sha256(project_text.encode("utf-8")).hexdigest(), validated_project, MappingProxyType(documents))
 
     def remove_component(self, snapshot: ProjectSnapshot, component_id: str, *, backup_path: str) -> RemovedComponent:
         reference = next((item for item in snapshot.model.components if item.id == component_id), None)
@@ -273,7 +315,7 @@ class FileProjectRepository:
         tree["components"].pop(position)
         new_text = dump_yaml(tree)
         parse_project(new_text, snapshot.root / "project.yaml")
-        with ProjectWriteLock(snapshot.root):
+        with _registration_write_lock(snapshot.root):
             if file_hash(snapshot.root / "project.yaml") != snapshot.disk_hash:
                 raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "описание проекта изменено после чтения", snapshot.root / "project.yaml"))
             if file_hash(document.path) != document.disk_hash:
@@ -322,7 +364,7 @@ class FileProjectRepository:
         refs.insert(index, ref)
         new_text = dump_yaml(tree)
         parse_project(new_text, snapshot.root / "project.yaml")
-        with ProjectWriteLock(snapshot.root):
+        with _registration_write_lock(snapshot.root):
             if file_hash(snapshot.root / "project.yaml") != snapshot.disk_hash:
                 raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "описание проекта изменено после чтения", snapshot.root / "project.yaml"))
             change_component_membership(

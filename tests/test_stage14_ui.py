@@ -882,7 +882,11 @@ def test_group_confirmation_rejects_a_changed_selection(tmp_path: Path, qtbot, m
     assert not any(node.type == "group" and node.name == "Group" for node in before.elements)
 
 
-def test_component_creation_and_deletion_round_trip_preserves_draft_and_tab(tmp_path: Path, qtbot, monkeypatch) -> None:
+@pytest.mark.parametrize("locale", ("ru", "en"))
+def test_component_creation_and_deletion_round_trip_preserves_draft_and_tab(tmp_path: Path, qtbot, monkeypatch, locale: str) -> None:
+    from componentpress.i18n import set_language
+
+    set_language(locale)
     root, window, service = make_window(tmp_path, qtbot)
     errors = []
     monkeypatch.setattr(window, "_show_error", errors.append)
@@ -890,7 +894,18 @@ def test_component_creation_and_deletion_round_trip_preserves_draft_and_tab(tmp_
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Discard))
     monkeypatch.setattr(window, "_ask_unsaved_choice", lambda *_args: QMessageBox.StandardButton.Discard)
 
+    unlink = Path.unlink
+
+    def fail_add_marker_cleanup(path, *args, **kwargs):
+        if path.name == "add-component.json":
+            raise PermissionError("injected post-commit cleanup failure")
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_add_marker_cleanup)
     assert window.add_component("third", "Третий компонент")
+    assert len(window._component_history.entries) == 1
+    assert window._component_history.index == 1
+    monkeypatch.setattr(Path, "unlink", unlink)
     tab = window.active_tab
     document = window.session.documents["third"]
     window._draft_changed(tab, "schema_version: 6\nid: third\nname: [неверный черновик]\n")

@@ -7,6 +7,8 @@ import pytest
 
 from componentpress.application.contracts import ComponentHistoryEntry, ComponentOperation
 from componentpress.diagnostics import logging as diagnostics
+from componentpress.domain.component import DataBinding
+from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.editor.project_history import ComponentHistory
 from componentpress.project_io.repository import FileProjectRepository
 
@@ -90,13 +92,26 @@ def test_pruned_backup_waits_for_membership_recovery(tmp_path: Path, monkeypatch
     assert "forest-card" not in removed.snapshot.documents
 
 
-def test_add_journal_cleanup_failure_is_recoverable_but_leaves_session_stale(
+def test_add_journal_cleanup_failure_keeps_session_consistent(
     tmp_path: Path, monkeypatch
 ) -> None:
+    from componentpress.bootstrap import project_service
+
     root = tmp_path / "project"
     shutil.copytree(DEMO, root)
-    repository = FileProjectRepository()
-    snapshot = repository.open(root)
+    service = project_service()
+    session = service.open_session(root)
+    original_snapshot = session.snapshot
+    original_documents = dict(session.documents)
+    preserved = session.documents["forest-card"]
+    preserved.set_draft("invalid draft", ())
+    preserved.update(name="Unsaved name")
+    original_project = (root / "project.yaml").read_bytes()
+    with pytest.raises(ProjectError) as caught:
+        service.add_to_session(session, "Unbound data", "unbound-data", data=DataBinding(sheet="Cards"))
+    assert caught.value.diagnostic.code == "DATA_SOURCE_UNKNOWN"
+    assert not (root / "components/unbound-data.yaml").exists()
+    assert (root / "project.yaml").read_bytes() == original_project
     unlink = Path.unlink
 
     def fail_after_registration(path, *args, **kwargs):
@@ -104,13 +119,86 @@ def test_add_journal_cleanup_failure_is_recoverable_but_leaves_session_stale(
             raise PermissionError("injected post-commit cleanup failure")
         return unlink(path, *args, **kwargs)
 
+    archive = tmp_path / "blocked.zip"
     monkeypatch.setattr(Path, "unlink", fail_after_registration)
-    with pytest.raises(PermissionError):
-        repository.add_component(snapshot, "history-probe", "History probe")
-    assert "history-probe" not in snapshot.documents
+    assert service.add_to_session(session, "History probe", "history-probe") == "history-probe"
+    assert session.snapshot is not original_snapshot
+    assert "history-probe" in session.snapshot.documents
+    assert all(session.documents[key] is value for key, value in original_documents.items())
+    assert preserved.dirty and preserved.draft_text == "invalid draft"
+    assert (root / ".componentpress/transactions/add-component.json").is_file()
+
+    with pytest.raises(ProjectError) as caught:
+        service.add_to_session(session, "Another component", "another-component")
+    assert caught.value.diagnostic.code == "TRANSACTION_CONFLICT"
+    assert not (root / "components/another-component.yaml").exists()
+    original_project = (root / "project.yaml").read_bytes()
+    with pytest.raises(ProjectError):
+        service.set_project_details(session, name="Changed", version="0.2.0")
+    with pytest.raises(ProjectError):
+        service.versions.export(session.snapshot, archive)
+    assert (root / "project.yaml").read_bytes() == original_project
+    assert not archive.exists()
 
     monkeypatch.setattr(Path, "unlink", unlink)
-    assert "history-probe" in repository.open(root).documents
+    assert "history-probe" in service.projects.open(root).documents
+    service.set_project_details(session, name="Changed", version="0.2.0")
+    assert service.add_to_session(session, "Another component", "another-component") == "another-component"
+    assert "another-component" in session.documents
+
+
+def test_add_collision_does_not_delete_existing_component_even_when_hash_matches(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "project"
+    shutil.copytree(DEMO, root)
+    repository = FileProjectRepository()
+    snapshot = repository.open(root)
+    target = root / "components/claimed.yaml"
+    owned = b""
+    unlink = Path.unlink
+
+    def race_with_component_creation(path, data):
+        nonlocal owned
+        if path == target:
+            owned = data
+            target.write_bytes(data)
+            raise ProjectError(Diagnostic("FILE_EXISTS", "file exists", target))
+        from componentpress.project_io.files import atomic_create as create
+        return create(path, data)
+
+    def fail_add_marker_cleanup(path, *args, **kwargs):
+        if path.name == "add-component.json":
+            raise PermissionError("injected cleanup failure")
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr("componentpress.project_io.transactions.atomic_create", race_with_component_creation)
+    monkeypatch.setattr(Path, "unlink", fail_add_marker_cleanup)
+    with pytest.raises(ProjectError):
+        repository.add_component(snapshot, "claimed", "Claimed")
+    assert target.read_bytes() == owned
+    journal = root / ".componentpress/transactions/add-component.json"
+    assert json.loads(journal.read_text(encoding="utf-8"))["ownership_conflict"]
+    monkeypatch.setattr(Path, "unlink", unlink)
+    with pytest.raises(ProjectError) as caught:
+        repository.open(root)
+    assert caught.value.diagnostic.code == "TRANSACTION_CONFLICT"
+    assert target.read_bytes() == owned
+
+
+def test_add_rejects_a_changed_existing_document_before_commit(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    shutil.copytree(DEMO, root)
+    repository = FileProjectRepository()
+    snapshot = repository.open(root)
+    original_project = (root / "project.yaml").read_bytes()
+    document = root / "components/forest-card.yaml"
+    document.write_text(document.read_text(encoding="utf-8") + "# external edit\n", encoding="utf-8")
+
+    with pytest.raises(ProjectError) as caught:
+        repository.add_component(snapshot, "new-card", "New card")
+
+    assert caught.value.diagnostic.code == "FILE_CHANGED_EXTERNALLY"
+    assert (root / "project.yaml").read_bytes() == original_project
+    assert not (root / "components/new-card.yaml").exists()
 
 
 def test_component_history_operations_keep_safe_log_context() -> None:
