@@ -194,6 +194,11 @@ def test_version_scenario_runs_with_fake_ports_without_adapters_or_side_effects(
     )
 
 
+def test_project_service_scenario_runs_without_logging_adapter_or_side_effects(tmp_path):
+    loaded = _probe(["componentpress.application.project_service"], tmp_path)
+    assert loaded == []
+
+
 def test_diagnostic_string_conversion_stays_neutral_in_a_fresh_process(tmp_path):
     loaded = _probe(["componentpress.domain.diagnostics"], tmp_path)
     assert loaded == BASELINE["runtime"]["componentpress.domain.diagnostics"]["modules"]

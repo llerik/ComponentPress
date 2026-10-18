@@ -5,7 +5,6 @@ from collections.abc import Callable
 from functools import wraps
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
-from componentpress.diagnostics.logging import log_event, log_exception
 from componentpress.application.edits import ensure_visual_edit_respects_locks
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.project import CopiesColumns, DataSource
@@ -23,17 +22,17 @@ from .version_service import VersionService
 def _logged(operation: str):
     def decorate(function):
         @wraps(function)
-        def run(*args, **kwargs):
-            log_event("project.operation", operation=operation, status="started")
+        def run(service, *args, **kwargs):
+            service._log_event(operation, "started")
             try:
-                result = function(*args, **kwargs)
+                result = function(service, *args, **kwargs)
             except ProjectError as exc:
-                log_event("project.operation", operation=operation, status="failed", code=exc.diagnostic.code)
+                service._log_event(operation, "failed", code=exc.diagnostic.code)
                 raise
             except Exception as exc:
-                log_exception("project.operation", exc, operation=operation, status="failed")
+                service._log_exception(operation, exc)
                 raise
-            log_event("project.operation", operation=operation, status="succeeded")
+            service._log_event(operation, "succeeded")
             return result
         return run
     return decorate
@@ -45,12 +44,28 @@ class ProjectService:
         write_lock: WriteLockFactory, versions: VersionService,
         identifiers: IdentifierGenerator | None = None,
         *, diagnostic_formatter: Callable[[Diagnostic], str],
+        event_logger: Callable[..., None],
+        exception_logger: Callable[..., str],
     ):
         self.projects = projects
         self.resources = resources
         self.write_lock = write_lock
         self.identifiers = identifiers or IdentifierGenerator()
         self.versions = versions
+        self.event_logger = event_logger
+        self.exception_logger = exception_logger
+
+    def _log_event(self, operation: str, status: str, **context: object) -> None:
+        try:
+            self.event_logger("project.operation", operation=operation, status=status, **context)
+        except Exception:
+            pass
+
+    def _log_exception(self, operation: str, error: Exception) -> None:
+        try:
+            self.exception_logger("project.operation", error, operation=operation, status="failed")
+        except Exception:
+            pass
 
     @_logged("create")
     def create(self, root: Path, name: str) -> ProjectSnapshot:

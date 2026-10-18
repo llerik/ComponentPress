@@ -6,6 +6,7 @@ from componentpress.project_io.repository import FileProjectRepository
 from componentpress.resources.repository import ResourceRepository
 from componentpress.platforms.services import ProjectWriteLock
 from componentpress.application.project_service import ProjectService
+from componentpress.diagnostics.logging import log_event, log_exception
 from componentpress.application.version_service import VersionService
 from componentpress.application.preview_service import PreviewService
 from componentpress.application.build_service import BuildService
@@ -42,6 +43,7 @@ def project_service() -> ProjectService:
     return ProjectService(
         projects, resource_repository(), ProjectWriteLock, versions,
         diagnostic_formatter=format_diagnostic,
+        event_logger=log_event, exception_logger=log_exception,
     )
 
 

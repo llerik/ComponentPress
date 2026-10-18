@@ -163,6 +163,32 @@ if sys.argv[3:] == ["componentpress.application.preview_service"]:
     assert service.select_row(source_snapshot, "card", validate_resources=False).component is bound
     assert resolver.validate_resources is False
     service.invalidate(root)
+if sys.argv[3:] == ["componentpress.application.project_service"]:
+    from contextlib import nullcontext
+    from pathlib import Path
+    from componentpress.application.project_service import ProjectService
+
+    calls = []
+
+    class Projects:
+        def create(self, root, name):
+            calls.append(("create", root, name))
+            return "snapshot"
+
+    def event_logger(event, **context):
+        calls.append((event, context))
+
+    service = ProjectService(
+        Projects(), object(), lambda _root: nullcontext(), object(),
+        diagnostic_formatter=str, event_logger=event_logger,
+        exception_logger=lambda *_args, **_kwargs: "incident",
+    )
+    assert service.create(Path("unwritten-project"), "Game") == "snapshot"
+    assert [call[0] for call in calls] == [
+        "project.operation", "create", "project.operation",
+    ]
+    assert calls[0][1]["status"] == "started"
+    assert calls[-1][1]["status"] == "succeeded"
 if sys.argv[3:] == ["componentpress.application.version_service"]:
     from componentpress.application.contracts import ArchiveExportResult
     from componentpress.application.version_service import VersionService
