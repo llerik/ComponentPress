@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QTreeView
 
 from componentpress.bootstrap import build_service, project_controller
 from componentpress.domain.component import SizeMM
+from componentpress.domain.schema import SCHEMA_VERSION
 from componentpress.application.contracts import BuildRequest
 from componentpress.execution.qt_wait import run_build
 from componentpress.app_assets import load_application_icon
@@ -42,7 +43,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
 
     validate_catalogs()
     set_language("en")
-    english_ok = tr("menu.file") == "File" and tr("about.schema", version=6).startswith("Supported")
+    english_ok = tr("menu.file") == "File" and tr("about.schema", version=SCHEMA_VERSION).startswith("Supported")
     set_language("ru")
     expected_log_root = os.environ.get("COMPONENTPRESS_LOG_DIR")
     log_path = technical_log.session_log()
@@ -427,7 +428,6 @@ def main(argv: list[str] | None = None) -> int:
         settings_root.mkdir(parents=True, exist_ok=True)
         QSettings.setDefaultFormat(QSettings.Format.IniFormat)
         QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(settings_root))
-        os.environ["COMPONENTPRESS_LOG_DIR"] = str(Path(arguments[1]) / ".componentpress" / "release-smoke-logs")
     technical_log.initialize()
     technical_log.install_exception_hooks()
     application.aboutToQuit.connect(technical_log.shutdown)

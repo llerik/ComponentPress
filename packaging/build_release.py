@@ -19,6 +19,7 @@ ROOT: Path = SETTINGS["ROOT"]
 EXECUTABLE_NAME: str = SETTINGS["EXECUTABLE_NAME"]
 RELEASE_EXECUTABLE: Path = SETTINGS["RELEASE_EXECUTABLE"]
 RELEASE_VERSION: str = SETTINGS["RELEASE_VERSION"]
+SCHEMA_VERSION: int = SETTINGS["SCHEMA_VERSION"]
 
 
 def sha256(path: Path) -> str:
@@ -74,7 +75,7 @@ def main() -> int:
             smoke_project,
             ignore=shutil.ignore_patterns("output", "archive", ".componentpress"),
         )
-        environment = build_environment.copy()
+        environment = build_environment | {"COMPONENTPRESS_LOG_DIR": str(temporary_root / "application-logs")}
         environment.pop("PYTHONHOME", None)
         environment.pop("PYTHONPATH", None)
         try:
@@ -108,7 +109,7 @@ def main() -> int:
             or "type: rectangle" not in saved_text
             or "type: ellipse" not in saved_text
             or "type: line" not in saved_text
-            or "schema_version: 6" not in saved_text
+            or f"schema_version: {SCHEMA_VERSION}" not in saved_text
             or "# Проверка текстового режима" not in saved_text
         ):
             print("Smoke-проверка не сохранила синхронизированный макет", file=sys.stderr)
@@ -134,7 +135,7 @@ def main() -> int:
         if jobs.exists() and any(jobs.iterdir()):
             print("Smoke-проверка оставила временный каталог задания", file=sys.stderr)
             return 10
-        print("Smoke: GUI, schema 6, Excel, фигуры, редактор, PDF/PNG ZIP, отмена и очистка — успешно")
+        print(f"Smoke: GUI, schema {SCHEMA_VERSION}, Excel, фигуры, редактор, PDF/PNG ZIP, отмена и очистка — успешно")
     RELEASE_EXECUTABLE.parent.mkdir(parents=True, exist_ok=True)
     staged.replace(RELEASE_EXECUTABLE)
     print(RELEASE_EXECUTABLE)
