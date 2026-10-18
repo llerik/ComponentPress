@@ -274,6 +274,7 @@ def test_png_zip_uses_copy_switch_mode_and_filename(tmp_path: Path, qtbot, monke
     )
 
     window._export_png_archive()
+    qtbot.waitUntil(lambda: bool(calls), timeout=5000)
     assert calls == [(tmp_path / "out.zip", mode)]
     assert suggested_names == [f"forest-card-{mode}.zip"]
     assert dialog_text == [

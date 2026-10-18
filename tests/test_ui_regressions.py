@@ -7,22 +7,26 @@ from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QPoint, QRect, QSettings, QSize, Qt
-from PySide6.QtGui import QColor, QFontDatabase, QIcon, QImage, QPixmap
+from PySide6.QtGui import QColor, QCloseEvent, QFontDatabase, QIcon, QImage, QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QColorDialog, QComboBox, QDialog, QMessageBox, QPushButton
 
 from componentpress.application.contracts import DocumentSnapshot, ProjectSnapshot
+from componentpress.application.contracts import PngArchiveResult
 from componentpress.bindings.resolver import BindingResolver
 from componentpress.bootstrap import project_controller
 from componentpress.domain.component import ComponentDefinition, DataBinding, SizeMM
-from componentpress.domain.diagnostics import ProjectError
+from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, LineNode, ShapeNode
 from componentpress.domain.project import DataSource, ProjectDefinition
 from componentpress.domain.tree import locations
 from componentpress.domain.values import CellValue, DataRow, DataSheetSnapshot
 from componentpress.i18n import set_language
 from componentpress.editor.dialogs import HtmlAddDialog
-from componentpress.editor.main_window import MainWindow
+from componentpress.editor.main_window import MainWindow, PngArchiveOperation
+from componentpress.editor import main_window as main_window_module
+from componentpress.editor.version_worker import ExportArchiveRequest
+from componentpress.execution.cancellation import CancellationToken
 from componentpress.editor.canvas import ComponentCanvas
 from componentpress.editor.canvas import ComponentPreview
 from componentpress.editor.properties import ElementProperties
@@ -373,6 +377,8 @@ def test_build_reservation_rejects_preview_from_dialog_event_loop(make_editor, m
     window._preview_coordinator.active = object()
     window._start_build(False)
     assert window._build_pending_active_only is False and not starts
+    tab.previewRequested.emit()
+    assert tab.preview_deferred
     window._preview_coordinator.active = None
     window._continue_build_after_preview()
     assert len(starts) == 1
@@ -382,6 +388,128 @@ def test_build_reservation_rejects_preview_from_dialog_event_loop(make_editor, m
     window._build_progress.close()
     window._build_progress.deleteLater()
     window._build_progress = None
+
+
+def test_png_export_reserves_before_save_and_waits_for_active_preview(make_editor, monkeypatch, tmp_path):
+    window, _root, _errors = make_editor()
+    called = []
+
+    def save_all():
+        assert window._png_operation is not None
+        assert window._save_reservation_id == window._png_operation.operation_id
+        assert not window._operation_allowed("resource_write")
+        assert not window.open_path(tmp_path)
+        return True
+
+    monkeypatch.setattr(window, "save_all", save_all)
+    monkeypatch.setattr(window, "_choose_png_archive", lambda operation: called.append(operation))
+    window._preview_coordinator.active = object()
+    window._export_png_archive()
+
+    operation = window._png_operation
+    assert operation is not None and operation.phase == "waiting_preview"
+    assert not called
+    assert not window.close_tab(window.tabs.currentIndex())
+    assert not window._operation_allowed("build")
+
+    window._preview_coordinator.active = None
+    window._continue_png_after_preview()
+    QTest.qWait(1)
+    assert called == [operation]
+    window._finish_png_operation(operation, "cancelled")
+    assert window._png_operation is None
+
+
+def test_png_progress_reentry_cannot_start_conflicting_operations(make_editor, monkeypatch, tmp_path):
+    window, root, _errors = make_editor()
+    tab = window.active_tab
+    operation = PngArchiveOperation(
+        "a" * 32, window.session, window._preview_session_identity, tab, "prod",
+        phase="running", snapshot=window.session.snapshot, target=tmp_path / "result.zip",
+        cancellation=CancellationToken(),
+    )
+    window._png_operation = operation
+    def export(*_args, **_kwargs):
+        window._export_png_archive()
+        assert not window.close_tab(window.tabs.indexOf(tab))
+        assert not window.open_path(tmp_path)
+        with pytest.raises(ProjectError) as error:
+            window._import_single_image(root, tmp_path / "unused.png", "")
+        assert error.value.diagnostic.code == "OPERATION_BUSY"
+        return PngArchiveResult(operation.target, "prod", 1, 1)
+
+    monkeypatch.setattr(window.controller, "png_archive_exporter", export)
+    window._run_png_archive(operation)
+    assert window._png_operation is None
+    assert "result.zip" in window.statusBar().currentMessage()
+
+
+@pytest.mark.parametrize("choice", ["cancel_export", "wait", "stay"])
+def test_png_close_choice_preserves_operation_and_defers_window_close(make_editor, monkeypatch, choice):
+    window, _root, _errors = make_editor()
+    operation = PngArchiveOperation(
+        "b" * 32, window.session, window._preview_session_identity, window.active_tab, "prod",
+        cancellation=CancellationToken(),
+    )
+    window._png_operation = operation
+    class MessageBox:
+        class ButtonRole:
+            DestructiveRole = 0
+            AcceptRole = 1
+            RejectRole = 2
+
+        def __init__(self, *_args):
+            self.buttons = []
+
+        def setWindowTitle(self, _text):
+            pass
+
+        def setText(self, _text):
+            pass
+
+        def addButton(self, text, _role):
+            button = (text, len(self.buttons))
+            self.buttons.append(button)
+            return button
+
+        def exec(self):
+            window._export_png_archive()
+            window.close_tab(window.tabs.currentIndex())
+
+        def clickedButton(self):
+            return self.buttons[{"cancel_export": 0, "wait": 1, "stay": 2}[choice]]
+
+    monkeypatch.setattr(main_window_module, "QMessageBox", MessageBox)
+    event = QCloseEvent()
+    window._defer_close_for_png(event)
+
+    assert not event.isAccepted()
+    assert window._png_operation is operation
+    assert operation.close_after is (choice != "stay")
+    assert operation.cancellation.cancelled is (choice == "cancel_export")
+    assert operation.close_confirmed is (choice != "stay")
+
+
+def test_version_replacement_dialog_keeps_operation_admission(make_editor, monkeypatch, tmp_path):
+    window, _root, _errors = make_editor()
+    owner = "c" * 32
+    window._version_busy_id = owner
+    request = ExportArchiveRequest(window.session.snapshot, tmp_path / "result.zip")
+    error = ProjectError(Diagnostic("ARCHIVE_EXISTS", "exists", request.target))
+    observed = []
+
+    def confirm(*_args):
+        observed.append(window._operation_allowed("png_export"))
+        window._export_png_archive()
+        return QMessageBox.StandardButton.Cancel
+
+    monkeypatch.setattr(main_window_module.QMessageBox, "question", confirm)
+    window._confirm_archive_replacement(request, error, owner)
+
+    assert observed == [False]
+    assert window._png_operation is None
+    assert window._version_busy_id == owner
+    window._version_busy_id = None
 
 
 def test_build_dialog_cancel_releases_reservation_and_resumes_preview(make_editor, monkeypatch):

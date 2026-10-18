@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+from dataclasses import dataclass
 from uuid import uuid4
 from types import MappingProxyType
 
@@ -79,7 +80,7 @@ from componentpress.domain.tree import (
 )
 
 from .controllers import ProjectController
-from .action_policy import BuildContext, EditingContext, HistoryContext, HistoryTarget, build_actions, editing_actions, history_target
+from .action_policy import BuildContext, EditingContext, HistoryContext, HistoryTarget, OperationContext, build_actions, editing_actions, history_target, operation_allowed
 from .commands import ReplaceComponentCommand
 from .dialogs import HtmlAddDialog, ImageAddDialog, ImageManagerDialog, ResourcePickerDialog, format_error
 from .build_dialog import BuildOptionsDialog
@@ -122,6 +123,23 @@ def _png_archive_status(result) -> str:
     return message + warning
 
 
+@dataclass
+class PngArchiveOperation:
+    operation_id: str
+    session: ProjectSession
+    session_identity: str
+    active_tab: DocumentTab | None
+    mode: str
+    phase: str = "saving"
+    snapshot: object | None = None
+    component_ids: tuple[str, ...] | None = None
+    target: Path | None = None
+    cancellation: CancellationToken | None = None
+    progress: QProgressDialog | None = None
+    close_after: bool = False
+    close_confirmed: bool = False
+
+
 class MainWindow(QMainWindow):
     def __init__(self, controller: ProjectController, parent=None):
         super().__init__(parent)
@@ -129,6 +147,7 @@ class MainWindow(QMainWindow):
         self._tabs: dict[str, DocumentTab] = {}
         self._selection_sync = False
         self._active_build_job: str | None = None; self._build_pending_active_only: bool | None = None
+        self._build_operation_id: str | None = None; self._build_session: ProjectSession | None = None; self._build_tab: DocumentTab | None = None; self._build_mode: str | None = None
         self._last_build_result: BuildResult | None = None
         self._build_progress: QProgressDialog | None = None; self._last_build_progress: BuildProgress | None = None
         self._close_after_build = False
@@ -140,7 +159,7 @@ class MainWindow(QMainWindow):
         self._preview_close_pending = False; self._preview_close_confirmed = False
         self._version_pool = QThreadPool(self)
         self._version_pool.setMaxThreadCount(1)
-        self._version_task = None
+        self._version_task = None; self._version_busy_id: str | None = None; self._version_task_id: str | None = None; self._pending_restore: tuple[Path, str] | None = None; self._png_operation: PngArchiveOperation | None = None; self._save_reservation_id: str | None = None
         self._version_request: VersionTaskRequest | None = None
         self._version_cancellation: CancellationToken | None = None
         self._version_progress: QProgressDialog | None = None
@@ -376,10 +395,10 @@ class MainWindow(QMainWindow):
         return super().eventFilter(watched, event)
 
     def _route_text_history_shortcut(self, watched, event) -> bool:
-        tab = self.active_tab
-        if tab is None or watched is not tab.text_editor or event.type() != QEvent.Type.KeyPress:
+        if event.type() != QEvent.Type.KeyPress or not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             return False
-        if not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+        tab = self.active_tab
+        if tab is None or watched is not tab.text_editor:
             return False
         key, modifiers = event.key(), event.modifiers()
         if key == Qt.Key.Key_Z:
@@ -862,9 +881,11 @@ class MainWindow(QMainWindow):
         self.data_mode.toggled.connect(self._data_mode_changed)
         self.event_search.textChanged.connect(self._filter_events)
 
-    def load_session(self, session: ProjectSession) -> None:
+    def load_session(self, session: ProjectSession, *, reservation: str | None = None) -> None:
         """Install an already opened session; useful to bootstrap and to test the UI."""
-        self._clear_tabs(discard=True)
+        if not self._operation_allowed("project_switch") and reservation != self._version_busy_id:
+            return
+        self._clear_tabs(discard=True, reservation=reservation)
         self._preview_session_identity = uuid4().hex
         self.controller.set_session(session)
         self._clear_component_history()
@@ -882,9 +903,9 @@ class MainWindow(QMainWindow):
         self._update_actions()
 
     def open_path(self, root: Path) -> bool:
-        if self._build_pending_active_only is not None:
+        if not self._operation_allowed("project_switch"):
             return False
-        if not self._confirm_all_dirty():
+        if not self._confirm_all_dirty() or not self._operation_allowed("project_switch"):
             return False
         try:
             session = self.controller.open(root)
@@ -895,9 +916,9 @@ class MainWindow(QMainWindow):
         return True
 
     def create_path(self, root: Path, name: str) -> bool:
-        if self._build_pending_active_only is not None:
+        if not self._operation_allowed("project_switch"):
             return False
-        if not self._confirm_all_dirty():
+        if not self._confirm_all_dirty() or not self._operation_allowed("project_switch"):
             return False
         try:
             session = self.controller.create(root, name)
@@ -908,7 +929,7 @@ class MainWindow(QMainWindow):
         return True
 
     def new_project_dialog(self) -> None:
-        if self._build_pending_active_only is not None:
+        if not self._operation_allowed("project_switch"):
             return
         folder = QFileDialog.getExistingDirectory(self, "Выберите пустую папку проекта")
         if not folder:
@@ -918,13 +939,15 @@ class MainWindow(QMainWindow):
             self.create_path(Path(folder), name)
 
     def open_project_dialog(self) -> None:
-        if self._build_pending_active_only is not None:
+        if not self._operation_allowed("project_switch"):
             return
         folder = QFileDialog.getExistingDirectory(self, "Открыть проект")
         if folder:
             self.open_path(Path(folder))
 
     def _import_project_archive(self) -> None:
+        if not self._operation_allowed("project_switch"):
+            return
         filename, _ = QFileDialog.getOpenFileName(self, tr("archive.import_title"), "", tr("archive.filter"))
         if not filename:
             return
@@ -981,15 +1004,20 @@ class MainWindow(QMainWindow):
             ),
         )
 
-    def _start_version_task(self, request: VersionTaskRequest, operation) -> None:
-        if self._version_task is not None:
+    def _start_version_task(self, request: VersionTaskRequest, operation, *, reservation: str | None = None) -> None:
+        if self._version_task is not None or not self._operation_allowed("version") and reservation != self._version_busy_id:
             return
+        reservation = reservation or uuid4().hex
+        self._version_busy_id = reservation
+        task_id = uuid4().hex
         cancellation = CancellationToken()
         task = VersionTask(request, operation, cancellation, locale=language())
+        self._show_version_task(task, task_id, request, cancellation)
+
+    def _show_version_task(self, task, task_id, request, cancellation) -> None:
         task.signals.progress.connect(self._version_task_progress, Qt.ConnectionType.QueuedConnection)
-        task.signals.finished.connect(self._version_task_finished, Qt.ConnectionType.QueuedConnection)
-        self._version_task = task
-        self._version_request = request
+        task.signals.finished.connect(lambda completion: self._version_task_finished(completion, task_id), Qt.ConnectionType.QueuedConnection)
+        self._version_task, self._version_task_id, self._version_request = task, task_id, request
         self._version_cancellation = cancellation
         self._version_progress = QProgressDialog(tr("ui.archive_prepare"), tr("action.cancel_build"), 0, 0, self)
         self._version_progress.setWindowTitle(tr("ui.archive_title"))
@@ -1011,26 +1039,42 @@ class MainWindow(QMainWindow):
         if isinstance(self._version_request, ImportImageFolderRequest) and getattr(self, "_image_manager_dialog", None) is not None:
             self._image_manager_dialog.set_import_progress(completed, total, label)
 
-    def _version_task_finished(self, completion: VersionTaskCompletion) -> None:
+    def _version_task_finished(self, completion: VersionTaskCompletion, task_id: str) -> None:
+        if self._version_task_id != task_id:
+            return
+        self._clear_version_task()
+        if completion.error is not None:
+            self._version_task_failed(completion, self._version_busy_id)
+        else:
+            self._dispatch_version_result(completion)
+        self._release_version_reservation()
+
+    def _clear_version_task(self) -> None:
         if self._version_progress is not None:
             self._version_progress.close()
-        self._version_progress = None
-        self._version_task = None
-        self._version_request = None
-        self._version_cancellation = None
+        self._version_progress = self._version_task = self._version_task_id = None
+        self._version_request = self._version_cancellation = None
         self._update_actions()
-        if completion.error is not None:
-            self._version_task_failed(completion)
-            return
-        request, result = completion.request, completion.result
-        if isinstance(request, ExportArchiveRequest) and isinstance(result, ArchiveExportResult):
-            self._archive_export_finished(request, result)
-        elif isinstance(request, RestoreArchiveRequest) and isinstance(result, Path):
-            self._archive_restore_finished(result)
-        elif isinstance(request, ImportImageFolderRequest) and isinstance(result, tuple):
-            self._image_folder_import_finished(result)
 
-    def _version_task_failed(self, completion: VersionTaskCompletion) -> None:
+    def _dispatch_version_result(self, completion: VersionTaskCompletion) -> None:
+        request, result, owner = completion.request, completion.result, self._version_busy_id
+        if isinstance(request, ExportArchiveRequest) and isinstance(result, ArchiveExportResult):
+            self._archive_export_finished(request, result, owner)
+        elif isinstance(request, RestoreArchiveRequest) and isinstance(result, Path):
+            self._archive_restore_finished(result, owner)
+        elif isinstance(request, ImportImageFolderRequest) and isinstance(result, tuple):
+            self._image_folder_import_finished(result, owner)
+
+    def _release_version_reservation(self) -> None:
+        if self._version_task is None and self._pending_restore is None:
+            self._version_busy_id = None
+        self._update_actions()
+        if self._version_busy_id is None:
+            if self.active_tab is not None:
+                self._show_selection(self._selected_ids())
+            self._resume_deferred_preview()
+
+    def _version_task_failed(self, completion: VersionTaskCompletion, owner: str | None) -> None:
         error = completion.error
         assert error is not None
         request = completion.request
@@ -1039,7 +1083,7 @@ class MainWindow(QMainWindow):
             if dialog is not None:
                 dialog.finish_import(None, error, completion.error_message)
         elif isinstance(request, ExportArchiveRequest) and error.diagnostic.code in {"ARCHIVE_EXISTS", "ARCHIVE_VERSION_EXISTS"}:
-            self._confirm_archive_replacement(request, error)
+            self._confirm_archive_replacement(request, error, owner)
         elif error.diagnostic.code == "BUILD_CANCELLED":
             self.statusBar().showMessage(tr("archive.cancelled"), 5000)
         elif completion.error_message:
@@ -1047,14 +1091,14 @@ class MainWindow(QMainWindow):
         else:
             self._show_error(error)
 
-    def _confirm_archive_replacement(self, request: ExportArchiveRequest, error: ProjectError) -> None:
+    def _confirm_archive_replacement(self, request: ExportArchiveRequest, error: ProjectError, owner: str | None) -> None:
         target = error.diagnostic.path or request.target
         answer = QMessageBox.question(
             self, tr("archive.exists_title"), tr("archive.replace_confirm", path=target),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
-        if answer != QMessageBox.StandardButton.Yes or self.session is None:
+        if answer != QMessageBox.StandardButton.Yes or self.session is None or owner != self._version_busy_id or self.session.snapshot.root != request.snapshot.root:
             return
         replacement = ExportArchiveRequest(self.session.snapshot, target, replace=True)
         self._start_version_task(
@@ -1062,31 +1106,60 @@ class MainWindow(QMainWindow):
             lambda cancellation, progress: self.controller.service.versions.export(
                 replacement.snapshot, replacement.target, replace=True,
                 cancellation=cancellation, on_progress=progress,
-            ),
+            ), reservation=owner,
         )
 
     def _show_prepared_version_error(self, message: str) -> None:
         QMessageBox.critical(self, tr("error.title"), message)
         self.statusBar().showMessage(message, 7000)
 
-    def _archive_restore_finished(self, root: Path) -> None:
+    def _archive_restore_finished(self, root: Path, owner: str | None) -> None:
+        if owner is None or owner != self._version_busy_id:
+            return
+        if self._preview_coordinator.active is not None:
+            self._pending_restore = (root, owner)
+            return
+        self._open_restored_project(root, owner)
+
+    def _open_restored_project(self, root: Path, owner: str) -> None:
+        if owner != self._version_busy_id or self._preview_coordinator.active is not None:
+            return
         try:
             session = self.controller.open(root)
         except ProjectError as exc:
             self._show_error(exc)
             self.statusBar().showMessage(tr("archive.restored_open_failed", path=root), 12000)
-            return
-        self.load_session(session)
+        else:
+            self.load_session(session, reservation=owner)
+        finally:
+            self._version_busy_id = None
+            self._update_actions()
+            self._resume_deferred_preview()
 
-    def _archive_export_finished(self, request: ExportArchiveRequest, result: ArchiveExportResult) -> None:
+    def _continue_pending_restore(self) -> None:
+        pending = self._pending_restore
+        if pending is None or self._preview_coordinator.active is not None:
+            return
+        self._pending_restore = None
+        QTimer.singleShot(0, lambda: self._open_restored_project(*pending))
+
+    def _archive_export_finished(self, request: ExportArchiveRequest, result: ArchiveExportResult, owner: str | None) -> None:
+        if owner is None or owner != self._version_busy_id or self.session is None or self.session.snapshot.root != request.snapshot.root:
+            return
         try:
-            snapshot = self.controller.service.open(request.snapshot.root)
-            if self.session is not None and self.session.snapshot.root == snapshot.root:
-                self.session.replace_snapshot(snapshot, saved=set(snapshot.documents))
-            self._refresh_component_tree()
-            self._active_tab_changed(self.tabs.currentIndex())
+            self._refresh_exported_project(request)
         except ProjectError as exc:
             self._show_error(exc)
+        self._report_archive_export(result)
+
+    def _refresh_exported_project(self, request: ExportArchiveRequest) -> None:
+        snapshot = self.controller.service.open(request.snapshot.root)
+        if self.session is not None and self.session.snapshot.root == snapshot.root:
+            self.session.replace_snapshot(snapshot, saved=set(snapshot.documents))
+        self._refresh_component_tree()
+        self._active_tab_changed(self.tabs.currentIndex())
+
+    def _report_archive_export(self, result: ArchiveExportResult) -> None:
         if not result.postprocessing_complete:
             version = self.session.snapshot.model.version if self.session is not None else tr("archive.unknown_version")
             QMessageBox.warning(
@@ -1098,7 +1171,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{self.session.snapshot.model.name} — ComponentPress")
         self.statusBar().showMessage(tr("archive.export_succeeded", path=result.path, version=result.next_version), 10000)
 
-    def _image_folder_import_finished(self, paths: tuple[str, ...]) -> None:
+    def _image_folder_import_finished(self, paths: tuple[str, ...], owner: str | None) -> None:
+        if owner is None or owner != self._version_busy_id:
+            return
         dialog = getattr(self, "_image_manager_dialog", None)
         if dialog is not None:
             dialog.finish_import(paths, None)
@@ -1136,7 +1211,7 @@ class MainWindow(QMainWindow):
             return
 
     def open_image_manager(self) -> None:
-        if self.session is None:
+        if self.session is None or not self._operation_allowed("resource_write"):
             return
         root = self.session.snapshot.root
         dialog = ImageManagerDialog(
@@ -1151,11 +1226,13 @@ class MainWindow(QMainWindow):
         dialog.open()
 
     def _import_single_image(self, root: Path, source: Path, folder: str) -> str:
+        self._require_resource_write(root)
         relative = self.controller.service.import_image(root, source, folder)
         self._resource_images_changed()
         return relative
 
     def _replace_project_image(self, root: Path, relative: str, source: Path, expected_hash: str) -> None:
+        self._require_resource_write(root)
         self.controller.service.replace_image(root, relative, source, expected_hash)
         self._resource_images_changed()
 
@@ -1166,8 +1243,12 @@ class MainWindow(QMainWindow):
         for tab in self._tabs.values():
             self._refresh_preview(tab)
 
+    def _require_resource_write(self, root: Path) -> None:
+        if not self._operation_allowed("resource_write") or self.session is None or self.session.snapshot.root != root:
+            raise ProjectError(Diagnostic("OPERATION_BUSY", tr("ui.operation_unavailable"), message_key="ui.operation_unavailable"))
+
     def _start_image_folder_import(self, dialog: ImageManagerDialog, root: Path, source: Path, folder: str) -> None:
-        if self._version_task is not None or self._active_build_job is not None:
+        if not self._operation_allowed("resource_write") or self.session is None or self.session.snapshot.root != root:
             return
         dialog.folder_button.setEnabled(False)
         request = ImportImageFolderRequest(root, source, folder)
@@ -1857,7 +1938,7 @@ class MainWindow(QMainWindow):
     def _preview_requested(self, tab: DocumentTab) -> None:
         if self._tabs.get(tab.component_id) is not tab or self.session is None:
             return
-        if self._build_pending_active_only is not None:
+        if self._build_pending_active_only is not None or self._png_operation is not None or self._version_busy_id is not None:
             tab.preview_deferred = True
             return
         if self.active_tab is not tab or self._active_build_job is not None:
@@ -1952,6 +2033,8 @@ class MainWindow(QMainWindow):
             self._show_preview_failure(job, result.error)
         self._start_preview_job(transition.start)
         self._continue_build_after_preview()
+        self._continue_png_after_preview()
+        self._continue_pending_restore()
 
     def _finish_preview_failure(self, job: PreviewJob, phase: PreviewPhase, error: Exception) -> None:
         transition = self._preview_coordinator.finish(job.request.identity.request, phase)
@@ -1962,6 +2045,8 @@ class MainWindow(QMainWindow):
             self._show_preview_failure(job, error)
         self._start_preview_job(transition.start)
         self._continue_build_after_preview()
+        self._continue_png_after_preview()
+        self._continue_pending_restore()
 
     def _skip_preview_job(self, job: PreviewJob) -> None:
         transition = self._preview_coordinator.finish(job.request.identity.request, PreviewPhase.FONTS)
@@ -1972,6 +2057,8 @@ class MainWindow(QMainWindow):
             job.tab.preview_deferred = True
         self._start_preview_job(transition.start)
         self._continue_build_after_preview()
+        self._continue_png_after_preview()
+        self._continue_pending_restore()
 
     def _release_preview_fonts(self, job: PreviewJob) -> None:
         job.fonts.close()
@@ -2062,7 +2149,7 @@ class MainWindow(QMainWindow):
         self._update_data_chain()
 
     def _data_binding_changed(self, _index: int) -> None:
-        if self.session is None or self.active_tab is None:
+        if self.session is None or self.active_tab is None or not self._user_editing_allowed():
             return
         sheet = self.data_sheet.currentData()
         if not sheet:
@@ -2099,10 +2186,10 @@ class MainWindow(QMainWindow):
         self._edit_selected_node({"content_mode": "column", "content_column": str(column)})
 
     def _import_xlsx(self) -> None:
-        if self.session is None:
+        if self.session is None or not self._operation_allowed("resource_write"):
             return
         filename, _ = QFileDialog.getOpenFileName(self, "Импорт XLSX", "", "Excel (*.xlsx)")
-        if not filename:
+        if not filename or not self._operation_allowed("resource_write"):
             return
         try:
             self.controller.import_data(Path(filename))
@@ -2113,10 +2200,12 @@ class MainWindow(QMainWindow):
         self._refresh_component_tree()
 
     def _clear_xlsx(self) -> None:
-        if self.session is None:
+        if self.session is None or not self._operation_allowed("resource_write"):
             return
         choice = QMessageBox.question(self, tr("ui.remove_xlsx"), "Отвязать все листы компонентов и убрать источник Excel из проекта?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         if choice != QMessageBox.StandardButton.Yes:
+            return
+        if not self._operation_allowed("resource_write"):
             return
         try:
             for component_id, document in tuple(self.session.documents.items()):
@@ -2147,66 +2236,163 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Экспортировано: {result.png}", 5000)
 
     def _export_png_archive(self) -> None:
-        if self.session is None or not self.save_all():
+        if self.session is None or not self._operation_allowed("png_export"):
             return
+        operation = PngArchiveOperation(uuid4().hex, self.session, self._preview_session_identity, self.active_tab,
+            self.data_mode.mode, cancellation=CancellationToken())
+        self._png_operation = operation
+        technical_log.log_event("project.png_export.admission", operation="png_export", operation_id=operation.operation_id, status="started", phase="preparing", mode=operation.mode)
+        self._update_actions()
+        if (not self._save_all_for_reservation(operation.operation_id) or not self._png_operation_is_current(operation)
+                or operation.cancellation.cancelled):
+            self._finish_png_operation(operation, "cancelled")
+            return
+        operation.snapshot = operation.session.snapshot
+        operation.phase = "waiting_preview"
+        for tab in self._tabs.values():
+            tab.preview_timer.stop()
+            tab.preview_deferred = tab.preview_arguments is not None
+        self._preview_coordinator.discard_pending()
+        self._continue_png_after_preview()
+
+    def _continue_png_after_preview(self) -> None:
+        operation = self._png_operation
+        if operation is None or self._preview_coordinator.active is not None:
+            return
+        if operation.cancellation.cancelled:
+            self._finish_png_operation(operation, "cancelled")
+            return
+        if self._png_operation_is_current(operation):
+            QTimer.singleShot(0, lambda item=operation: self._choose_png_archive(item))
+
+    def _choose_png_archive(self, operation: PngArchiveOperation) -> None:
+        if not self._png_operation_is_current(operation):
+            return
+        operation.phase = "choosing"
+        choice, active_button, project_button = self._png_choice_dialog(operation)
+        choice.exec()
+        self._accept_png_choice(operation, choice, active_button, project_button)
+
+    def _png_choice_dialog(self, operation: PngArchiveOperation):
         choice = QMessageBox(self)
         choice.setWindowTitle(tr("ui.png_export_title"))
         choice.setText(tr("ui.png_export_choice"))
-        active_button = choice.addButton(tr("ui.png_active"), QMessageBox.ButtonRole.AcceptRole) if self.active_tab is not None else None
-        project_button = choice.addButton(tr("ui.png_all"), QMessageBox.ButtonRole.AcceptRole)
+        active = choice.addButton(tr("ui.png_active"), QMessageBox.ButtonRole.AcceptRole) if operation.active_tab is not None else None
+        project = choice.addButton(tr("ui.png_all"), QMessageBox.ButtonRole.AcceptRole)
         choice.addButton(QMessageBox.StandardButton.Cancel)
-        choice.exec()
+        return choice, active, project
+
+    def _accept_png_choice(self, operation, choice, active_button, project_button) -> None:
+        if not self._png_operation_is_current(operation) or operation.cancellation.cancelled:
+            self._finish_png_operation(operation, "cancelled")
+            return
         clicked = choice.clickedButton()
         if clicked not in (active_button, project_button):
+            self._finish_png_operation(operation, "cancelled")
             return
-        component_ids = (self.active_tab.component_id,) if self.active_tab is not None and clicked is active_button else None
-        target_name = f"{self.active_tab.component_id}-{self.data_mode.mode}.zip" if component_ids else f"{self.session.snapshot.model.id}-{self.data_mode.mode}.zip"
+        operation.component_ids = (operation.active_tab.component_id,) if clicked is active_button else None
+        self._select_png_target(operation, self._png_target_name(operation))
+
+    @staticmethod
+    def _png_target_name(operation: PngArchiveOperation) -> str:
+        component_id = operation.component_ids[0] if operation.component_ids else operation.session.snapshot.model.id
+        return f"{component_id}-{operation.mode}.zip"
+
+    def _select_png_target(self, operation: PngArchiveOperation, target_name: str) -> None:
+        if not self._png_operation_is_current(operation) or operation.cancellation.cancelled:
+            self._finish_png_operation(operation, "cancelled")
+            return
+        operation.phase = "selecting_target"
         filename, _ = QFileDialog.getSaveFileName(self, tr("ui.png_save"), target_name, "ZIP (*.zip)")
-        if not filename:
+        if not filename or not self._png_operation_is_current(operation) or operation.cancellation.cancelled:
+            self._finish_png_operation(operation, "cancelled")
             return
+        operation.target = Path(filename)
+        self._run_png_archive(operation)
+
+    def _run_png_archive(self, operation: PngArchiveOperation) -> None:
+        operation.phase = "running"
+        self._show_png_progress(operation)
         try:
-            from componentpress.execution.cancellation import CancellationToken
+            result = self._call_png_exporter(operation)
+        except Exception as exc:
+            result = exc
+        self._report_png_result(result)
+        self._finish_png_operation(operation, self._png_result_status(result))
 
-            cancellation = CancellationToken()
-            progress = QProgressDialog(tr("ui.archive_prepare"), tr("action.cancel_build"), 0, 0, self)
-            progress.setWindowTitle(tr("ui.png_export_title"))
-            progress.setAutoClose(False)
-            progress.setAutoReset(False)
-            progress.canceled.connect(cancellation.cancel)
-            progress.show()
+    def _show_png_progress(self, operation: PngArchiveOperation) -> None:
+        progress = QProgressDialog(tr("ui.archive_prepare"), tr("action.cancel_build"), 0, 0, self)
+        operation.progress = progress
+        progress.setWindowTitle(tr("ui.png_export_title"))
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        progress.canceled.connect(operation.cancellation.cancel)
+        progress.show()
 
-            def update_progress(value) -> None:
-                progress.setRange(0, max(value.total, 1))
-                progress.setValue(value.completed)
-                phase = "ui.png_progress_render" if value.phase == "render" else "ui.png_progress_pack"
-                progress.setLabelText(tr(phase))
-                QApplication.processEvents()
+    def _call_png_exporter(self, operation: PngArchiveOperation):
+        technical_log.log_event("project.png_export.admission", operation="png_export", operation_id=operation.operation_id, status="started", phase="export", mode=operation.mode)
+        return self.controller.png_archive_exporter(operation.snapshot, operation.target, mode=operation.mode,
+            component_ids=operation.component_ids, cancellation=operation.cancellation,
+            on_progress=lambda value: self._update_png_progress(operation, value))
 
-            result = self.controller.png_archive_exporter(
-                self.session.snapshot,
-                Path(filename),
-                mode=self.data_mode.mode,
-                component_ids=component_ids,
-                cancellation=cancellation,
-                on_progress=update_progress,
-            )
-        except ProjectError as exc:
-            if "progress" in locals():
-                progress.close()
-            if exc.diagnostic.code == "BUILD_CANCELLED":
+    @staticmethod
+    def _png_result_status(result) -> str:
+        if isinstance(result, Exception):
+            return "cancelled" if isinstance(result, ProjectError) and result.diagnostic.code == "BUILD_CANCELLED" else "failed"
+        return "succeeded"
+
+    def _report_png_result(self, result) -> None:
+        if isinstance(result, Exception):
+            if isinstance(result, ProjectError) and result.diagnostic.code == "BUILD_CANCELLED":
                 self.statusBar().showMessage(tr("ui.png_cancelled"), 5000)
-                return
-            self._show_error(exc)
+            else:
+                self._show_error(result)
+        else:
+            self.statusBar().showMessage(_png_archive_status(result), 7000)
+
+    def _update_png_progress(self, operation: PngArchiveOperation, value) -> None:
+        if not self._png_operation_is_current(operation) or operation.progress is None:
             return
-        progress.close()
-        self.statusBar().showMessage(_png_archive_status(result), 7000)
+        operation.progress.setRange(0, max(value.total, 1))
+        operation.progress.setValue(value.completed)
+        key = "ui.png_progress_render" if value.phase == "render" else "ui.png_progress_pack"
+        operation.progress.setLabelText(tr(key))
+        QApplication.processEvents()
+
+    def _finish_png_operation(self, operation: PngArchiveOperation, status: str) -> None:
+        if self._png_operation is not operation:
+            return
+        technical_log.log_event("project.png_export.admission", operation="png_export", operation_id=operation.operation_id,
+            status=status, phase="completion", mode=operation.mode)
+        self._png_operation = None
+        if operation.progress is not None:
+            operation.progress.close()
+        self._update_actions()
+        if self.active_tab is not None:
+            self._show_selection(self._selected_ids())
+        if operation.close_after:
+            QTimer.singleShot(0, self.close)
+        else:
+            self._resume_deferred_preview()
+
+    def _png_operation_is_current(self, operation: PngArchiveOperation) -> bool:
+        tab = operation.active_tab
+        tab_is_current = tab is None or self._tabs.get(tab.component_id) is tab
+        return (self._png_operation is operation and self.session is operation.session
+                and self._preview_session_identity == operation.session_identity and tab_is_current
+                and self.active_tab is tab)
 
     def _start_build(self, active_only: bool) -> None:
-        if self.session is None or self.controller.build is None or self._active_build_job is not None or self._version_task is not None or self._build_pending_active_only is not None:
-            return
-        if not self.save_all():
+        if self.session is None or self.controller.build is None or not self._operation_allowed("build"):
             return
         self._build_pending_active_only = active_only
+        self._build_operation_id = uuid4().hex
+        self._build_session = self.session
+        self._build_tab = self.active_tab
+        self._build_mode = self.data_mode.mode
+        if not self._save_all_for_reservation(self._build_operation_id):
+            self._cancel_pending_build()
+            return
         for tab in self._tabs.values():
             tab.preview_timer.stop()
             tab.preview_deferred = tab.preview_arguments is not None
@@ -2220,21 +2406,26 @@ class MainWindow(QMainWindow):
     def _show_build_options(self, active_only: bool) -> None:
         if self._build_pending_active_only is None or self.session is None:
             return
-        dialog = BuildOptionsDialog(self.session.snapshot.model.print, self, mode=self.data_mode.mode)
+        if self._build_session is not self.session or active_only and self._build_tab is not self.active_tab:
+            self._cancel_pending_build()
+            return
+        dialog = BuildOptionsDialog(self.session.snapshot.model.print, self, mode=self._build_mode)
         if dialog.exec() != dialog.DialogCode.Accepted:
             self._cancel_pending_build()
             return
-        if self._build_pending_active_only is None or self.session is None:
+        if (self._build_pending_active_only is None or self.session is None
+                or self._build_session is not self.session or active_only and self._build_tab is not self.active_tab):
+            self._cancel_pending_build()
             return
-        self._launch_build(dialog, active_only, self.data_mode.mode)
+        self._launch_build(dialog, active_only, self._build_mode)
 
     def _launch_build(self, dialog, active_only: bool, mode: str) -> None:
         component_ids = None
         if active_only:
-            if self.active_tab is None:
+            if self._build_tab is None:
                 self._cancel_pending_build()
                 return
-            component_ids = (self.active_tab.component_id,)
+            component_ids = (self._build_tab.component_id,)
         request = BuildRequest(
             component_ids=component_ids,
             mode=mode,
@@ -2244,25 +2435,32 @@ class MainWindow(QMainWindow):
         self._start_build_request(request)
 
     def _start_build_request(self, request: BuildRequest) -> None:
-        progress = self._build_progress_dialog()
-        self._build_progress = progress
-        self._last_build_progress = None
         try:
-            self._active_build_job = self.controller.start_build(
-                request,
-                on_progress=self._on_build_progress,
-                on_finished=self._queue_build_finished,
-            )
-            self._build_pending_active_only = None
-            self._update_actions()
+            job_id = self._start_build_worker(request)
         except Exception as exc:
-            progress.close()
-            self._build_progress = None
-            self._cancel_pending_build()
-            self._show_error(exc)
+            self._reject_build_start(exc)
             return
-        self.statusBar().showMessage(f"Сборка запущена: {self._active_build_job}")
+        self._active_build_job = job_id
+        self._release_build_reservation()
+        self.statusBar().showMessage(f"Сборка запущена: {job_id}")
         self._update_actions()
+
+    def _start_build_worker(self, request: BuildRequest) -> str:
+        self._build_progress = self._build_progress_dialog()
+        self._last_build_progress = None
+        return self.controller.start_build(request, on_progress=self._on_build_progress,
+                                           on_finished=self._queue_build_finished)
+
+    def _reject_build_start(self, error: Exception) -> None:
+        if self._build_progress is not None:
+            self._build_progress.close()
+        self._build_progress = None
+        self._cancel_pending_build()
+        self._show_error(error)
+
+    def _release_build_reservation(self) -> None:
+        self._build_pending_active_only = self._build_operation_id = None
+        self._build_session = self._build_tab = self._build_mode = None
 
     def _build_progress_dialog(self) -> QProgressDialog:
         progress = QProgressDialog(tr("ui.build_prepare"), tr("action.cancel_build"), 0, 0, self)
@@ -2277,6 +2475,10 @@ class MainWindow(QMainWindow):
         if self._build_pending_active_only is None:
             return
         self._build_pending_active_only = None
+        self._build_operation_id = None
+        self._build_session = None
+        self._build_tab = None
+        self._build_mode = None
         if resume_preview:
             self._resume_deferred_preview()
         self._update_actions()
@@ -2382,8 +2584,8 @@ class MainWindow(QMainWindow):
         self._update_tab_title(tab.component_id)
         self._update_actions()
 
-    def _apply_draft(self, component_id: str) -> bool:
-        if self.session is None or not self._user_editing_allowed():
+    def _apply_draft(self, component_id: str, *, reservation: str | None = None) -> bool:
+        if self.session is None or not self._user_editing_allowed(reservation):
             return False
         document = self.session.documents[component_id]
         if document.draft_text is None:
@@ -2510,7 +2712,7 @@ class MainWindow(QMainWindow):
             matches = preview_node.node.condition_matches if preview_node is not None and isinstance(preview_node.node, ConditionalGroupNode) else None
             font_families = ()
             font_error = None
-            if isinstance(node, HtmlNode):
+            if isinstance(node, HtmlNode) and self._operation_allowed("resource_write"):
                 try:
                     font_families = available_font_families(self.session.snapshot.root)
                 except ProjectError as exc:
@@ -2961,6 +3163,7 @@ class MainWindow(QMainWindow):
     def _import_image(self, source: Path, folder: str) -> str:
         if self.session is None:
             raise RuntimeError("проект не открыт")
+        self._require_resource_write(self.session.snapshot.root)
         return self.controller.service.import_image(self.session.snapshot.root, source, folder)
 
     def _cached_columns(self) -> tuple[str, ...]:
@@ -2973,7 +3176,7 @@ class MainWindow(QMainWindow):
         return data.headers if data is not None else ()
 
     def _place_element(self, tool: str, x_mm: float, y_mm: float) -> None:
-        if self.session is None or not self._visual_editing_allowed():
+        if self.session is None or not self._visual_editing_allowed() or not self._tool_write_allowed(tool):
             return
         root = self.session.snapshot.root
         accepted = True
@@ -3029,6 +3232,9 @@ class MainWindow(QMainWindow):
             self.active_tab.canvas.cancel_tool()
         if not accepted:
             self.statusBar().showMessage("Добавление элемента отменено", 2000)
+
+    def _tool_write_allowed(self, tool: str) -> bool:
+        return tool != "html" or self._operation_allowed("resource_write")
 
     def _draw_element(self, tool: str, x1: float, y1: float, x2: float, y2: float) -> None:
         if self.session is None or self.active_tab is None:
@@ -3158,16 +3364,24 @@ class MainWindow(QMainWindow):
         self._update_actions()
         return True
 
-    def save_all(self) -> bool:
-        if not self._user_editing_allowed():
+    def save_all(self, *, _reservation: str | None = None) -> bool:
+        reservation = _reservation or self._save_reservation_id
+        if not self._user_editing_allowed(reservation):
             return False
         if self.session is None:
             return True
-        return self._save_all_documents()
+        return self._save_all_documents(reservation)
 
-    def _save_all_documents(self) -> bool:
+    def _save_all_for_reservation(self, reservation: str | None) -> bool:
+        self._save_reservation_id = reservation
+        try:
+            return self.save_all()
+        finally:
+            self._save_reservation_id = None
+
+    def _save_all_documents(self, reservation: str | None = None) -> bool:
         for component_id in tuple(self.session.documents):
-            if not self._apply_draft(component_id):
+            if not self._apply_draft(component_id, reservation=reservation):
                 tab = self._tabs.get(component_id)
                 if tab is not None:
                     self.tabs.setCurrentWidget(tab)
@@ -3186,13 +3400,24 @@ class MainWindow(QMainWindow):
         return True
 
     def close_tab(self, index: int) -> bool:
+        if not self._operation_allowed("close_tab"):
+            return False
         if index < 0:
             return True
         tab = self.tabs.widget(index)
         if not isinstance(tab, DocumentTab):
             return True
-        if not self._confirm_document(tab.component_id):
+        active = self._preview_coordinator.active
+        if active is not None and active.tab is tab:
             return False
+        if not self._confirm_document(tab.component_id) or not self._operation_allowed("close_tab"):
+            return False
+        if self.tabs.widget(index) is not tab:
+            return False
+        self._remove_tab(index, tab)
+        return True
+
+    def _remove_tab(self, index: int, tab: DocumentTab) -> None:
         tab.preview_timer.stop()
         tab.preview_generation += 1
         self._preview_coordinator.discard_pending(tab.identity)
@@ -3203,7 +3428,6 @@ class MainWindow(QMainWindow):
         self.undo_group.removeStack(tab.undo_stack)
         self.tabs.removeTab(index)
         tab.deleteLater()
-        return True
 
     def _confirm_document(self, component_id: str) -> bool:
         if self.session is None or not self.session.documents[component_id].dirty:
@@ -3244,7 +3468,9 @@ class MainWindow(QMainWindow):
         box.setDefaultButton(QMessageBox.StandardButton.Save)
         return QMessageBox.StandardButton(box.exec())
 
-    def _clear_tabs(self, *, discard: bool = False) -> None:
+    def _clear_tabs(self, *, discard: bool = False, reservation: str | None = None) -> None:
+        if not self._operation_allowed("project_switch") and reservation != self._version_busy_id:
+            return
         self._clear_component_history()
         self._project_history_focus = False
         if discard and self.session is not None:
@@ -3320,17 +3546,36 @@ class MainWindow(QMainWindow):
         nodes = [item.node for item in found if item is not None]
         return EditingContext(
             tab is not None, bool(tab and tab.mode == "text"),
-            self._build_pending_active_only is not None or self.controller.is_build_preparing(self._active_build_job),
-            self._version_task is not None, len(selected) if valid else 0,
+            self._build_pending_active_only is not None or self._png_operation is not None or self.controller.is_build_preparing(self._active_build_job),
+            self._version_busy_id is not None, len(selected) if valid else 0,
             valid and all(node_id not in locks for node_id in selected),
             valid and all(not contains_locked_node(node) for node in nodes),
             valid and len({item.parent_id for item in found if item is not None}) == 1,
             len(nodes) == 1 and isinstance(nodes[0], GroupNode),
         )
 
-    def _user_editing_allowed(self) -> bool:
+    def _user_editing_allowed(self, reservation: str | None = None) -> bool:
+        if reservation is not None and self._owns_operation_reservation(reservation):
+            return True
         context = self._editing_context()
         return not context.reserved and not context.version_busy
+
+    def _owns_operation_reservation(self, reservation: str) -> bool:
+        png = self._png_operation
+        return bool(
+            png and png.operation_id == reservation and png.phase == "saving"
+            or self._build_operation_id == reservation and self._build_pending_active_only is not None
+        )
+
+    def _operation_allowed(self, operation: str) -> bool:
+        context = OperationContext(
+            self._preview_coordinator.active is not None,
+            self._build_pending_active_only is not None,
+            self._active_build_job is not None,
+            self._png_operation is not None,
+            self._version_busy_id is not None,
+        )
+        return operation_allowed(context, operation)
 
     def _visual_editing_allowed(self) -> bool:
         return editing_actions(self._editing_context()).layout
@@ -3340,8 +3585,10 @@ class MainWindow(QMainWindow):
         decisions = editing_actions(context)
         build = build_actions(BuildContext(
             self.session is not None, context.has_tab, self._active_build_job is not None,
-            context.version_busy, context.reserved,
+            context.version_busy or self._png_operation is not None, context.reserved,
         ))
+        self.tabs.tabBar().setEnabled(self._png_operation is None)
+        self.data_mode.setEnabled(self._png_operation is None and self._version_busy_id is None)
         self.undo_action.setText(tr("action.undo"))
         self.redo_action.setText(tr("action.redo"))
         self.undo_action.setEnabled(self._history_target(redo=False) is not HistoryTarget.NONE and self._user_editing_allowed())
@@ -3419,23 +3666,30 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         had_pending_build = self._build_pending_active_only is not None
         self._cancel_pending_build(resume_preview=False)
-        if self._preview_close_pending:
-            event.ignore()
-            return
-        if self._version_task is not None:
-            QMessageBox.information(self, tr("ui.archive_title"), "Дождитесь завершения операции или отмените её.")
-            event.ignore()
-            return
-        if self._active_build_job is not None:
-            self._defer_close_for_build(event)
+        if self._defer_close_for_operation(event):
             return
         if not self._prepare_preview_close(event):
             if had_pending_build and not self._preview_coordinator.closed:
                 self._resume_deferred_preview()
             return
-
         self.ui_state.save(self)
         event.accept()
+
+    def _defer_close_for_operation(self, event: QCloseEvent) -> bool:
+        if self._png_operation is not None:
+            self._defer_close_for_png(event)
+            return True
+        if self._preview_close_pending:
+            event.ignore()
+            return True
+        if self._version_busy_id is not None:
+            QMessageBox.information(self, tr("ui.archive_title"), "Дождитесь завершения операции или отмените её.")
+            event.ignore()
+            return True
+        if self._active_build_job is not None:
+            self._defer_close_for_build(event)
+            return True
+        return False
 
     def _defer_close_for_build(self, event: QCloseEvent) -> None:
         choice = QMessageBox.question(
@@ -3450,6 +3704,32 @@ class MainWindow(QMainWindow):
             if choice == QMessageBox.StandardButton.Yes:
                 self._cancel_build()
         event.ignore()
+
+    def _defer_close_for_png(self, event: QCloseEvent) -> None:
+        operation = self._png_operation
+        if operation is None or operation.close_confirmed:
+            event.ignore()
+            return
+        operation.close_confirmed = True
+        choice, cancel_export, stay = self._png_close_dialog()
+        choice.exec()
+        if choice.clickedButton() is stay:
+            operation.close_confirmed = False
+            event.ignore()
+            return
+        operation.close_after = True
+        if choice.clickedButton() is cancel_export:
+            operation.cancellation.cancel()
+        event.ignore()
+
+    def _png_close_dialog(self):
+        choice = QMessageBox(self)
+        choice.setWindowTitle(tr("ui.png_export_title"))
+        choice.setText(tr("ui.png_close_prompt"))
+        cancel = choice.addButton(tr("ui.png_close_cancel_export"), QMessageBox.ButtonRole.DestructiveRole)
+        choice.addButton(tr("ui.png_close_wait"), QMessageBox.ButtonRole.AcceptRole)
+        stay = choice.addButton(tr("ui.cancel"), QMessageBox.ButtonRole.RejectRole)
+        return choice, cancel, stay
 
     def _prepare_preview_close(self, event: QCloseEvent) -> bool:
         if not self._preview_close_confirmed and not self._confirm_all_dirty():

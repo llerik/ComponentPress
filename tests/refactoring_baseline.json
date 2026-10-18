@@ -599,14 +599,6 @@
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
     },
-    "src/componentpress/editor/main_window.py|MainWindow._export_png_archive": {
-      "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow._export_png_archive",
-      "line": 2065,
-      "length": 56,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
-    },
     "src/componentpress/editor/main_window.py|MainWindow._on_build_finished": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._on_build_finished",

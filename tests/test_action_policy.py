@@ -1,5 +1,6 @@
 from componentpress.editor.action_policy import (
-    BuildContext, EditingContext, HistoryContext, HistoryTarget, build_actions, editing_actions, history_target,
+    BuildContext, EditingContext, HistoryContext, HistoryTarget, OperationContext, build_actions,
+    editing_actions, history_target, operation_allowed,
 )
 
 
@@ -33,3 +34,24 @@ def test_build_actions_require_project_tab_and_idle_state() -> None:
 
     no_project = build_actions(BuildContext(False, False, False, False, False))
     assert no_project.idle and not no_project.build_all and not no_project.build_active
+
+
+def test_operation_admission_allows_independent_work_and_blocks_conflicts() -> None:
+    idle = OperationContext(False, False, False, False, False)
+    preview = OperationContext(True, False, False, False, False)
+    pending_build = OperationContext(False, True, False, False, False)
+    build = OperationContext(False, False, True, False, False)
+    png = OperationContext(False, False, False, True, False)
+    version = OperationContext(False, False, False, False, True)
+
+    assert all(operation_allowed(idle, name) for name in ("project_switch", "png_export", "build", "version", "resource_write", "close_tab"))
+    assert operation_allowed(preview, "png_export") and operation_allowed(preview, "build")
+    assert operation_allowed(preview, "version") and not operation_allowed(preview, "resource_write")
+    assert not operation_allowed(preview, "project_switch")
+    for context in (pending_build, build, png, version):
+        assert not operation_allowed(context, "project_switch")
+        assert not operation_allowed(context, "png_export")
+        assert not operation_allowed(context, "close_tab")
+    assert not operation_allowed(build, "version")
+    assert operation_allowed(png, "view")
+    assert not operation_allowed(png, "unlisted_operation")

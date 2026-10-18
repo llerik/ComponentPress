@@ -284,6 +284,7 @@ def test_gui_archive_export_and_import_run_without_blocking_the_window(tmp_path:
         window.controller.service, "open_session",
         lambda _root: (_ for _ in ()).throw(ProjectError(Diagnostic("PROJECT_READ", "Cannot open project"))),
     )
-    window._archive_restore_finished(tmp_path / "unreadable-restored-project")
+    window._version_busy_id = "test-restore"
+    window._archive_restore_finished(tmp_path / "unreadable-restored-project", "test-restore")
     assert window.session is active_session
     assert errors

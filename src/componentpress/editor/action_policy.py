@@ -60,6 +60,30 @@ def build_actions(context: BuildContext) -> BuildActions:
 
 
 @dataclass(frozen=True)
+class OperationContext:
+    preview_active: bool
+    build_reserved: bool
+    build_active: bool
+    png_reserved: bool
+    version_busy: bool
+
+
+def operation_allowed(context: OperationContext, operation: str) -> bool:
+    if operation == "project_switch":
+        return not any((context.preview_active, context.build_reserved, context.build_active, context.png_reserved, context.version_busy))
+    if operation == "png_export":
+        return not any((context.build_reserved, context.build_active, context.png_reserved, context.version_busy))
+    if operation == "build":
+        return not any((context.build_reserved, context.build_active, context.png_reserved, context.version_busy))
+    if operation in {"version", "resource_write"}:
+        blocked = (context.build_reserved, context.build_active, context.png_reserved, context.version_busy)
+        return not any((*blocked, context.preview_active)) if operation == "resource_write" else not any(blocked)
+    if operation == "close_tab":
+        return not any((context.build_reserved, context.build_active, context.png_reserved, context.version_busy))
+    return operation == "view"
+
+
+@dataclass(frozen=True)
 class EditingContext:
     has_tab: bool
     text_mode: bool
