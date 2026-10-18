@@ -58,9 +58,9 @@ def test_export_then_restore_preserves_all_project_bytes_and_version(tmp_path: P
 
     result = _versions(repository).export(snapshot, archive_path)
 
-    assert (result.path, result.next_version, result.postprocessing_complete, result.detail) == (archive_path, "0.1.1", True, None)
-    assert repository.open(root).model.version == "0.1.1"
-    assert _source_files(root)["project.yaml"] != before["project.yaml"]
+    assert (result.path, result.project_version, result.postprocessing_complete, result.detail) == (archive_path, "0.1.0", True, None)
+    assert repository.open(root).model.version == "0.1.0"
+    assert _source_files(root) == before
     with zipfile.ZipFile(archive_path) as archive:
         manifest = json.loads(archive.read("manifest.json"))
         assert manifest["project_version"] == "0.1.0"
@@ -116,7 +116,7 @@ def test_invalid_path_in_archive_manifest_is_rejected_before_destination_write(t
         "format_version": 1,
         "project_id": "game",
         "project_version": "0.1.0",
-        "schema_version": 6,
+        "schema_version": 7,
         "files": {"project.yaml": {"size": 0, "sha256": hashlib.sha256(b"").hexdigest()}, "../outside": {"size": 0, "sha256": hashlib.sha256(b"").hexdigest()}},
         "directories": [],
     }
@@ -132,65 +132,42 @@ def test_invalid_path_in_archive_manifest_is_rejected_before_destination_write(t
     assert not list(tmp_path.glob(".componentpress-import-*"))
 
 
-def test_recovery_finishes_only_the_patch_after_published_archive(tmp_path: Path, monkeypatch) -> None:
+def test_recovery_cleans_published_archive_journal_without_changing_project(tmp_path: Path, monkeypatch) -> None:
     import componentpress.versioning.repository as module
 
     root = tmp_path / "game"
     repository = _project(root)
     source_snapshot = repository.open(root)
-    actual_atomic_write = module.atomic_write
+    original_unlink = Path.unlink
+    fail_cleanup = True
 
-    def fail_project_patch(path: Path, data: bytes, expected_hash: str | None = None) -> str:
-        if path == root / "project.yaml":
-            raise ProjectError(__import__("componentpress.domain.diagnostics", fromlist=["Diagnostic"]).Diagnostic(
-                "FILE_WRITE", "simulated project YAML write failure", path
-            ))
-        return actual_atomic_write(path, data, expected_hash)
+    def fail_journal_cleanup(path: Path, *args, **kwargs) -> None:
+        nonlocal fail_cleanup
+        if path.name == "publish.json" and fail_cleanup:
+            fail_cleanup = False
+            raise OSError("simulated journal cleanup failure")
+        original_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(module, "atomic_write", fail_project_patch)
+    monkeypatch.setattr(Path, "unlink", fail_journal_cleanup)
     archive_path = root / "archive" / "game-0.1.0.zip"
-    result = _versions(repository, lambda diagnostic: f"external:{diagnostic.code}").export(source_snapshot, archive_path)
+    result = _versions(repository).export(source_snapshot, archive_path)
     assert result.postprocessing_complete is False
-    assert result.detail == "external:FILE_WRITE"
+    assert result.detail
     assert archive_path.is_file()
-    actual_recovery_write = recovery_module.atomic_write
-
-    def fail_recovery_patch(path: Path, data: bytes, expected_hash: str | None = None) -> str:
-        if path == root / "project.yaml":
-            raise ProjectError(__import__("componentpress.domain.diagnostics", fromlist=["Diagnostic"]).Diagnostic(
-                "FILE_WRITE", "simulated recovery YAML write failure", path
-            ))
-        return actual_recovery_write(path, data, expected_hash)
-
-    monkeypatch.setattr(recovery_module, "atomic_write", fail_recovery_patch)
-    assert repository.open(root).model.version == "0.1.0"
-    assert repository.version_recovery_diagnostics[0].code == "FILE_WRITE"
-    original_project = (root / "project.yaml").read_bytes()
-    script = """
-import sys
-from pathlib import Path
-from componentpress.project_io.repository import FileProjectRepository
-from componentpress.domain.diagnostics import Diagnostic, ProjectError
-try:
-    FileProjectRepository().open(Path(sys.argv[1]))
-except ProjectError as error:
-    print(error.diagnostic.code)
-"""
-    with ProjectWriteLock(root):
-        blocked = subprocess.run(
-            [sys.executable, "-B", "-c", script, str(root)],
-            capture_output=True, text=True, encoding="utf-8", timeout=15,
-        )
-    assert blocked.returncode == 0 and blocked.stdout.strip() == "PROJECT_LOCKED", blocked.stderr
-    assert (root / "project.yaml").read_bytes() == original_project
-    assert archive_path.is_file()
-    monkeypatch.setattr(recovery_module, "atomic_write", actual_recovery_write)
-    assert repository.open(root).model.version == "0.1.1"
-    monkeypatch.setattr(module, "atomic_write", actual_atomic_write)
-
-    diagnostics = recovery_module.recover_project_versions(root)
-    assert diagnostics == ()
-    assert repository.open(root).model.version == "0.1.1"
+    journal = next((root / ".componentpress" / "versioning").glob("*/publish.json"))
+    record = json.loads(journal.read_text(encoding="utf-8"))
+    assert "next_version" not in record and "project_hash" not in record
+    # A legacy journal field is ignored; recovery never applies the former patch.
+    record["next_version"] = "0.1.1"
+    journal.write_text(json.dumps(record), encoding="utf-8")
+    monkeypatch.setattr(module, "atomic_write", lambda *args, **kwargs: pytest.fail("recovery must not write project.yaml"))
+    project_path = root / "project.yaml"
+    project_path.write_bytes(project_path.read_bytes().replace(b'version: "0.1.0"', b'version: "later"'))
+    saved_project = project_path.read_bytes()
+    reopened = repository.open(root)
+    assert reopened.model.version == "later"
+    assert project_path.read_bytes() == saved_project
+    assert not journal.exists()
     assert not list((root / ".componentpress" / "versioning").glob("*/publish.json"))
 
 
@@ -246,7 +223,7 @@ def test_gui_archive_export_and_import_run_without_blocking_the_window(tmp_path:
     assert heartbeat
     assert archive_path.is_file()
     assert window.session is original_session
-    assert window.session.snapshot.model.version == "0.1.1"
+    assert window.session.snapshot.model.version == "0.1.0"
 
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *_args, **_kwargs: (str(archive_path), "ZIP (*.zip)"))
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *_args, **_kwargs: str(parent))
@@ -257,9 +234,10 @@ def test_gui_archive_export_and_import_run_without_blocking_the_window(tmp_path:
     assert window.session.snapshot.model.version == "0.1.0"
     assert root.joinpath("project.yaml").is_file()
 
-    source = tmp_path / "images"
+    source = ROOT / "examples" / "demo-game" / "assets" / "images" / "animals" / "enemy"
     imported = ("assets/images/from-folder/leaf.png",)
-    monkeypatch.setattr(window.controller.service, "import_image_folder", lambda *_args, **_kwargs: imported)
+    import_events = []
+    window.controller.service.event_logger = lambda event, **context: import_events.append((event, context))
 
     class ImportCapture:
         folder_button = QPushButton()
@@ -268,7 +246,7 @@ def test_gui_archive_export_and_import_run_without_blocking_the_window(tmp_path:
             self.finished = (paths, error, message)
 
         def set_import_progress(self, *_args):
-            pass
+            self.progress = getattr(self, "progress", []) + [_args]
 
     capture = ImportCapture()
     window._image_manager_dialog = capture
@@ -276,6 +254,12 @@ def test_gui_archive_export_and_import_run_without_blocking_the_window(tmp_path:
     qtbot.waitUntil(lambda: window._version_task is None, timeout=15000)
     assert capture.finished[1] is None, capture.finished[1].diagnostic
     assert capture.finished == (imported, None, None)
+    assert len(capture.progress) == 2
+    assert all(len(progress) == 3 for progress in capture.progress)
+    assert (window.session.snapshot.root / imported[0]).read_bytes() == (source / "leaf.png").read_bytes()
+    assert window._version_busy_id is None
+    assert [item[1]["status"] for item in import_events] == ["started", "succeeded"]
+    assert all("path" not in item[1] for item in import_events)
 
     active_session = window.session
     errors = []

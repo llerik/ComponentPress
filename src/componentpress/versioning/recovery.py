@@ -11,8 +11,8 @@ import zipfile
 from componentpress.diagnostics.logging import log_event
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.platforms.services import ProjectWriteLock
-from componentpress.project_io.files import atomic_write, file_hash
-from componentpress.project_io.yaml_codec import dump_yaml, parse_project, update_tree
+from componentpress.project_io.files import file_hash
+from componentpress.project_io.yaml_codec import parse_project
 from componentpress.versioning.repository import _verify_archive
 
 
@@ -125,14 +125,10 @@ def _recover_publication(root: Path, project_id: str, operation: Path, record: d
     if record.get("operation_id") != operation.name or record.get("project_id") != project_id:
         raise ValueError("идентификатор операции не совпадает с журналом")
     target = _archive_target(record)
-    project_path = root / "project.yaml"
     if not target.is_file() or file_hash(target) != record["archive_hash"]:
         _discard_unpublished(operation)
         return None
     _verify_recovery_archive(target, project_id, record)
-    result = _apply_version_patch(project_path, record)
-    if result is not None:
-        return result
     _remove_recovery_journal(operation)
     shutil.rmtree(operation, ignore_errors=True)
     return None
@@ -165,32 +161,3 @@ def _archive_target(record: dict) -> Path:
 def _discard_unpublished(operation: Path) -> None:
     (operation / "publish.json").unlink(missing_ok=True)
     shutil.rmtree(operation, ignore_errors=True)
-
-
-def _apply_version_patch(project_path: Path, record: dict) -> Diagnostic | None:
-    project_hash = file_hash(project_path)
-    if project_hash == record["project_hash"]:
-        _patch_project_version(project_path, record)
-        return None
-    model, _ = parse_project(project_path.read_text(encoding="utf-8"), project_path)
-    if model.id != record["project_id"] or model.version != record["next_version"]:
-        return Diagnostic(
-            "VERSION_RECOVERY_CONFLICT", "архив опубликован, но описание проекта изменено; версия не повышена", project_path,
-        )
-    return None
-
-
-def _patch_project_version(project_path: Path, record: dict) -> None:
-    from componentpress.versioning.repository import _recover_pending_registration
-
-    _recover_pending_registration(project_path.parent)
-    _model, tree = parse_project(project_path.read_text(encoding="utf-8"), project_path)
-    model, _ = parse_project(project_path.read_text(encoding="utf-8"), project_path)
-    if model.id != record["project_id"] or model.version != record["project_version"]:
-        raise ValueError("версия проекта отличается от журнала")
-    updated = model.model_copy(update={"version": record["next_version"]})
-    update_tree(tree, updated)
-    operation_id = record["operation_id"]
-    _log_phase("project.archive.recovery.patch", "publishing", "started", operation_id)
-    atomic_write(project_path, dump_yaml(tree).encode("utf-8"), record["project_hash"])
-    _log_phase("project.archive.recovery.patch", "publishing", "succeeded", operation_id)

@@ -18,7 +18,7 @@ def test_application_service_uses_fake_ports_without_adapters():
     class Archives:
         def export(self, snapshot, target, **kwargs):
             calls.append(("export", snapshot, target, kwargs))
-            return ArchiveExportResult(target, "0.1.1", True)
+            return ArchiveExportResult(target, "0.1.0", True)
 
         def restore_path(self, archive, destination, **kwargs):
             calls.append(("restore", archive, destination, kwargs))
@@ -30,7 +30,7 @@ def test_application_service_uses_fake_ports_without_adapters():
             return "snapshot"
 
     service = VersionService(Archives(), Projects())
-    assert service.export("snapshot", Path("game.zip")) == ArchiveExportResult(Path("game.zip"), "0.1.1", True)
+    assert service.export("snapshot", Path("game.zip")) == ArchiveExportResult(Path("game.zip"), "0.1.0", True)
     assert service.restore("game.zip", Path("restored")) == "snapshot"
     assert [call[0] for call in calls] == ["export", "restore", "open"]
 
@@ -52,7 +52,7 @@ def test_zip_adapter_locks_canonical_project_and_logs_safe_start_and_finish(monk
 
     def export(*_args, **_kwargs):
         assert held[-1][0] == "enter"
-        return ArchiveExportResult(Path("archive.zip"), "0.1.1", True)
+        return ArchiveExportResult(Path("archive.zip"), "0.1.0", True)
 
     monkeypatch.setattr(archive_module, "log_event", lambda event, **context: events.append((event, context)))
     monkeypatch.setattr(archive_module, "export_project_version", export)
@@ -100,7 +100,7 @@ def test_logging_sink_failure_does_not_change_archive_result(monkeypatch, tmp_pa
         def __exit__(self, *_args): pass
 
     monkeypatch.setattr(archive_module, "log_event", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("log sink")))
-    monkeypatch.setattr(archive_module, "export_project_version", lambda *_args, **_kwargs: ArchiveExportResult(Path("archive.zip"), "0.1.1", True))
+    monkeypatch.setattr(archive_module, "export_project_version", lambda *_args, **_kwargs: ArchiveExportResult(Path("archive.zip"), "0.1.0", True))
     adapter = ZipArchiveRepository(object(), Lock, diagnostic_formatter=str)
     assert adapter.export(snapshot, Path("archive.zip")).postprocessing_complete is True
 
@@ -126,6 +126,6 @@ def test_published_archive_recovers_when_journal_removal_fails(monkeypatch, tmp_
     assert journal.is_file()
 
     monkeypatch.setattr(Path, "unlink", real_unlink)
-    assert projects.open(root).model.version == "0.1.1"
-    assert projects.open(root).model.version == "0.1.1"
+    assert projects.open(root).model.version == "0.1.0"
+    assert projects.open(root).model.version == "0.1.0"
     assert not list((root / ".componentpress" / "versioning").glob("*/publish.json"))

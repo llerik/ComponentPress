@@ -23,7 +23,7 @@ from componentpress.project_io.archive_snapshots import EXCLUDED_ROOTS
 from componentpress.project_io.files import atomic_write, file_hash
 from componentpress.project_io.paths import validate_relative_path
 from componentpress.application.ports import ProjectRepository, WriteLockFactory
-from componentpress.project_io.yaml_codec import dump_yaml, parse_project, update_tree
+from componentpress.project_io.yaml_codec import parse_project
 from componentpress.project_io.yaml_codec import parse_component
 from componentpress.diagnostics.logging import log_event, log_exception
 from componentpress.i18n import tr
@@ -73,12 +73,6 @@ def _digest(stream, cancellation=None) -> tuple[str, int]:
     return hasher.hexdigest(), size
 
 
-def _version_step(version: str) -> str:
-    parts = [int(part) for part in version.split(".")]
-    parts[2] += 1
-    return ".".join(str(part) for part in parts)
-
-
 @dataclass
 class _Export:
     snapshot: ProjectSnapshot
@@ -89,8 +83,7 @@ class _Export:
     cancellation: object
     on_progress: object
     diagnostic_formatter: Callable[[Diagnostic], str]
-    old_version: str
-    new_version: str
+    project_version: str
     operation_root: Path
     copied: Path
     project_path: Path
@@ -98,7 +91,6 @@ class _Export:
     published: bool = False
     files: dict | None = None
     directories: list | None = None
-    old_project_hash: str = ""
 
 
 def _read_manifest(archive: zipfile.ZipFile) -> tuple[dict, list[zipfile.ZipInfo]]:
@@ -334,7 +326,7 @@ def _new_export(snapshot, target, replace, cancellation, on_progress, formatter,
     operation_root = root / ".componentpress" / "versioning" / operation_id
     return _Export(
         snapshot, target, root, operation_id, replace, cancellation, on_progress, formatter,
-        snapshot.model.version, _version_step(snapshot.model.version), operation_root,
+        snapshot.model.version, operation_root,
         operation_root / "snapshot", root / "project.yaml",
     )
 
@@ -369,7 +361,7 @@ def _check_snapshot_target(state):
 def _check_snapshot_project(state):
     project_path = state.copied / "project.yaml"
     archived, _ = parse_project(project_path.read_text(encoding="utf-8"), project_path)
-    if archived.id != state.snapshot.model.id or archived.version != state.old_version:
+    if archived.id != state.snapshot.model.id or archived.version != state.project_version:
         raise ProjectError(Diagnostic("ARCHIVE_SOURCE_CHANGED", "проект изменился после подготовки снимка", state.project_path))
     if state.files["project.yaml"]["sha256"] != state.snapshot.disk_hash:
         raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "описание проекта изменилось после чтения", state.project_path))
@@ -413,7 +405,7 @@ def _write_archive_entries(archive, state):
 def _write_archive(state, archived_project):
     manifest = {
         "format_version": FORMAT_VERSION, "project_id": state.snapshot.model.id,
-        "project_version": state.old_version, "schema_version": archived_project.schema_version,
+        "project_version": state.project_version, "schema_version": archived_project.schema_version,
         "files": state.files, "directories": state.directories,
     }
     with zipfile.ZipFile(state.temporary, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
@@ -443,14 +435,13 @@ def _build_archive(state):
 def _validate_publication(state):
     _check_cancel(state.cancellation)
     current = _metadata(state.temporary)
-    if current["project_id"] != state.snapshot.model.id or current["project_version"] != state.old_version:
+    if current["project_id"] != state.snapshot.model.id or current["project_version"] != state.project_version:
         raise ProjectError(Diagnostic("ARCHIVE_VERIFY", "манифест архива не совпадает с проектом", state.temporary))
-    state.old_project_hash = file_hash(state.project_path)
-    if state.old_project_hash != state.snapshot.disk_hash:
+    if file_hash(state.project_path) != state.snapshot.disk_hash:
         raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "описание проекта изменилось во время архивации", state.project_path))
-    conflict = _version_conflict(state.root, state.snapshot.model.id, state.old_version, state.target)
+    conflict = _version_conflict(state.root, state.snapshot.model.id, state.project_version, state.target)
     if conflict is not None and not (state.replace and conflict.resolve() == state.target.resolve(strict=False)):
-        raise ProjectError(Diagnostic("ARCHIVE_VERSION_EXISTS", f"архив версии {state.old_version} уже существует: {conflict}; явно подтвердите замену", conflict))
+        raise ProjectError(Diagnostic("ARCHIVE_VERSION_EXISTS", f"архив версии {state.project_version} уже существует: {conflict}; явно подтвердите замену", conflict))
     verify_source_inventory(state.root, state.files, state.directories, cancellation=state.cancellation, on_progress=state.on_progress)
     _check_cancel(state.cancellation)
 
@@ -459,8 +450,7 @@ def _write_publication_journal(state):
     journal = state.operation_root / "publish.json"
     record = {
         "operation_id": state.operation_id, "target": str(state.target),
-        "project_id": state.snapshot.model.id, "project_version": state.old_version,
-        "next_version": state.new_version, "project_hash": state.old_project_hash,
+        "project_id": state.snapshot.model.id, "project_version": state.project_version,
         "archive_hash": file_hash(state.temporary),
     }
     _log_phase("project.archive.journal", "publishing", "started", state.operation_id)
@@ -480,28 +470,21 @@ def _replace_archive(state):
     _log_phase("project.archive.publish", "publishing", "succeeded", state.operation_id)
 
 
-def _patch_published_version(state):
-    _recover_pending_registration(state.root)
-    model, _ = parse_project(state.project_path.read_text(encoding="utf-8"), state.project_path)
-    _original, tree = parse_project(state.project_path.read_text(encoding="utf-8"), state.project_path)
-    updated = model.model_copy(update={"version": state.new_version})
-    update_tree(tree, updated)
-    _log_phase("project.archive.version_patch", "publishing", "started", state.operation_id)
-    result = atomic_write(state.project_path, dump_yaml(tree).encode("utf-8"), state.old_project_hash)
-    _log_phase("project.archive.version_patch", "publishing", "succeeded", state.operation_id)
-    return result
-
-
 def _publish_archive(state) -> ArchiveExportResult:
     _validate_publication(state)
     journal = _write_publication_journal(state)
     _replace_archive(state)
     try:
-        _patch_published_version(state)
+        _log_phase("project.archive.journal", "publishing", "started", state.operation_id)
         journal.unlink(missing_ok=True)
-        return ArchiveExportResult(state.target, state.new_version, True)
-    except ProjectError as exc:
-        return ArchiveExportResult(state.target, state.new_version, False, state.diagnostic_formatter(exc.diagnostic))
+        _log_phase("project.archive.journal", "publishing", "succeeded", state.operation_id)
+        return ArchiveExportResult(state.target, state.project_version, True)
+    except (OSError, ProjectError) as exc:
+        diagnostic = exc.diagnostic if isinstance(exc, ProjectError) else Diagnostic(
+            "ARCHIVE_CLEANUP_PENDING", "", state.target, message_key="error.archive_cleanup_pending",
+        )
+        detail = state.diagnostic_formatter(diagnostic)
+        return ArchiveExportResult(state.target, state.project_version, False, detail)
 
 
 def _cleanup_export(state):
@@ -518,14 +501,15 @@ def _handle_project_export_error(state, error: ProjectError) -> ArchiveExportRes
     if not state.published:
         _discard_export_journal(state)
         raise error
-    return ArchiveExportResult(state.target, state.new_version, False, state.diagnostic_formatter(error.diagnostic))
+    return ArchiveExportResult(state.target, state.project_version, False, state.diagnostic_formatter(error.diagnostic))
 
 
 def _handle_io_export_error(state, error: OSError | zipfile.BadZipFile | ValueError) -> ArchiveExportResult:
     if not state.published:
         _discard_export_journal(state)
         raise ProjectError(Diagnostic("ARCHIVE_EXPORT", f"ошибка создания архива: {error}", state.target)) from error
-    return ArchiveExportResult(state.target, state.new_version, False, f"не удалось обновить версию проекта: {error}")
+    diagnostic = Diagnostic("ARCHIVE_EXPORT_PENDING", str(error), state.target, message_key="error.archive_export_pending")
+    return ArchiveExportResult(state.target, state.project_version, False, state.diagnostic_formatter(diagnostic))
 
 
 def _discard_export_journal(state):
@@ -697,6 +681,6 @@ class ZipArchiveRepository:
     @staticmethod
     def _log_export_result(result, operation_id):
         if not result.postprocessing_complete:
-            _safe_log("project.archive.version_patch", operation="archive", phase="publishing", status="failed", code="VERSION_PATCH", operation_id=operation_id)
+            _safe_log("project.archive.journal", operation="archive", phase="publishing", status="failed", code="CLEANUP_PENDING", operation_id=operation_id)
         _safe_log("project.archive", operation="archive", phase="finished", status="succeeded", operation_id=operation_id)
 

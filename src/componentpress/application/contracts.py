@@ -139,10 +139,10 @@ class PngArchiveResult:
 
 @dataclass(frozen=True)
 class ArchiveExportResult:
-    """Archive location and whether version patch and journal removal completed."""
+    """Archive location and whether publication journal cleanup completed."""
 
     path: Path
-    next_version: str
+    project_version: str
     postprocessing_complete: bool
     detail: str | None = None
 

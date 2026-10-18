@@ -91,8 +91,8 @@
       "path": "src/componentpress/application/project_service.py",
       "name": "ProjectService.update_project_settings",
       "line": 163,
-      "length": 44,
-      "stage": "5а",
+      "length": 58,
+      "stage": "schema-7",
       "owner": "coder:src/componentpress/application"
     },
     "src/componentpress/bindings/grammar.py|parse_references": {
@@ -1162,6 +1162,12 @@
       "line": 9,
       "stage": "9а",
       "owner": "coder:src/componentpress/editor"
+    },
+    "src/componentpress/application/project_service.py|ProjectService.update_project_settings|from|pydantic.ValidationError": {
+      "line": 177,
+      "stage": "schema-7",
+      "owner": "coder:src/componentpress/application",
+      "count": 1
     }
   },
   "cycles": {

@@ -1161,15 +1161,14 @@ class MainWindow(QMainWindow):
 
     def _report_archive_export(self, result: ArchiveExportResult) -> None:
         if not result.postprocessing_complete:
-            version = self.session.snapshot.model.version if self.session is not None else tr("archive.unknown_version")
             QMessageBox.warning(
                 self, tr("archive.published_title"),
-                tr("archive.postprocessing_pending", path=result.path, version=version, detail=result.detail or ""),
+                tr("archive.postprocessing_pending", path=result.path, detail=result.detail or ""),
             )
             return
         assert self.session is not None
         self.setWindowTitle(f"{self.session.snapshot.model.name} — ComponentPress")
-        self.statusBar().showMessage(tr("archive.export_succeeded", path=result.path, version=result.next_version), 10000)
+        self.statusBar().showMessage(tr("archive.export_succeeded", path=result.path, version=result.project_version), 10000)
 
     def _image_folder_import_finished(self, paths: tuple[str, ...], owner: str | None) -> None:
         if owner is None or owner != self._version_busy_id:
@@ -1182,33 +1181,26 @@ class MainWindow(QMainWindow):
     def project_settings_dialog(self) -> None:
         if self.session is None or not self._user_editing_allowed():
             return
-        model = self.session.snapshot.model
         dialog = ProjectSettingsDialog(self.session, self.controller.preview, self)
-        if dialog.exec() != dialog.DialogCode.Accepted:
-            return
-        values = dialog.values()
-        try:
-            old_parts = tuple(int(part) for part in model.version.split("."))
-            new_parts = tuple(int(part) for part in values["version"].split("."))
-            if len(new_parts) == 3 and new_parts < old_parts:
-                answer = QMessageBox.warning(
-                    self, "Понижение версии", "Понижение версии может привести к конфликту имени архива. Продолжить?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                    QMessageBox.StandardButton.Cancel,
+        while dialog.exec() == dialog.DialogCode.Accepted:
+            values = dialog.values()
+            try:
+                self.controller.update_project_settings(
+                    name=values["name"], version=values["version"], prod=values["prod"], test=values["test"],
+                    data_source_file=values["source_file"],
+                    clear_data_source=not values["source"] and values["source_file"] is None,
                 )
-                if answer != QMessageBox.StandardButton.Yes:
+                self.setWindowTitle(f"{values['name']} — ComponentPress")
+                self._invalidate_preview_cache()
+                self._active_tab_changed(self.tabs.currentIndex())
+                return
+            except ProjectError as exc:
+                self._show_error(exc)
+                if exc.diagnostic.code not in {"PROJECT_VERSION_INVALID", "PROJECT_SETTINGS_INVALID"}:
                     return
-            self.controller.update_project_settings(
-                name=values["name"], version=values["version"], prod=values["prod"], test=values["test"],
-                data_source_file=values["source_file"],
-                clear_data_source=not values["source"] and values["source_file"] is None,
-            )
-            self.setWindowTitle(f"{values['name']} — ComponentPress")
-            self._invalidate_preview_cache()
-            self._active_tab_changed(self.tabs.currentIndex())
-        except (ProjectError, ValidationError, ValueError, OSError) as exc:
-            self._show_error(exc)
-            return
+            except (ValidationError, ValueError, OSError) as exc:
+                self._show_error(exc)
+                return
 
     def open_image_manager(self) -> None:
         if self.session is None or not self._operation_allowed("resource_write"):
@@ -1255,7 +1247,8 @@ class MainWindow(QMainWindow):
         self._start_version_task(
             request,
             lambda cancellation, progress: self.controller.service.import_image_folder(
-                request.root, request.source, request.folder, cancellation=cancellation, on_progress=progress
+                request.root, request.source, request.folder, cancellation=cancellation,
+                on_progress=lambda completed, total: progress(completed, total, ""),
             ),
         )
 

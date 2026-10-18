@@ -102,8 +102,8 @@ if sys.argv[3:] == ["componentpress.application.preview_service"]:
     from componentpress.domain.values import DataRow, DataSheetSnapshot
 
     root = Path("unwritten-project")
-    component = ComponentDefinition(schema_version=6, id="card", name="Card", size_mm=SizeMM(width=40, height=30))
-    project = ProjectDefinition(schema_version=6, id="game", name="Game", version="0.0.1",
+    component = ComponentDefinition(schema_version=7, id="card", name="Card", size_mm=SizeMM(width=40, height=30))
+    project = ProjectDefinition(schema_version=7, id="game", name="Game", version="0.0.1",
                                 components=(ComponentRef(id="card", path="components/card.yaml"),))
     document = DocumentSnapshot(root / "components/card.yaml", "", "", component)
     snapshot = ProjectSnapshot(root, "", "", project, {"card": document})
@@ -200,7 +200,7 @@ if sys.argv[3:] == ["componentpress.application.version_service"]:
 
     class Archive:
         def export(self, snapshot, target, **options):
-            return ArchiveExportResult(target, "0.1.1", True)
+            return ArchiveExportResult(target, "0.1.0", True)
 
         def restore_path(self, archive_path, destination, **options):
             return destination
@@ -210,7 +210,7 @@ if sys.argv[3:] == ["componentpress.application.version_service"]:
             return root
 
     service = VersionService(Archive(), Projects())
-    assert service.export(object(), "archive.zip") == ArchiveExportResult("archive.zip", "0.1.1", True)
+    assert service.export(object(), "archive.zip") == ArchiveExportResult("archive.zip", "0.1.0", True)
     assert service.restore("archive.zip", "restored") == "restored"
 if all(module.startswith("componentpress.domain.") for module in sys.argv[3:]):
     assert not any(name.startswith("componentpress.application.") for name in sys.modules), "domain imported application"

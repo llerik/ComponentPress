@@ -96,9 +96,9 @@ class ProjectDefinition(StrictModel):
 
     @field_validator("version")
     @classmethod
-    def semantic_version(cls, value: str) -> str:
-        if not re.fullmatch(r"\d+\.\d+\.\d+", value):
-            raise ValueError("версия должна иметь вид major.minor.patch")
+    def portable_version(cls, value: str) -> str:
+        if len(value) > 5 or any(character in '<>:"/\\|?*' or ord(character) < 32 for character in value):
+            raise ValueError("версия должна содержать не более 5 символов и не содержать символы имени файла")
         return value
 
     @field_validator("icons")

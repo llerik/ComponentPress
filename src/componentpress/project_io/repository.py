@@ -93,7 +93,7 @@ class FileProjectRepository:
             f"schema_version: {SCHEMA_VERSION}\n"
             f"id: {project_id}\n"
             f"name: {json.dumps(name, ensure_ascii=False)}\n"
-            'version: "0.1.0"\n'
+            'version: "1.0"\n'
             "variables: {}\n"
             "icons: {}\n"
             "data_source: null\n"

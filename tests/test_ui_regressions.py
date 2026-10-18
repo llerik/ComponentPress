@@ -50,8 +50,8 @@ def text_node(**changes):
 
 
 def snapshot(tmp_path, elements):
-    project = ProjectDefinition(schema_version=6, id="test", name="Test", version="0.1.0")
-    component = ComponentDefinition(schema_version=6, id="card", name="Card",
+    project = ProjectDefinition(schema_version=7, id="test", name="Test", version="0.1.0")
+    component = ComponentDefinition(schema_version=7, id="card", name="Card",
                                     size_mm=SizeMM(width=30, height=20), elements=tuple(elements))
     return ProjectSnapshot(tmp_path, "", "", project,
                            {"card": DocumentSnapshot(tmp_path / "card.yaml", "", "", component)})

@@ -418,12 +418,16 @@ def test_excel_picker_preserves_nested_project_path_and_reuses_workbook(tmp_path
     root = tmp_path / "game"
     shutil.copytree(source_root, root)
     service = project_service()
+    events = []
+    service.event_logger = lambda event, **context: events.append((event, context))
     window = MainWindow(ProjectController(service))
     use_temp_ui_settings(window, tmp_path)
     window.load_session(service.open_session(root))
     qtbot.addWidget(window)
+    events.clear()
     workbook_before = (root / "data/game.xlsx").read_bytes()
     dialog = ProjectSettingsDialog(window.session, window.controller.preview, window)
+    dialog.version.setText("34.0")
     monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **kw: (str(root / "data/game.xlsx"), "")))
     dialog._choose_file()
     assert dialog.source.text() == "data/game.xlsx"
@@ -432,10 +436,47 @@ def test_excel_picker_preserves_nested_project_path_and_reuses_workbook(tmp_path
         data_source_file=dialog.values()["source_file"],
     )
     assert window.session.snapshot.model.data_source.path == "data/game.xlsx"
+    assert window.session.snapshot.model.version == "34.0"
+    assert events[-1][1]["status"] == "succeeded"
     reopened = FileProjectRepository().open(root)
     assert reopened.model.data_source.path == "data/game.xlsx"
     assert (root / "data/game.xlsx").read_bytes() == workbook_before
     assert sorted(path.name for path in (root / "data").glob("*.xlsx")) == ["game.xlsx"]
+
+
+@pytest.mark.parametrize("locale", ("ru", "en"))
+def test_invalid_version_is_localized_and_rejected_before_excel_copy(tmp_path: Path, qtbot, locale: str) -> None:
+    from componentpress.i18n import set_language, tr
+
+    set_language(locale)
+    source_root = Path(__file__).resolve().parents[1] / "examples" / "demo-excel-game"
+    root = tmp_path / "game"
+    shutil.copytree(source_root, root)
+    external = tmp_path / "outside.xlsx"
+    shutil.copy2(root / "data/game.xlsx", external)
+    service = project_service()
+    events = []
+    service.event_logger = lambda event, **context: events.append((event, context))
+    window = MainWindow(ProjectController(service))
+    use_temp_ui_settings(window, tmp_path)
+    window.load_session(service.open_session(root))
+    qtbot.addWidget(window)
+    events.clear()
+    before = (root / "project.yaml").read_bytes()
+
+    from componentpress.domain.diagnostics import ProjectError
+
+    with pytest.raises(ProjectError) as caught:
+        service.update_project_settings(
+            window.session, name="Game", version="toolong", prod="Prod", test="Debug",
+            data_source_file=external,
+        )
+    assert caught.value.diagnostic.code == "PROJECT_VERSION_INVALID"
+    assert tr("error.project_version_invalid") in format_error(caught.value)
+    assert (root / "project.yaml").read_bytes() == before
+    assert not (root / "data/outside.xlsx").exists()
+    assert events[0][1] == {"operation": "project_settings", "status": "started"}
+    assert events[-1][1]["code"] == "PROJECT_VERSION_INVALID"
 
 
 def test_project_settings_external_nested_book_and_conflict_are_safe(tmp_path: Path, qtbot) -> None:
@@ -522,18 +563,27 @@ def test_blank_errors_and_invalid_project_version_have_useful_message(tmp_path: 
         DialogCode = QDialog.DialogCode
 
         def __init__(self, *_args):
-            pass
+            self.calls = 0
 
         def exec(self):
-            return QDialog.DialogCode.Accepted
+            self.calls += 1
+            return QDialog.DialogCode.Accepted if self.calls == 1 else QDialog.DialogCode.Rejected
 
         def values(self):
-            return {"name": "Game", "version": "bad", "prod": "Prod", "test": "Debug", "source": "", "source_file": None}
+            return {"name": "Game", "version": "too long", "prod": "Prod", "test": "Debug", "source": "", "source_file": None}
 
-    monkeypatch.setattr(main_window_module, "ProjectSettingsDialog", InvalidSettingsDialog)
+    instances = []
+
+    def make_invalid_dialog(*args):
+        dialog = InvalidSettingsDialog(*args)
+        instances.append(dialog)
+        return dialog
+
+    monkeypatch.setattr(main_window_module, "ProjectSettingsDialog", make_invalid_dialog)
     window.project_settings_dialog()
-    assert window.session.snapshot.model.version != "bad"
-    assert errors and str(errors[0]).strip()
+    assert instances[0].calls == 2
+    assert window.session.snapshot.model.version != "too long"
+    assert errors and errors[0].diagnostic.code == "PROJECT_VERSION_INVALID"
 
     shown = []
     monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda _parent, _title, message: shown.append(message)))
@@ -909,7 +959,7 @@ def test_component_creation_and_deletion_round_trip_preserves_draft_and_tab(tmp_
     monkeypatch.setattr(Path, "unlink", unlink)
     tab = window.active_tab
     document = window.session.documents["third"]
-    window._draft_changed(tab, "schema_version: 6\nid: third\nname: [неверный черновик]\n")
+    window._draft_changed(tab, "schema_version: 7\nid: third\nname: [неверный черновик]\n")
     window._undo()
     assert "third" not in window.session.documents
     assert not (root / "components" / "third.yaml").exists()
@@ -917,7 +967,7 @@ def test_component_creation_and_deletion_round_trip_preserves_draft_and_tab(tmp_
     assert window.session.documents["third"] is document
     assert window.active_tab is tab
     assert document.has_invalid_draft
-    assert document.draft_text.startswith("schema_version: 6")
+    assert document.draft_text.startswith("schema_version: 7")
     assert service.projects.open(root).documents["third"].model.name == "Третий компонент"
     assert not errors, errors
 

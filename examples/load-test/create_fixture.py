@@ -62,7 +62,7 @@ def main() -> None:
 
         safe = sheet.lower()
         color, pale, accent = PALETTES[sheet_index]
-        component = f'''schema_version: 6
+        component = f'''schema_version: 7
 id: {safe}
 name: "{sheet}"
 size_mm:
@@ -142,7 +142,7 @@ elements:
         (ROOT / "components" / f"{safe}.yaml").write_text(component, encoding="utf-8")
 
     refs = "\n".join(f"- id: {sheet.lower()}\n  path: components/{sheet.lower()}.yaml" for sheet in SHEETS)
-    project = f'''schema_version: 6
+    project = f'''schema_version: 7
 id: lorem-ipsum-load-test
 name: "Lorem Ipsum load test"
 version: "0.1.0"

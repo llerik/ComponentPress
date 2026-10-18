@@ -293,7 +293,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     if saved.model.background != "#DDEEFF" or "# Проверка текстового режима" not in saved.committed.text:
         return _smoke_failure(root, inspect.currentframe().f_lineno)
-    if saved.model.schema_version != 6 or not {node.type for node in saved.model.elements}.issuperset({"rectangle", "ellipse", "line"}):
+    if saved.model.schema_version != 7 or not {node.type for node in saved.model.elements}.issuperset({"rectangle", "ellipse", "line"}):
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     if not any(node.id == "smoke-group" for node in saved.model.elements):
         return _smoke_failure(root, inspect.currentframe().f_lineno)
@@ -340,13 +340,13 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     original_snapshot = window.session.snapshot
     version_result = window.controller.service.versions.export(original_snapshot, version_zip)
     if (
-        version_result.path != version_zip or version_result.next_version != "0.1.1"
+        version_result.path != version_zip or version_result.project_version != "0.1.0"
         or not version_result.postprocessing_complete or version_result.detail is not None
         or not version_zip.is_file()
     ):
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     promoted_snapshot = window.controller.service.projects.open(root)
-    if promoted_snapshot.model.version != "0.1.1":
+    if promoted_snapshot.model.version != "0.1.0":
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     window.session.replace_snapshot(promoted_snapshot, saved=set(promoted_snapshot.documents))
     try:

@@ -16,7 +16,7 @@ from componentpress.domain.values import DataRow, DataSheetSnapshot
 
 def _component(component_id: str, *, name: str | None = None, bound: bool = False) -> ComponentDefinition:
     return ComponentDefinition(
-        schema_version=6, id=component_id, name=name or component_id,
+        schema_version=7, id=component_id, name=name or component_id,
         size_mm=SizeMM(width=40, height=30),
         data=DataBinding(sheet="Sheet") if bound else None,
     )
@@ -24,7 +24,7 @@ def _component(component_id: str, *, name: str | None = None, bound: bool = Fals
 
 def _snapshot(root: Path, components: tuple[ComponentDefinition, ...]) -> ProjectSnapshot:
     project = ProjectDefinition(
-        schema_version=6, id=root.name, name=root.name, version="0.1.0",
+        schema_version=7, id=root.name, name=root.name, version="0.1.0",
         data_source=DataSource(path="source.xlsx") if any(item.data for item in components) else None,
         components=tuple(ComponentRef(id=item.id, path=f"components/{item.id}.yaml") for item in components),
     )

@@ -67,7 +67,7 @@ class ProjectSettingsDialog(QDialog):
 
     def values(self) -> dict:
         return {
-            "name": self.name.text().strip(), "version": self.version.text().strip(),
+            "name": self.name.text().strip(), "version": self.version.text(),
             "prod": self.prod.text().strip(), "test": self.test.text().strip(),
             "source": self.source.text().strip(), "source_file": self._picked_file,
         }

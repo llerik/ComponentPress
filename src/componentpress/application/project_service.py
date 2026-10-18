@@ -207,11 +207,27 @@ class ProjectService:
         session.replace_snapshot(updated)
         return "main"
 
+    @_logged("project_settings")
     def update_project_settings(self, session: ProjectSession, *, name: str, version: str,
                                 prod: str, test: str, data_source_file: Path | None = None,
                                 clear_data_source: bool = False) -> None:
         from componentpress.project_io.files import file_hash
         from componentpress.project_io.paths import resolve_project_path
+        from pydantic import ValidationError
+
+        current = session.snapshot.model
+        from componentpress.domain.project import ProjectDefinition
+        try:
+            ProjectDefinition.model_validate(current.model_dump(mode="python") | {
+                "name": name, "version": version,
+                "copies_columns": {"prod": prod, "test": test},
+            })
+        except ValidationError as exc:
+            field = str(exc.errors()[0]["loc"][0])
+            code = "PROJECT_VERSION_INVALID" if field == "version" else "PROJECT_SETTINGS_INVALID"
+            key = "error.project_version_invalid" if field == "version" else "error.project_settings_invalid"
+            raise ProjectError(Diagnostic(code, "", field=field, message_key=key)) from exc
+
         source_path = session.snapshot.model.data_source.path if session.snapshot.model.data_source else None
         created_path: Path | None = None
         created_hash: str | None = None
@@ -229,7 +245,6 @@ class ProjectService:
                 source_path = None
             if source_path is None and any(document.model.data is not None for document in session.documents.values()):
                 raise ProjectError(Diagnostic("DATA_SOURCE_IN_USE", "сначала отвяжите листы компонентов от Excel", session.snapshot.root))
-            current = session.snapshot.model
             from componentpress.domain.project import CopiesColumns, DataSource, ProjectDefinition
             candidate = ProjectDefinition.model_validate(current.model_dump(mode="python") | {
                 "name": name, "version": version,
