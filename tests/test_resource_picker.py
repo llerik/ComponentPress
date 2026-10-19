@@ -11,27 +11,28 @@ from componentpress.editor import main_window
 from componentpress.editor.main_window import MainWindow
 from componentpress.i18n import set_language
 from componentpress.project_io.repository import FileProjectRepository
+from componentpress.domain.project import ProjectDefinition
+from componentpress.domain.project import IconDefinition
 
 
 @pytest.mark.parametrize("language", ("ru", "en"))
 def test_picker_selects_existing_image_and_double_click_matches_ok(tmp_path: Path, qtbot, language: str) -> None:
     set_language(language)
     root = tmp_path / "project"
-    image_path = root / "assets" / "images" / "nested" / "card.png"
+    image_path = root / "assets" / "images" / "card.png"
     image_path.parent.mkdir(parents=True)
     assert QImage(2, 2, QImage.Format.Format_RGB32).save(str(image_path))
     for double_click in (False, True):
         picker = dialogs.ResourcePickerDialog(root, lambda *_: "")
         qtbot.addWidget(picker)
-        index = picker.model.index(str(image_path))
-        qtbot.waitUntil(index.isValid, timeout=3000)
-        picker.tree.setCurrentIndex(index)
+        index = picker.images.model().index(0, 0)
+        picker.images.setCurrentIndex(index)
         if double_click:
-            picker.tree.doubleClicked.emit(index)
+            picker.images.itemDoubleClicked.emit(picker.images.item(0))
         else:
             picker._accept_selection()
         assert picker.result() == QDialog.DialogCode.Accepted
-        assert picker.selected_path == "assets/images/nested/card.png"
+        assert picker.selected_path == "assets/images/card.png"
         picker.close()
 
 
@@ -48,42 +49,33 @@ def test_picker_import_cancel_success_and_error_do_not_leak_partial_selection(tm
     assert calls == []
 
     monkeypatch.setattr(dialogs.QFileDialog, "getOpenFileName", lambda *args: (str(source), ""))
-    monkeypatch.setattr(dialogs.QInputDialog, "getText", lambda *args: ("", False))
     picker._import()
-    assert picker.result() == 0
-    assert calls == []
-
-    monkeypatch.setattr(dialogs.QInputDialog, "getText", lambda *args: ("//nested\\sub/", True))
-    picker._import()
-    assert calls == [(source, "nested/sub")]
+    assert calls == [(source, "")]
     assert picker.result() == QDialog.DialogCode.Accepted
     assert picker.selected_path == "assets/images/new.png"
 
 
-def test_picker_rejects_a_directory_without_accepting(tmp_path: Path, qtbot, monkeypatch) -> None:
+def test_picker_shows_only_flat_registered_image_files(tmp_path: Path, qtbot, monkeypatch) -> None:
     root = tmp_path / "project"
     directory = root / "assets" / "images" / "nested"
     directory.mkdir(parents=True)
     picker = dialogs.ResourcePickerDialog(root, lambda *_: "")
     qtbot.addWidget(picker)
-    index = picker.model.index(str(directory))
-    qtbot.waitUntil(index.isValid, timeout=3000)
-    picker.tree.setCurrentIndex(index)
     notices = []
     monkeypatch.setattr(dialogs.QMessageBox, "information", lambda *args: notices.append(args[-1]))
     picker._accept_selection()
     assert picker.result() == 0
     assert picker.selected_path == ""
-    assert notices
+    assert picker.images.count() == 0
 
 
 def test_picker_import_error_keeps_dialog_open_and_manager_still_constructs(tmp_path: Path, qtbot, monkeypatch) -> None:
     picker = dialogs.ResourcePickerDialog(tmp_path / "project", lambda *_: (_ for _ in ()).throw(ValueError("import failed")))
-    manager = dialogs.ImageManagerDialog(tmp_path / "project", lambda *_: "", lambda *_: None)
+    project = ProjectDefinition(schema_version=8, id="game", name="Game", version="1.0")
+    manager = dialogs.ImageManagerDialog(tmp_path / "project", project, lambda *_: "", lambda *_: None, lambda *_: None, lambda *_: None, lambda *_: None)
     qtbot.addWidget(picker)
     qtbot.addWidget(manager)
     monkeypatch.setattr(dialogs.QFileDialog, "getOpenFileName", lambda *args: ("source.png", ""))
-    monkeypatch.setattr(dialogs.QInputDialog, "getText", lambda *args: ("", True))
     shown = []
     monkeypatch.setattr(dialogs.QMessageBox, "critical", lambda *args: shown.append(args[-1]))
     picker._import()
@@ -91,6 +83,72 @@ def test_picker_import_error_keeps_dialog_open_and_manager_still_constructs(tmp_
     assert picker.selected_path == ""
     assert shown == ["import failed"]
     assert manager.folderImportRequested is not None
+
+
+def test_image_manager_reveals_properties_and_keys_for_selected_tile(tmp_path: Path, qtbot) -> None:
+    root = tmp_path / "project"
+    image_path = root / "assets" / "images" / "magic.png"
+    image_path.parent.mkdir(parents=True)
+    image = QImage(8, 8, QImage.Format.Format_ARGB32)
+    image.fill(0xFFFF00FF)
+    assert image.save(str(image_path), "PNG")
+    project = ProjectDefinition(
+        schema_version=8, id="game", name="Game", version="1.0",
+        images=("assets/images/magic.png",),
+        icons={"image_2": IconDefinition(path="assets/images/magic.png", width_px=8, height_px=8)},
+    )
+    manager = dialogs.ImageManagerDialog(root, project, lambda *_: "", lambda *_: None, lambda *_: None, lambda *_: None, lambda *_: None)
+    qtbot.addWidget(manager)
+    assert manager.images.count() == 1
+    manager.images.setCurrentRow(0)
+    assert manager.keys.count() == 1
+    assert manager.keys.item(0).text() == "image_2 — 8×8 px"
+    qtbot.waitUntil(lambda: manager.details.maximumWidth() > 0, timeout=1000)
+    assert "8 × 8 px" in manager.properties.text()
+
+    manager.images.clearSelection()
+    qtbot.waitUntil(lambda: manager.details.maximumWidth() == 0, timeout=1000)
+    assert manager.keys.count() == 0
+    manager.refresh()
+    assert not manager.images.selectedItems()
+    assert manager.details.maximumWidth() == 0
+    manager.images.setCurrentRow(0)
+    qtbot.waitUntil(lambda: manager.details.maximumWidth() > 0, timeout=1000)
+
+
+@pytest.mark.parametrize("language, title", (("ru", "Редактировать ключ изображения"), ("en", "Edit image key")))
+def test_image_key_double_click_opens_populated_editor(tmp_path: Path, qtbot, monkeypatch, language: str, title: str) -> None:
+    from componentpress.i18n import set_language
+
+    set_language(language)
+    root = tmp_path / "project"
+    image_path = root / "assets" / "images" / "magic.png"
+    image_path.parent.mkdir(parents=True)
+    image = QImage(8, 8, QImage.Format.Format_ARGB32)
+    image.fill(0xFFFF00FF)
+    assert image.save(str(image_path), "PNG")
+    project = ProjectDefinition(
+        schema_version=8, id="game", name="Game", version="1.0",
+        images=("assets/images/magic.png",),
+        icons={"image_2": IconDefinition(path="assets/images/magic.png", width_px=120001, height_px=60001)},
+    )
+    updates = []
+    manager = dialogs.ImageManagerDialog(
+        root, project, lambda *_: "", lambda *_: None, lambda *_: None,
+        lambda *args: updates.append(args), lambda *_: None,
+    )
+    qtbot.addWidget(manager)
+    manager.images.setCurrentRow(0)
+    key = manager.keys.item(0)
+    monkeypatch.setattr(dialogs.ImageKeyDialog, "exec", lambda dialog: QDialog.DialogCode.Accepted)
+    manager.keys.itemDoubleClicked.emit(key)
+    assert updates == [("image_2", "image_2", 120001, 60001)]
+
+    editor = dialogs.ImageKeyDialog("image_2", 120001, 60001, editing=True)
+    qtbot.addWidget(editor)
+    assert editor.windowTitle() == title
+    assert editor.name.text() == "image_2"
+    assert (editor.width.value(), editor.height.value()) == (120001, 60001)
 @pytest.mark.parametrize("language", ("ru", "en"))
 def test_image_and_html_add_dialogs_only_apply_accepted_picker_results(tmp_path: Path, qtbot, monkeypatch, language: str) -> None:
     from componentpress.i18n import set_language
@@ -102,7 +160,7 @@ def test_image_and_html_add_dialogs_only_apply_accepted_picker_results(tmp_path:
     qtbot.addWidget(html)
     image.source.setText("existing.png")
     original_html = html.html.toPlainText()
-    monkeypatch.setattr(dialogs, "ResourcePickerDialog", lambda *_: SimpleNamespace(
+    monkeypatch.setattr(dialogs, "ResourcePickerDialog", lambda *_, **__: SimpleNamespace(
         selected_path="picked.png", exec=lambda: QDialog.DialogCode.Rejected,
     ))
     image._choose()
@@ -110,7 +168,7 @@ def test_image_and_html_add_dialogs_only_apply_accepted_picker_results(tmp_path:
     assert image.source.text() == "existing.png"
     assert html.html.toPlainText() == original_html
 
-    monkeypatch.setattr(dialogs, "ResourcePickerDialog", lambda *_: SimpleNamespace(
+    monkeypatch.setattr(dialogs, "ResourcePickerDialog", lambda *_, **__: SimpleNamespace(
         selected_path="picked.png", exec=lambda: QDialog.DialogCode.Accepted,
     ))
     image._choose()
@@ -138,7 +196,7 @@ def test_main_window_html_insert_uses_picker_path_and_updates_only_after_accepta
     fake_window = SimpleNamespace(
         _selected_ids=lambda: ("heading",),
         _user_editing_allowed=lambda: True,
-        session=SimpleNamespace(snapshot=SimpleNamespace(root=root), documents={"forest-card": document}),
+        session=SimpleNamespace(snapshot=SimpleNamespace(root=root, model=SimpleNamespace(images=())), documents={"forest-card": document}),
         active_tab=SimpleNamespace(component_id="forest-card"),
         element_properties=SimpleNamespace(
             insert_html_image=lambda *args: calls.append(args),
@@ -147,7 +205,7 @@ def test_main_window_html_insert_uses_picker_path_and_updates_only_after_accepta
         _import_image=lambda *_args: "",
         _edit_selected_node=lambda *_args: None,
     )
-    monkeypatch.setattr(main_window, "ResourcePickerDialog", lambda *_: SimpleNamespace(
+    monkeypatch.setattr(main_window, "ResourcePickerDialog", lambda *_, **__: SimpleNamespace(
         selected_path="assets/images/picked.png", DialogCode=QDialog.DialogCode,
         exec=lambda: QDialog.DialogCode.Accepted,
     ))
@@ -174,7 +232,7 @@ def test_main_window_html_insert_cancel_preserves_html_and_history(tmp_path: Pat
     fake_window = SimpleNamespace(
         _selected_ids=lambda: ("heading",),
         _user_editing_allowed=lambda: True,
-        session=SimpleNamespace(snapshot=SimpleNamespace(root=root), documents={"forest-card": document}),
+        session=SimpleNamespace(snapshot=SimpleNamespace(root=root, model=SimpleNamespace(images=())), documents={"forest-card": document}),
         active_tab=SimpleNamespace(component_id="forest-card"),
         element_properties=SimpleNamespace(
             insert_html_image=lambda *args: commits.append(args),
@@ -183,7 +241,7 @@ def test_main_window_html_insert_cancel_preserves_html_and_history(tmp_path: Pat
         _import_image=lambda *_args: "",
         _edit_selected_node=lambda *args: edits.append(args),
     )
-    monkeypatch.setattr(main_window, "ResourcePickerDialog", lambda *_: SimpleNamespace(
+    monkeypatch.setattr(main_window, "ResourcePickerDialog", lambda *_, **__: SimpleNamespace(
         selected_path="assets/images/unused.png", DialogCode=QDialog.DialogCode,
         exec=lambda: QDialog.DialogCode.Rejected,
     ))

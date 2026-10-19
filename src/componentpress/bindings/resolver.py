@@ -149,8 +149,8 @@ class BindingResolver:
                 raise self._resource_error(exc, location, source_cell) from exc
         return value
 
-    def resolve_html(self, template: str, row: DataRow | None, location: BindingLocation) -> str:
-        parser = _BindingHtmlParser(self, row, location)
+    def resolve_html(self, template: str, row: DataRow | None, location: BindingLocation, *, content_mode: str = "manual") -> str:
+        parser = _BindingHtmlParser(self, row, location, content_mode)
         parser.feed(template)
         parser.close()
         html = "".join(parser.output)
@@ -231,6 +231,14 @@ class BindingResolver:
                             path_template = self._cell_text(cell, location, node.source_column or "")
                     if not empty_source and node.source_mode == "column":
                         try:
+                            from pathlib import PurePosixPath
+                            filename = PurePosixPath(path_template)
+                            if filename.name != path_template or "/" in path_template or "\\" in path_template:
+                                raise ProjectError(Diagnostic(
+                                    "IMAGE_FILENAME_INVALID", "в столбце должно быть имя файла изображения",
+                                    owner, location.field, message_key="error.image_excel_filename",
+                                ))
+                            path_template = f"assets/images/{path_template}"
                             validate_relative_path(path_template)
                             if self.validate_resources:
                                 self.loader.image(path_template, owner=owner, field=location.field)
@@ -258,12 +266,13 @@ class BindingResolver:
                                 message_key=exc.diagnostic.message_key, params=exc.diagnostic.params,
                                 incident_id=exc.diagnostic.incident_id,
                             )) from exc
-                        if parse_references(html):
+                        if "{{" in html:
                             raise ProjectError(Diagnostic("COLUMN_TEMPLATE_FORBIDDEN", "содержимое Excel не может содержать подстановки", owner, location.field, source=source, sheet=sheet, cell=cell.coordinate, node_id=node.id))
                         html = expand_html_icons(
                             html, self.project.icons, loader=self.loader if self.validate_resources else None, owner=owner,
                             field=location.field, source=source, sheet=sheet,
                             cell=cell.coordinate, node_id=node.id,
+                            strict_unknown=False,
                         )
                         try:
                             validate_html(html, owner, location.field)
@@ -275,7 +284,7 @@ class BindingResolver:
                                 incident_id=exc.diagnostic.incident_id,
                             )) from exc
                     else:
-                        html = self.resolve_html(html, row, location)
+                        html = self.resolve_html(html, row, location, content_mode="manual")
                     resolved.append(node.model_copy(update={"html": html, "content_mode": "manual", "content_column": None}))
                 elif isinstance(node, ConditionalGroupNode):
                     condition_matches = None
@@ -369,11 +378,12 @@ class BindingResolver:
 
 
 class _BindingHtmlParser(HTMLParser):
-    def __init__(self, resolver: BindingResolver, row: DataRow | None, location: BindingLocation):
+    def __init__(self, resolver: BindingResolver, row: DataRow | None, location: BindingLocation, content_mode: str):
         super().__init__(convert_charrefs=False)
         self.resolver = resolver
         self.row = row
         self.location = location
+        self.content_mode = content_mode
         self.output: list[str] = []
         self.resources: list[tuple[str, CellValue | None]] = []
 
@@ -404,7 +414,58 @@ class _BindingHtmlParser(HTMLParser):
         self.output.append(f"</{tag}>")
 
     def handle_data(self, data: str) -> None:
-        self.output.append(self.resolver.resolve_text(data, self.row, self.location, icons=True))
+        def expand_source(value: str, *, strict_unknown: bool = True) -> str:
+            return expand_html_icons(
+                value, self.resolver.project.icons,
+                loader=self.resolver.loader if self.resolver.validate_resources else None,
+                owner=self.location.owner, field=self.location.field,
+                source=self.location.source, sheet=self.location.sheet,
+                cell="", node_id=self.location.node_id,
+                strict_unknown=strict_unknown,
+            )
+
+        if self.content_mode != "manual":
+            self.output.append(expand_source(data, strict_unknown=False))
+            return
+        pieces: list[str] = []
+        cursor = 0
+        for reference in parse_references(data):
+            start, end = self.resolver._span(data, reference)
+            pieces.append(expand_source(data[cursor:start]))
+            if reference.kind == "column":
+                if self.row is None:
+                    raise ProjectError(Diagnostic(
+                        "COLUMN_WITHOUT_DATA", f"столбец {reference.name!r} без строки данных",
+                        self.location.owner, self.location.field, node_id=self.location.node_id,
+                    ))
+                cell = self.row.values.get(reference.name)
+                if cell is None:
+                    raise ProjectError(Diagnostic(
+                        "COLUMN_UNKNOWN", f"нет столбца {reference.name!r}", self.location.owner,
+                        self.location.field, source=self.location.source, sheet=self.location.sheet,
+                        node_id=self.location.node_id,
+                    ))
+                value = self.resolver._cell_text(cell, self.location, reference.name)
+                pieces.append(expand_icons(
+                    value, self.resolver.project.icons,
+                    loader=self.resolver.loader if self.resolver.validate_resources else None,
+                    owner=self.location.owner, field=self.location.field,
+                    source=self.location.source, sheet=self.location.sheet,
+                    cell=cell.coordinate, node_id=self.location.node_id,
+                ))
+                cursor = end
+                continue
+            else:
+                if reference.name not in self.resolver.project.variables:
+                    raise ProjectError(Diagnostic(
+                        "VARIABLE_UNKNOWN", f"нет переменной {reference.name!r}",
+                        self.location.owner, self.location.field, node_id=self.location.node_id,
+                    ))
+                value = self.resolver._expression("vars", reference.name, {"vars": self.resolver.project.variables})
+            pieces.append(escape(value, quote=False))
+            cursor = end
+        pieces.append(expand_source(data[cursor:]))
+        self.output.append("".join(pieces))
 
     def handle_entityref(self, name: str) -> None:
         self.output.append(f"&{name};")

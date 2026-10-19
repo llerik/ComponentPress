@@ -68,7 +68,7 @@ def test_both_modes_validate_resources_in_zero_quantity_rows(tmp_path: Path) -> 
     root = _copy_demo(tmp_path)
     workbook_path = root / "data" / "game.xlsx"
     workbook = load_workbook(workbook_path)
-    workbook["Карты"]["D3"] = "assets/images/missing-zero-row.png"
+    workbook["Карты"]["D3"] = "missing-zero-row.png"
     workbook.save(workbook_path)
     workbook.close()
     service = project_service()

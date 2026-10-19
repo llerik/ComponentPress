@@ -216,7 +216,7 @@ def test_new_default_element_names_use_english_catalog(tmp_path: Path, qtbot, mo
         window.open_component("forest-card")
         window._draw_element("rectangle", 1, 1, 8, 6)
         assert window.add_html("<p>English</p>", 2, 3)
-        assert window.add_image("assets/images/animals/enemy/leaf.png", 8, 8)
+        assert window.add_image("assets/images/leaf.png", 8, 8)
         names = {node.type: node.name for node in window.session.documents["forest-card"].model.elements if node.type in {"rectangle", "html", "image"}}
         assert names == {"rectangle": "Rectangle 1", "html": "HTML text 1", "image": "Image 1"}
         window._set_selection((next(node.id for node in window.session.documents["forest-card"].model.elements if node.type == "rectangle"),), source="tree")

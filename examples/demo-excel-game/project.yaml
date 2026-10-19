@@ -1,21 +1,176 @@
 %YAML 1.2
 ---
 # Пример проекта второго этапа; расширен для демонстрации этапа 6
-schema_version: 7
+schema_version: 8
 id: demo-game
 name: "Лесная игра"
 version: "0.1.0"
 variables:
   edition: "Первый прототип"
+images:
+- assets/images/leaf.png
+- assets/images/leaf-small.png
+- assets/images/background_chain.png
+- assets/images/background_monsters.png
+- assets/images/base.png
+- assets/images/build.png
+- assets/images/chain.png
+- assets/images/character.png
+- assets/images/crown.png
+- assets/images/first_building.png
+- assets/images/happiness.png
+- assets/images/level_1.png
+- assets/images/level_2.png
+- assets/images/level_3.png
+- assets/images/love.png
+- assets/images/magic_build.png
+- assets/images/magic_war.png
+- assets/images/move-back.png
+- assets/images/ogre.png
+- assets/images/pay.png
+- assets/images/piece-skull (1).png
+- assets/images/pluse_magic.png
+- assets/images/pluse_monstaer.png
+- assets/images/pluse_one.png
+- assets/images/pluse_three.png
+- assets/images/pluse_trap.png
+- assets/images/pluse_two.png
+- assets/images/remove.png
+- assets/images/right.png
+- assets/images/second_building.png
+- assets/images/size1.png
+- assets/images/size2.png
+- assets/images/size3+.png
+- assets/images/size3.png
+- assets/images/star.png
+- assets/images/take_card.png
+- assets/images/third_building.png
+- assets/images/type_defender.png
+- assets/images/type_mage.png
+- assets/images/type_shooter.png
+- assets/images/type_warrior.png
+- assets/images/unhappy.png
+- assets/images/war.png
+- assets/images/work.png
+- assets/images/buildings_archery.png
+- assets/images/buildings_crowned-heart.png
+- assets/images/buildings_graveyard.png
+- assets/images/buildings_hatchery.png
+- assets/images/buildings_lair.png
+- assets/images/buildings_library.png
+- assets/images/buildings_mine.png
+- assets/images/buildings_portal.png
+- assets/images/buildings_prison.png
+- assets/images/buildings_training.png
+- assets/images/buildings_treasury.png
+- assets/images/buildings_tunnel.png
+- assets/images/buildings_workshop.png
+- assets/images/characteristics_armour.png
+- assets/images/characteristics_armour_magic.png
+- assets/images/characteristics_attack.png
+- assets/images/characteristics_attack_magic.png
+- assets/images/characteristics_black.png
+- assets/images/characteristics_damage.png
+- assets/images/characteristics_distance.png
+- assets/images/characteristics_health.png
+- assets/images/characteristics_initiative.png
+- assets/images/effects_attack.png
+- assets/images/effects_defence.png
+- assets/images/effects_discard.png
+- assets/images/effects_reset.png
+- assets/images/effects_show.png
+- assets/images/event_locked-chest.png
+- assets/images/event_open-chest.png
+- assets/images/event_wolf-trap.png
+- assets/images/field_ancient-altar.png
+- assets/images/field_cursed-archives.png
+- assets/images/field_geysers.png
+- assets/images/field_glowing-stones.png
+- assets/images/field_granite.png
+- assets/images/field_ground.png
+- assets/images/field_lava.png
+- assets/images/field_place-of-power.png
+- assets/images/field_stalactites.png
+- assets/images/field_treasure.png
+- assets/images/field_water-grotto.png
+- assets/images/heroes_archer.png
+- assets/images/heroes_archer_b.png
+- assets/images/heroes_dwarf.png
+- assets/images/heroes_dwarf_b.png
+- assets/images/heroes_knight.png
+- assets/images/heroes_knight_b.png
+- assets/images/heroes_paladin.png
+- assets/images/heroes_paladin_b.png
+- assets/images/heroes_prist.png
+- assets/images/heroes_prist_b.png
+- assets/images/heroes_spider-gigant.png
+- assets/images/heroes_spider-gigant_b.png
+- assets/images/heroes_spider-poisonous.png
+- assets/images/heroes_spider-poisonous_b.png
+- assets/images/heroes_spider.png
+- assets/images/heroes_spider_b.png
+- assets/images/heroes_wizard.png
+- assets/images/heroes_wizard_b.png
+- assets/images/monsters_black_knight.png
+- assets/images/monsters_black_knight_b.png
+- assets/images/monsters_dark_elf.png
+- assets/images/monsters_dark_elf_b.png
+- assets/images/monsters_demon.png
+- assets/images/monsters_demon_b.png
+- assets/images/monsters_goblin.png
+- assets/images/monsters_goblin_b.png
+- assets/images/monsters_ork.png
+- assets/images/monsters_ork_b.png
+- assets/images/monsters_plant.png
+- assets/images/monsters_plant_b.png
+- assets/images/monsters_salamander.png
+- assets/images/monsters_salamander_b.png
+- assets/images/monsters_skeleton+b.png
+- assets/images/monsters_skeleton.png
+- assets/images/monsters_troll.png
+- assets/images/monsters_troll_b.png
+- assets/images/monsters_vampire.png
+- assets/images/monsters_vampire_b.png
+- assets/images/monsters_warlock.png
+- assets/images/monsters_warlock_b.png
+- assets/images/monsters_zombie.png
+- assets/images/monsters_zombie_b.png
+- assets/images/resources_bonfire.png
+- assets/images/resources_carrion.png
+- assets/images/resources_cemetery.png
+- assets/images/resources_chicken-leg.png
+- assets/images/resources_coin.png
+- assets/images/resources_fight-spirit.png
+- assets/images/resources_hourglass.png
+- assets/images/resources_potion.png
+- assets/images/resources_prisoner.png
+- assets/images/resources_victory.png
+- assets/images/traps_boulder-dash.png
+- assets/images/traps_crush.png
+- assets/images/traps_falling-blob.png
+- assets/images/traps_firewall.png
+- assets/images/traps_foot-trip.png
+- assets/images/traps_mimic-chest.png
+- assets/images/traps_quicksand.png
+- assets/images/traps_spiked-wall.png
+- assets/images/traps_spiky-pit.png
+- assets/images/traps_steel-door.png
+- assets/images/traps_striking-splinter.png
+- assets/images/traps_wooden-door.png
+- assets/images/type_death.png
+- assets/images/type_green.png
+- assets/images/type_magic.png
+- assets/images/type_mechanic.png
+- assets/images/type_nature.png
 icons:
   ic_leaf_6:
-    path: assets/images/animals/enemy/leaf.png
-    width_mm: 6.0
-    height_mm: 6.0
+    path: assets/images/leaf.png
+    width_px: 32
+    height_px: 32
   ic_leaf_3:
-    path: assets/images/icons/effects/leaf-small.png
-    width_mm: 3.0
-    height_mm: 3.0
+    path: assets/images/leaf-small.png
+    width_px: 16
+    height_px: 16
 data_source:
   path: data/game.xlsx
 copies_columns:

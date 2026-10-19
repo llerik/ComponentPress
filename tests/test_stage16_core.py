@@ -20,7 +20,7 @@ from ruamel.yaml.comments import CommentedMap
 
 
 def _component(elements=(), *, component_id="card", width=63, height=88):
-    return ComponentDefinition(schema_version=7, id=component_id, name=component_id,
+    return ComponentDefinition(schema_version=8, id=component_id, name=component_id,
                                size_mm=SizeMM(width=width, height=height), elements=tuple(elements))
 
 
@@ -229,15 +229,15 @@ def test_image_folder_import_flattens_names_and_rolls_back_on_collision(tmp_path
     _png(source / "root.png")
     _png(source / "nested" / "icon.png", "#00FF00")
     repo = ResourceRepository()
-    paths = repo.import_image_folder(root, source, "cards")
-    assert paths == ("assets/images/cards/root.png", "assets/images/cards/nested_icon.png")
+    paths = repo.import_image_folder(root, source)
+    assert paths == ("assets/images/root.png", "assets/images/nested_icon.png")
     assert len(repo.list_images(root)) == 2
     conflict = tmp_path / "conflict"
     conflict.mkdir()
     _png(conflict / "root.png", "#0000FF")
     with pytest.raises(Exception):
-        repo.import_image_folder(root, conflict, "cards")
-    assert (root / "assets/images/cards/root.png").read_bytes() == (source / "root.png").read_bytes()
+        repo.import_image_folder(root, conflict)
+    assert (root / "assets/images/root.png").read_bytes() == (source / "root.png").read_bytes()
     assert not list((root / ".componentpress" / "resource-imports").glob("*/journal.json"))
 
 
@@ -267,7 +267,7 @@ def test_image_folder_import_rolls_back_a_partial_publish(tmp_path, monkeypatch)
     assert not list((root / ".componentpress" / "transactions" / "resource-imports").glob("*.json"))
 
 
-def test_optional_blank_image_round_trips_in_schema_six_yaml():
+def test_optional_blank_image_round_trips_in_current_schema_yaml():
     component = _component((ImageNode(id="optional", name="Optional", type="image", x_mm=0, y_mm=0,
                                      width_mm=10, height_mm=10, source="", optional=True),))
     tree = CommentedMap()
@@ -276,21 +276,18 @@ def test_optional_blank_image_round_trips_in_schema_six_yaml():
     assert parsed == component
 
 
-def test_image_replacement_keeps_path_and_rejects_stale_hash(tmp_path):
+def test_reimporting_an_identical_image_is_idempotent(tmp_path):
     root = tmp_path / "project"
     images = root / "assets/images"
     images.mkdir(parents=True)
     target = images / "portrait.png"
     old = _png(target)
-    source = tmp_path / "new.png"
-    new = _png(source, "#0000FF")
+    source = tmp_path / "portrait.png"
+    source.write_bytes(old)
     repo = ResourceRepository()
-    from componentpress.project_io.files import file_hash
-    expected = file_hash(target)
-    repo.replace_image(root, "assets/images/portrait.png", source, expected)
-    assert target.read_bytes() == new and target.exists()
-    with pytest.raises(Exception):
-        repo.replace_image(root, "assets/images/portrait.png", source, expected)
+    assert repo.import_image(root, source) == "assets/images/portrait.png"
+    assert repo.import_image(root, source) == "assets/images/portrait.png"
+    assert target.read_bytes() == old
 
 
 def test_same_size_components_share_page_in_project_order():

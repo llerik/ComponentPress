@@ -88,7 +88,6 @@ def _add_component_commands(commands) -> None:
     image = commands.add_parser("import-image", help=tr("cli.import_image"))
     image.add_argument("folder", type=Path)
     image.add_argument("source", type=Path)
-    image.add_argument("--into", default="", help=tr("cli.import_image_into"))
 
 
 def _add_render_command(commands) -> None:
@@ -180,7 +179,7 @@ def _update_project(args, service) -> int | None:
         service.register(args.folder, args.id, args.name)
         print(tr("cli.add_ok"))
     elif args.command == "import-image":
-        print(service.import_image(args.folder, args.source, args.into))
+        print(service.import_image(args.folder, args.source))
     else:
         return None
     return 0

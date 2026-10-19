@@ -18,8 +18,8 @@ def main() -> None:
     cards = book.active
     cards.title = "Карты"
     cards.append(["ID", "Название", "Описание", "Изображение", "Сила", "Количество", "Дата", "Флаг", "Prod", "Debug", "Заголовок HTML"])
-    cards.append(["wolf", "Волк", r"Атака ic_leaf_6 и ic_leaf_3; буквально \ic_leaf_3", "assets/images/animals/enemy/leaf.png", "=3+4", 2, date(2026, 10, 3), True, 2, 1, "<p><b>Волк</b></p>"])
-    cards.append(["fox", "Лиса", "Тихая карта ic_leaf_3", "assets/images/animals/enemy/leaf.png", 2.5, 1, None, False, 0, 3, "<p><b>Лиса</b></p>"])
+    cards.append(["wolf", "Волк", r"Атака ic_leaf_6 и ic_leaf_3; буквально \ic_leaf_3", "leaf.png", "=3+4", 2, date(2026, 10, 3), True, 2, 1, "<p><b>Волк</b></p>"])
+    cards.append(["fox", "Лиса", "Тихая карта ic_leaf_3", "leaf.png", 2.5, 1, None, False, 0, 3, "<p><b>Лиса</b></p>"])
     events = book.create_sheet("События")
     events.append(["ID", "Название", "Prod", "Debug", "Заголовок HTML"])
     events.append(["event-1", "Лесной дождь", 1, 0, "<p><b>Лесной дождь</b></p>"])

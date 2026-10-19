@@ -38,7 +38,7 @@ EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "demo-game"
 
 def simple_component() -> ComponentDefinition:
     return ComponentDefinition(
-        schema_version=7,
+        schema_version=8,
         id="card",
         name="Карта",
         size_mm=SizeMM(width=63, height=88),
@@ -138,7 +138,7 @@ def test_drop_into_group_preserves_world_position_and_sibling_drop_sets_order() 
 
 def test_grouping_keeps_comments_attached_to_moved_nodes(tmp_path: Path) -> None:
     path = tmp_path / "card.yaml"
-    text = """schema_version: 7
+    text = """schema_version: 8
 id: card
 name: Card
 size_mm: {width: 63, height: 88}
@@ -217,7 +217,7 @@ def test_gui_add_group_undo_redo_save_and_export(tmp_path: Path, qtbot, monkeypa
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Discard))
     window, root = editor(tmp_path, qtbot, monkeypatch)
     assert window.add_html("<p>Новый текст</p>", 2, 3, node_id="new-title")
-    assert window.add_image("assets/images/animals/enemy/leaf.png", 8, 9, node_id="new-art")
+    assert window.add_image("assets/images/leaf.png", 8, 9, node_id="new-art")
     assert window.session is not None and window.active_tab is not None
     model = window.session.documents["forest-card"].model
     assert locations(model)["new-title"].node.width_mm == 40

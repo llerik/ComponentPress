@@ -135,6 +135,7 @@ class ElementProperties(QWidget):
     nodeChanged = Signal(dict)
     rotationRequested = Signal(float)
     insertImageRequested = Signal()
+    selectImageRequested = Signal()
     colorRequested = Signal(str)
 
     def __init__(self, parent=None):
@@ -161,6 +162,16 @@ class ElementProperties(QWidget):
         self.optional_image.setObjectName("optionalImage")
         self.source_edit = QLineEdit()
         self.source_edit.setObjectName("imageSource")
+        self.source_edit.setReadOnly(True)
+        self.source_button = QPushButton(tr("ui.choose"))
+        self.source_button.setObjectName("chooseImageSource")
+        self.source_button.clicked.connect(self.selectImageRequested)
+        source_row = QWidget()
+        self.source_row = source_row
+        source_layout = QHBoxLayout(source_row)
+        source_layout.setContentsMargins(0, 0, 0, 0)
+        source_layout.addWidget(self.source_edit, 1)
+        source_layout.addWidget(self.source_button)
         self.fit_combo = QComboBox()
         self.fit_combo.setObjectName("imageFit")
         self.fit_combo.addItems(["contain", "cover", "stretch"])
@@ -258,7 +269,7 @@ class ElementProperties(QWidget):
         form.addRow(tr("ui.height_mm"), self.height_spin)
         form.addRow(tr("ui.rotation"), self.rotation_spin)
         form.addRow(tr("ui.optional_image"), self.optional_image)
-        form.addRow(tr("ui.image"), self.source_edit)
+        form.addRow(tr("ui.image"), source_row)
         form.addRow(tr("ui.content_source"), self.content_mode)
         form.addRow(tr("ui.excel_column"), self.content_column)
         form.addRow(tr("ui.condition_column"), self.condition_column)
@@ -522,7 +533,6 @@ class ElementProperties(QWidget):
         html = isinstance(node, HtmlNode)
         self.form.setRowVisible(self.name_edit, True)
         self.name_edit.setText(node.name)
-        self.form.setRowVisible(self.source_edit, image)
         self.form.setRowVisible(self.fit_combo, image)
         self.form.setRowVisible(self.content_mode, image or html)
         if image:
@@ -583,7 +593,7 @@ class ElementProperties(QWidget):
             self.name_edit, self.x_spin, self.y_spin, self.width_spin, self.height_spin, self.rotation_spin,
             self.condition_column, self.condition_operator, self.condition_value, self.optional_image, self.stroke_button, self.fill_button, self.stroke_color, self.fill_color, self.no_fill_button,
             self.stroke_width, self.stroke_style, self.line_dx, self.line_dy,
-            self.source_edit, self.fit_combo, self.content_mode, self.content_column,
+            self.source_edit, self.source_button, self.fit_combo, self.content_mode, self.content_column,
             self.font_combo, self.font_spin, self.color_edit, self.color_swatch,
             self.html_edit, self.insert_image, self.apply_html,
             *self.alignment_buttons.values(),
@@ -639,6 +649,7 @@ class ElementProperties(QWidget):
         image = node_type == "image"
         manual = self.content_mode.currentData() == "manual"
         self.form.setRowVisible(self.content_column, (html or image) and not manual)
+        self.form.setRowVisible(self.source_row, image and manual)
         for widget in (self.html_edit, self.insert_image, self.apply_html):
             widget.setVisible(html and manual)
 

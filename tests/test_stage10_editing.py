@@ -154,29 +154,29 @@ def test_arrow_hold_batches_repeats_and_blocked_group_warning_cannot_reenter(
 
 def _component() -> ComponentDefinition:
     return ComponentDefinition(
-        schema_version=7,
+        schema_version=8,
         id="card",
         name="Card",
         size_mm=SizeMM(width=63, height=88),
         elements=(
-            ImageNode(id="back", name="Back", type="image", x_mm=2, y_mm=3, width_mm=10, height_mm=8, source="assets/images/animals/enemy/leaf.png"),
-            ImageNode(id="front", name="Front", type="image", x_mm=20, y_mm=15, width_mm=5, height_mm=12, source="assets/images/animals/enemy/leaf.png"),
+            ImageNode(id="back", name="Back", type="image", x_mm=2, y_mm=3, width_mm=10, height_mm=8, source="assets/images/leaf.png"),
+            ImageNode(id="front", name="Front", type="image", x_mm=20, y_mm=15, width_mm=5, height_mm=12, source="assets/images/leaf.png"),
             GroupNode(
                 id="group", name="Group", type="group", x_mm=40, y_mm=35,
-                children=(ImageNode(id="child", name="Child", type="image", x_mm=3, y_mm=4, width_mm=8, height_mm=5, source="assets/images/animals/enemy/leaf.png"),),
+                children=(ImageNode(id="child", name="Child", type="image", x_mm=3, y_mm=4, width_mm=8, height_mm=5, source="assets/images/leaf.png"),),
             ),
         ),
     )
 
 
-def test_project_and_new_component_templates_use_shared_schema_six(tmp_path: Path) -> None:
+def test_project_and_new_component_templates_use_shared_schema_eight(tmp_path: Path) -> None:
     repository = project_repository()
     snapshot = repository.create(tmp_path / "game", "Game")
-    assert snapshot.model.schema_version == 7
+    assert snapshot.model.schema_version == 8
     snapshot = repository.add_component(snapshot, "card", "Card")
-    assert snapshot.documents["card"].model.schema_version == 7
-    assert snapshot.model.schema_version == snapshot.documents["card"].model.schema_version == SCHEMA_VERSION == 7
-    assert "schema_version: 7" in snapshot.documents["card"].text
+    assert snapshot.documents["card"].model.schema_version == 8
+    assert snapshot.model.schema_version == snapshot.documents["card"].model.schema_version == SCHEMA_VERSION == 8
+    assert "schema_version: 8" in snapshot.documents["card"].text
 
 
 @pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6, "5", "true", "5.0", 5.0])
@@ -189,7 +189,7 @@ def test_old_or_mistyped_project_schema_is_rejected_without_rewriting(tmp_path: 
     if version == "true":
         scalar = "true"
     scalar = "true" if version == "true" else scalar
-    project.write_text(source.replace("schema_version: 7", f"schema_version: {scalar}", 1), encoding="utf-8")
+    project.write_text(source.replace("schema_version: 8", f"schema_version: {scalar}", 1), encoding="utf-8")
     original = project.read_bytes()
     with pytest.raises(ProjectError) as caught:
         project_repository().open(root)
@@ -201,7 +201,7 @@ def test_old_component_schema_is_rejected_without_rewriting(tmp_path: Path) -> N
     root = tmp_path / "game"
     shutil.copytree(ROOT / "examples" / "demo-game", root)
     component = root / "components" / "forest-card.yaml"
-    component.write_text(component.read_text(encoding="utf-8").replace("schema_version: 7", "schema_version: 4", 1), encoding="utf-8")
+    component.write_text(component.read_text(encoding="utf-8").replace("schema_version: 8", "schema_version: 4", 1), encoding="utf-8")
     original = component.read_bytes()
     with pytest.raises(ProjectError) as caught:
         project_repository().open(root)
@@ -230,7 +230,7 @@ def test_document_models_require_schema_version_to_be_strict_integer_seven(model
 ])
 def test_css_is_rejected_from_manual_component_html(tmp_path: Path, markup: str) -> None:
     owner = tmp_path / "card.yaml"
-    text = f'''schema_version: 7
+    text = f'''schema_version: 8
 id: card
 name: Card
 size_mm: {{width: 63, height: 88}}
@@ -300,10 +300,10 @@ def test_geometry_alignment_uses_node_and_group_bounds(edge: str) -> None:
 def test_lock_inheritance_guards_visual_edits_but_allows_sibling_reordering() -> None:
     component = _component().model_copy(update={
         "elements": (
-            ImageNode(id="free", name="Free", type="image", x_mm=1, y_mm=1, width_mm=2, height_mm=2, source="assets/images/animals/enemy/leaf.png"),
-            ImageNode(id="locked", name="Locked", type="image", x_mm=4, y_mm=1, width_mm=2, height_mm=2, source="assets/images/animals/enemy/leaf.png", locked=True),
+            ImageNode(id="free", name="Free", type="image", x_mm=1, y_mm=1, width_mm=2, height_mm=2, source="assets/images/leaf.png"),
+            ImageNode(id="locked", name="Locked", type="image", x_mm=4, y_mm=1, width_mm=2, height_mm=2, source="assets/images/leaf.png", locked=True),
             GroupNode(id="parent", name="Parent", type="group", x_mm=10, y_mm=10, locked=True, children=(
-                ImageNode(id="inherited", name="Inherited", type="image", x_mm=1, y_mm=1, width_mm=2, height_mm=2, source="assets/images/animals/enemy/leaf.png"),
+                ImageNode(id="inherited", name="Inherited", type="image", x_mm=1, y_mm=1, width_mm=2, height_mm=2, source="assets/images/leaf.png"),
             )),
         ),
     })
@@ -338,10 +338,10 @@ def test_font_picker_preserves_unknown_saved_family_without_emitting_a_change(qt
 
 def test_visual_lock_guard_allows_layer_crossing_and_preserves_yaml_edit_path() -> None:
     component = ComponentDefinition(
-        schema_version=7, id="card", name="Card", size_mm=SizeMM(width=63, height=88),
+        schema_version=8, id="card", name="Card", size_mm=SizeMM(width=63, height=88),
         elements=(
-            ImageNode(id="locked", name="Locked", type="image", x_mm=1, y_mm=1, width_mm=2, height_mm=2, source="assets/images/animals/enemy/leaf.png", locked=True),
-            ImageNode(id="free", name="Free", type="image", x_mm=4, y_mm=1, width_mm=2, height_mm=2, source="assets/images/animals/enemy/leaf.png"),
+            ImageNode(id="locked", name="Locked", type="image", x_mm=1, y_mm=1, width_mm=2, height_mm=2, source="assets/images/leaf.png", locked=True),
+            ImageNode(id="free", name="Free", type="image", x_mm=4, y_mm=1, width_mm=2, height_mm=2, source="assets/images/leaf.png"),
         ),
     )
     crossed = place_nodes(component, ("free",), "locked")
@@ -353,7 +353,7 @@ def test_visual_lock_guard_allows_layer_crossing_and_preserves_yaml_edit_path() 
         ensure_visual_edit_respects_locks(component, moved_locked)
     assert caught.value.diagnostic.code == "NODE_LOCKED"
 
-    yaml_text = '''schema_version: 7
+    yaml_text = '''schema_version: 8
 id: card
 name: Card
 size_mm: {width: 63, height: 88}
@@ -366,7 +366,7 @@ elements:
     width_mm: 2
     height_mm: 2
     locked: false
-    source: {mode: manual, path: assets/images/animals/enemy/leaf.png}
+    source: {mode: manual, path: assets/images/leaf.png}
   - id: free
     name: Free
     type: image
@@ -374,7 +374,7 @@ elements:
     y_mm: 1
     width_mm: 2
     height_mm: 2
-    source: {mode: manual, path: assets/images/animals/enemy/leaf.png}
+    source: {mode: manual, path: assets/images/leaf.png}
 '''
     edited, _ = parse_component(yaml_text, Path("card.yaml"))
     assert edited.elements[0].x_mm == 9 and not edited.elements[0].locked

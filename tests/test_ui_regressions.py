@@ -50,8 +50,8 @@ def text_node(**changes):
 
 
 def snapshot(tmp_path, elements):
-    project = ProjectDefinition(schema_version=7, id="test", name="Test", version="0.1.0")
-    component = ComponentDefinition(schema_version=7, id="card", name="Card",
+    project = ProjectDefinition(schema_version=8, id="test", name="Test", version="0.1.0")
+    component = ComponentDefinition(schema_version=8, id="card", name="Card",
                                     size_mm=SizeMM(width=30, height=20), elements=tuple(elements))
     return ProjectSnapshot(tmp_path, "", "", project,
                            {"card": DocumentSnapshot(tmp_path / "card.yaml", "", "", component)})
@@ -250,7 +250,7 @@ def test_active_static_validation_ignores_missing_project_excel_and_checks_resou
 def test_static_validation_after_cache_invalidation_shows_localized_diagnostic(make_editor, locale, expected):
     set_language(locale)
     window, root, _errors = make_editor()
-    (root / "assets/images/animals/enemy/leaf.png").unlink()
+    (root / "assets/images/leaf.png").unlink()
 
     window.controller.preview.invalidate(root)
     window._validate_all()

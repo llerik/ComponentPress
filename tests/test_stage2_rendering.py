@@ -49,13 +49,13 @@ def _write_project(root: Path, elements: str, *, width: float = 10, height: floa
     (root / "components").mkdir()
     (root / "assets/images").mkdir(parents=True)
     (root / "project.yaml").write_text(
-        "schema_version: 7\nid: test\nname: Test\nversion: 0.1.0\nvariables: {}\nicons: {}\ndata_source: null\ncopies_columns: {prod: Prod, test: Debug}\n"
+        "schema_version: 8\nid: test\nname: Test\nversion: 0.1.0\nvariables: {}\nicons: {}\ndata_source: null\ncopies_columns: {prod: Prod, test: Debug}\n"
         "components:\n  - id: card\n    path: components/card.yaml\n"
         "print:\n  paper: A4\n  orientation: portrait\n  margin_mm: 5\n  gap_mm: 3\n  dpi: 254\n  cut_lines: true\n  cut_line_width_mm: 0.2\n",
         encoding="utf-8",
     )
     (root / "components/card.yaml").write_text(
-        f'schema_version: 7\nid: card\nname: Card\nsize_mm:\n  width: {width}\n  height: {height}\nbackground: "#FFFFFF"\nelements:\n{elements}',
+        f'schema_version: 8\nid: card\nname: Card\nsize_mm:\n  width: {width}\n  height: {height}\nbackground: "#FFFFFF"\nelements:\n{elements}',
         encoding="utf-8",
     )
 
@@ -162,10 +162,10 @@ def test_html_table_rowspan_colspan_and_inline_images_render_at_two_dpi(tmp_path
 @pytest.mark.parametrize(
     ("mutation", "code"),
     [
-        (lambda text: text.replace("assets/images/animals/enemy/leaf.png", "assets/images/missing.png"), "RESOURCE_MISSING"),
+        (lambda text: text.replace("assets/images/leaf.png", "assets/images/missing.png"), "RESOURCE_MISSING"),
         (lambda text: text.replace("font_family: Arial", "font_family: Definitely Missing Font 123"), "FONT_MISSING"),
         (lambda text: text.replace("<table border=", "<video></video><table border="), "HTML_UNSUPPORTED"),
-        (lambda text: text.replace('src="assets/images/animals/enemy/leaf.png"', 'src="https://example.invalid/a.png"'), "PATH_INVALID"),
+        (lambda text: text.replace('src="assets/images/leaf.png"', 'src="https://example.invalid/a.png"'), "PATH_INVALID"),
     ],
 )
 def test_render_errors_are_addressed_and_do_not_publish_output(mutation: Callable[[str], str], code: str, tmp_path: Path) -> None:

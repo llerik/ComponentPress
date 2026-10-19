@@ -41,7 +41,7 @@ def test_legacy_project_is_rejected_without_migration_or_writes(tmp_path: Path) 
     root = copy_example(tmp_path)
     project = root / "project.yaml"
     component = root / "components/forest-card.yaml"
-    project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 7", "schema_version: 2"), encoding="utf-8")
+    project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 8", "schema_version: 2"), encoding="utf-8")
     originals = (project.read_bytes(), component.read_bytes())
     repository = FileProjectRepository()
     try:
@@ -58,8 +58,8 @@ def test_legacy_migration_entry_point_is_read_only(tmp_path: Path, monkeypatch) 
     root = copy_example(tmp_path)
     project = root / "project.yaml"
     component = root / "components/forest-card.yaml"
-    project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 7", "schema_version: 1"), encoding="utf-8")
-    component.write_text(component.read_text(encoding="utf-8").replace("schema_version: 7", "schema_version: 1"), encoding="utf-8")
+    project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 8", "schema_version: 1"), encoding="utf-8")
+    component.write_text(component.read_text(encoding="utf-8").replace("schema_version: 8", "schema_version: 1"), encoding="utf-8")
     originals = (project.read_bytes(), component.read_bytes())
     try:
         migrations.migrate_v1_to_v2(root)
@@ -89,7 +89,7 @@ def test_text_and_layout_are_synchronized_with_one_undo_step(tmp_path: Path, qtb
     assert locations(original)["leaf-art"].node.x_mm == 4
 
     window._request_mode(tab, "text")
-    edited = tab.text_editor.toPlainText().replace("schema_version: 7", "schema_version: 7\n# Новый комментарий")
+    edited = tab.text_editor.toPlainText().replace("schema_version: 8", "schema_version: 8\n# Новый комментарий")
     edited = edited.replace("    x_mm: 4\n", "    x_mm: 7\n", 1)
     tab.text_editor.setPlainText(edited)
     assert locations(window.session.documents["forest-card"].model)["leaf-art"].node.x_mm == 4
@@ -151,7 +151,7 @@ def test_invalid_draft_keeps_last_model_and_blocks_save(tmp_path: Path, qtbot) -
     qtbot.keyClick(tab.text_editor, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
     assert tab.text_editor.toPlainText() == initial
     assert tab.undo_stack.count() == 0
-    tab.text_editor.setPlainText("schema_version: 7\nelements: [")
+    tab.text_editor.setPlainText("schema_version: 8\nelements: [")
     document = window.session.documents["forest-card"]
     assert document.model == before
     assert document.has_invalid_draft
@@ -167,8 +167,8 @@ def test_same_names_get_unique_ids_and_rename_keeps_identity(tmp_path: Path, qtb
     root = copy_example(tmp_path)
     window = make_window(root, qtbot)
     assert window.session is not None and window.active_tab is not None
-    assert window.add_image("assets/images/animals/enemy/leaf.png", 1, 1, name="Повтор")
-    assert window.add_image("assets/images/animals/enemy/leaf.png", 2, 2, name="Повтор")
+    assert window.add_image("assets/images/leaf.png", 1, 1, name="Повтор")
+    assert window.add_image("assets/images/leaf.png", 2, 2, name="Повтор")
     added = [node for node in window.session.documents["forest-card"].model.elements if isinstance(node, ImageNode) and node.name == "Повтор"]
     assert len(added) == 2
     assert added[0].id != added[1].id

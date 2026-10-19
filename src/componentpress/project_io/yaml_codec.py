@@ -217,7 +217,16 @@ def _validate_html_binding(
     location = (*base, "html")
     field = _field_address(location)
     if node.content_mode == "manual":
-        _grammar(node.html, path, field, tree, location, has_data=False, variables=variables)
+        try:
+            refs = parse_references(node.html)
+        except GrammarError as exc:
+            raise ProjectError(Diagnostic(exc.code, f"{exc} (символ {exc.offset + 1})", path, field, _field_line(tree, location))) from exc
+        for ref in refs:
+            if ref.kind == "column":
+                if not re.fullmatch(r"[A-Za-z0-9_-]+", ref.name):
+                    raise ProjectError(Diagnostic("TEMPLATE_SYNTAX", "неверное имя ключа изображения", path, field, _field_line(tree, location)))
+            elif variables is not None and ref.name not in variables:
+                raise ProjectError(Diagnostic("VARIABLE_UNKNOWN", f"нет переменной {ref.name!r}", path, field, _field_line(tree, location)))
         for source in html_image_sources(node.html):
             _template_path(source, path, f"{field}.img.src")
     elif model.data is None:
@@ -260,6 +269,7 @@ def parse_project(text: str, path: Path) -> tuple[ProjectDefinition, CommentedMa
     paths.extend((f"components.{i}.path", item.path) for i, item in enumerate(model.components))
     if model.data_source is not None:
         paths.append(("data_source.path", model.data_source.path))
+    paths.extend((f"images.{i}", item) for i, item in enumerate(model.images))
     paths.extend((f"icons.{name}.path", item.path) for name, item in model.icons.items())
     for field, value in paths:
         try:
@@ -270,8 +280,12 @@ def parse_project(text: str, path: Path) -> tuple[ProjectDefinition, CommentedMa
                 message_key=exc.diagnostic.message_key, params=exc.diagnostic.params,
                 incident_id=exc.diagnostic.incident_id,
             )) from exc
-        if field.startswith("icons.") and (not value.startswith("assets/images/") or not value.lower().endswith((".png", ".jpg", ".jpeg"))):
-            raise ProjectError(Diagnostic("ICON_PATH", "иконка должна ссылаться на PNG/JPEG в assets/images", path, field))
+        if field.startswith(("icons.", "images.")) and (
+            not value.startswith("assets/images/")
+            or "/" in value[len("assets/images/"):]
+            or not value.lower().endswith((".png", ".jpg", ".jpeg"))
+        ):
+            raise ProjectError(Diagnostic("ICON_PATH", "изображение должно ссылаться на PNG/JPEG непосредственно в assets/images", path, field))
         if field == "data_source.path" and not value.lower().endswith(".xlsx"):
             raise ProjectError(Diagnostic("DATA_SOURCE_PATH", "ожидается файл .xlsx", path, field))
     return model, tree

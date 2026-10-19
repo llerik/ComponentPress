@@ -1,5 +1,5 @@
 # Статический макет с вложенной группой
-schema_version: 7
+schema_version: 8
 id: forest-card
 name: "Лесная карта"
 size_mm:
@@ -16,7 +16,7 @@ elements:
     height_mm: 42
     source:
       mode: manual
-      path: assets/images/animals/enemy/leaf.png
+      path: assets/images/leaf.png
     fit: contain
   - id: text-group
     type: group
@@ -51,9 +51,9 @@ elements:
         content:
           mode: manual
           html: |-
-            <p>{{ vars["edition"] }} <img src="assets/images/animals/enemy/leaf.png" width="12" height="12" /></p>
+            <p>{{ vars["edition"] }} <img src="assets/images/leaf.png" width="12" height="12" /></p>
             <table border="1" cellspacing="0" cellpadding="2" width="100%">
               <tr><th colspan="2">Свойства</th></tr>
-              <tr><td rowspan="2"><img src="assets/images/animals/enemy/leaf.png" width="12" height="12" /></td><td>Тип: лес</td></tr>
+              <tr><td rowspan="2"><img src="assets/images/leaf.png" width="12" height="12" /></td><td>Тип: лес</td></tr>
               <tr><td>Редакция: 1</td></tr>
             </table>

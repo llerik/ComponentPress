@@ -135,7 +135,7 @@ def test_snapshot_uses_disk_spill_only_for_used_resources(tmp_path: Path) -> Non
     ensure_gui_application()
     root = _copy_demo(tmp_path)
     unused = root / "assets" / "images" / "unused.png"
-    unused.write_bytes((root / "assets" / "images" / "animals" / "enemy" / "leaf.png").read_bytes())
+    unused.write_bytes((root / "assets" / "images" / "leaf.png").read_bytes())
     source = project_service().open(root)
     store = JobStore(root)
     job_id = "spill-test"
@@ -157,9 +157,9 @@ def test_snapshot_uses_disk_spill_only_for_used_resources(tmp_path: Path) -> Non
             name: SnapshotResourceLoader(snapshot.resources).image(name).content_hash
             for name in snapshot.resources
         }
-        live = root / "assets" / "images" / "animals" / "enemy" / "leaf.png"
+        live = root / "assets" / "images" / "leaf.png"
         live.write_bytes(b"changed after snapshot")
-        name = "assets/images/animals/enemy/leaf.png"
+        name = "assets/images/leaf.png"
         loader = SnapshotResourceLoader({name: snapshot.resources[name]})
         assert loader.image(name).content_hash == captured[name]
     finally:
@@ -215,7 +215,7 @@ def test_memory_and_disk_snapshots_render_identically(tmp_path: Path) -> None:
 
 
 def test_snapshot_resource_loader_prefers_memory_over_disk(tmp_path: Path) -> None:
-    data = (DEMO / "assets" / "images" / "animals" / "enemy" / "leaf.png").read_bytes()
+    data = (DEMO / "assets" / "images" / "leaf.png").read_bytes()
     name = "assets/image.png"
     resource = SnapshotResource(name, hashlib.sha256(data).hexdigest(), len(data), data, tmp_path / "missing.png")
 
@@ -230,9 +230,9 @@ def test_snapshot_resource_loader_preserves_read_diagnostics(storage: str, tmp_p
     copied = tmp_path / "missing.png"
     resource = SnapshotResource(name, "bad-hash", 0, copied_path=copied)
     if storage == "corrupt":
-        copied.write_bytes((DEMO / "assets" / "images" / "animals" / "enemy" / "leaf.png").read_bytes())
+        copied.write_bytes((DEMO / "assets" / "images" / "leaf.png").read_bytes())
     elif storage == "empty":
-        copied.write_bytes((DEMO / "assets" / "images" / "animals" / "enemy" / "leaf.png").read_bytes())
+        copied.write_bytes((DEMO / "assets" / "images" / "leaf.png").read_bytes())
         resource = SnapshotResource(name, hashlib.sha256(b"").hexdigest(), 0, data=b"", copied_path=copied)
     loader = SnapshotResourceLoader({name: resource})
 

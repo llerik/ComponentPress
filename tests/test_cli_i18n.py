@@ -46,7 +46,6 @@ def test_cli_help_and_argparse_failures_use_the_selected_language(
     assert help_result.returncode == 0
     assert all(label in help_result.stdout for label in labels[:-1])
     command_help = {
-        "import-image": "подпапка" if language == "ru" else "subfolder",
         "render": "номер строки Excel" if language == "ru" else "Excel row number",
         "build": "рабочих потоков" if language == "ru" else "rendering workers",
     }
@@ -93,11 +92,11 @@ def test_cli_commands_preserve_user_names_and_localize_results(
     assert resized.returncode == 0, resized.stderr
     assert resized.stdout.strip() == ("Размер сохранён" if language == "ru" else "Size saved")
 
-    image = ROOT / "examples" / "demo-game" / "assets" / "images" / "animals" / "enemy" / "leaf.png"
-    imported = _cli(language, "import-image", str(custom), str(image), "--into", "cards/forest")
+    image = ROOT / "examples" / "demo-game" / "assets" / "images" / "leaf.png"
+    imported = _cli(language, "import-image", str(custom), str(image))
     assert imported.returncode == 0, imported.stderr
-    assert imported.stdout.strip() == "assets/images/cards/forest/leaf.png"
-    copied = custom / "assets" / "images" / "cards" / "forest" / "leaf.png"
+    assert imported.stdout.strip() == "assets/images/leaf.png"
+    copied = custom / "assets" / "images" / "leaf.png"
     assert copied.read_bytes() == image.read_bytes()
 
 

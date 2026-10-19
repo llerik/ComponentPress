@@ -31,8 +31,8 @@ for (let sheetIndex = 0; sheetIndex < sheets.length; sheetIndex++) {
     text[row % text.length],
     text[(row + 1) % text.length],
     text[(row + 2) % text.length],
-    `assets/images/set-${sheetIndex + 1}/field-1/row-${String(row + 1).padStart(2, "0")}.png`,
-    `assets/images/set-${sheetIndex + 1}/field-2/row-${String(row + 1).padStart(2, "0")}.png`,
+    `set-${sheetIndex + 1}_field-1_row-${String(row + 1).padStart(2, "0")}.png`,
+    `set-${sheetIndex + 1}_field-2_row-${String(row + 1).padStart(2, "0")}.png`,
     4,
     1,
   ]);

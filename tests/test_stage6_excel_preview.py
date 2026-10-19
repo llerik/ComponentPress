@@ -52,8 +52,8 @@ def _book(path: Path, *, formula_cache: str | None = "7", missing: bool = False,
     sheet = book.active
     sheet.title = "Карты"
     sheet.append(["ID", "Название", "Описание", "Изображение", "Сила", "Количество", "Дата", "Флаг", "Prod", "Debug", "Название HTML", "Описание HTML"])
-    sheet.append(["wolf", "Волк", r"Атака ic_leaf_6 и ic_leaf_3; буквально \ic_leaf_3", "assets/images/animals/enemy/leaf.png", "=3+4", 2, date(2026, 10, 3), True, 2, 1, "<p><b>Волк</b></p>", "<p>Атака ic_leaf_6 и ic_leaf_3; буквально \\ic_leaf_3</p>"])
-    sheet.append(["fox", "Лиса", "Тихая", "assets/images/animals/enemy/leaf.png", 2.5, 0, None, False, 0, 3, "<p><b>Лиса</b></p>", "<p>Тихая</p>"])
+    sheet.append(["wolf", "Волк", r"Атака ic_leaf_6 и ic_leaf_3; буквально \ic_leaf_3", "leaf.png", "=3+4", 2, date(2026, 10, 3), True, 2, 1, "<p><b>Волк</b></p>", "<p>Атака ic_leaf_6 и ic_leaf_3; буквально \\ic_leaf_3</p>"])
+    sheet.append(["fox", "Лиса", "Тихая", "leaf.png", 2.5, 0, None, False, 0, 3, "<p><b>Лиса</b></p>", "<p>Тихая</p>"])
     events = book.create_sheet("События")
     events.append(["ID", "Название", "Prod", "Debug", "Название HTML", "Описание HTML"])
     events.append(["event-1", "Дождь", 1, 0, "<p>Дождь</p>", "<p>Событие</p>"])
@@ -73,7 +73,7 @@ def _bound_project(tmp_path: Path) -> Path:
     project = root / "project.yaml"
     tree = yaml.load(project.read_text(encoding="utf-8"))
     tree["data_source"] = {"path": "data/game.xlsx"}
-    tree["icons"]["ic_leaf_3"] = {"path": "assets/images/animals/enemy/leaf.png", "width_mm": 3, "height_mm": 3}
+    tree["icons"]["ic_leaf_3"] = {"path": "assets/images/leaf.png", "width_px": 12, "height_px": 12}
     output = StringIO()
     yaml.dump(tree, output)
     project.write_text(output.getvalue(), encoding="utf-8")
@@ -161,7 +161,7 @@ def test_resolver_icons_tables_dynamic_paths_and_immutable_template(tmp_path: Pa
     assert cursor.charFormat().fontWeight() >= QFont.Weight.Bold
     assert 'width=&quot;' not in dump
     assert "ic_leaf_3" in dump  # escaped label remains literal
-    assert "assets/images/animals/enemy/leaf.png" in dump
+    assert "assets/images/leaf.png" in dump
     assert resolved.component != original
     assert snapshot.documents["forest-card"].model == original
 
@@ -173,7 +173,7 @@ def test_unknown_icon_reports_sheet_row_column_and_node(tmp_path: Path) -> None:
     sheet = book.active
     sheet.title = "Карты"
     sheet.append(["ID", "Название", "Описание", "Изображение", "Сила", "Количество", "Prod", "Debug", "Название HTML", "Описание HTML"])
-    sheet.append(["x", "X", "bad ic_unknown", "assets/images/animals/enemy/leaf.png", 1, 1, 1, 1, "<p>X</p>", "<p>bad ic_unknown</p>"])
+    sheet.append(["x", "X", "bad ic_unknown", "leaf.png", 1, 1, 1, 1, "<p>X</p>", "<p>bad ic_unknown</p>"])
     book.save(path)
     book.close()
     snapshot = project_repository().open(root)
@@ -253,9 +253,9 @@ def test_gui_data_panel_switch_refresh_insert_and_export(tmp_path: Path, qtbot, 
 
 
 def test_dynamic_html_image_missing_keeps_excel_origin(tmp_path: Path) -> None:
-    project = ProjectDefinition(schema_version=7, id="game", name="Game", version="0.1.0")
+    project = ProjectDefinition(schema_version=8, id="game", name="Game", version="0.1.0")
     component = ComponentDefinition(
-        schema_version=7, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
+        schema_version=8, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
         data=DataBinding(source="main", sheet="Лист"),
         elements=(HtmlNode(
             id="body", name="Body", type="html", x_mm=0, y_mm=0,
@@ -280,7 +280,7 @@ def test_missing_and_broken_icon_keep_excel_origin(tmp_path: Path) -> None:
     broken.parent.mkdir(parents=True)
     broken.write_bytes(b"not a png")
     component = ComponentDefinition(
-        schema_version=7, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
+        schema_version=8, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
         data=DataBinding(source="main", sheet="Лист"),
         elements=(HtmlNode(
             id="body", name="Body", type="html", x_mm=0, y_mm=0,
@@ -292,8 +292,8 @@ def test_missing_and_broken_icon_keep_excel_origin(tmp_path: Path) -> None:
         ("ic_broken", "assets/images/broken.png", "RESOURCE_INVALID"),
     ):
         project = ProjectDefinition(
-            schema_version=7, id="game", name="Game", version="0.1.0",
-            icons={name: IconDefinition(path=path, width_mm=3, height_mm=3)},
+            schema_version=8, id="game", name="Game", version="0.1.0",
+            images=(path,), icons={name: IconDefinition(path=path, width_px=12, height_px=12)},
         )
         row = DataRow(2, "2", 1, {"Текст": CellValue(name, "B2")})
         data = DataSheetSnapshot("main", tmp_path / "data.xlsx", "Лист", "hash", 1, ("Текст",), (row,))
@@ -339,9 +339,9 @@ def test_ordinary_excel_error_blocks_html_and_configured_id(tmp_path: Path) -> N
     reader = XlsxReader()
     data = reader.read(path, "Лист", source="main", id_column="ID")
     assert data.rows[0].values["Текст"].formula_state is FormulaState.ERROR
-    project = ProjectDefinition(schema_version=7, id="game", name="Game", version="0.1.0")
+    project = ProjectDefinition(schema_version=8, id="game", name="Game", version="0.1.0")
     component = ComponentDefinition(
-        schema_version=7, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
+        schema_version=8, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
         data=DataBinding(source="main", sheet="Лист", id_column="ID"),
         elements=(HtmlNode(
             id="body", name="Body", type="html", x_mm=0, y_mm=0, width_mm=30,
@@ -371,7 +371,7 @@ def test_ordinary_excel_error_blocks_html_and_configured_id(tmp_path: Path) -> N
 
 
 def test_invalid_dynamic_paths_keep_origin_for_image_and_html(tmp_path: Path) -> None:
-    project = ProjectDefinition(schema_version=7, id="game", name="Game", version="0.1.0")
+    project = ProjectDefinition(schema_version=8, id="game", name="Game", version="0.1.0")
     row = DataRow(2, "2", 1, {"Путь": CellValue("../outside.png", "A2")})
     data = DataSheetSnapshot("main", tmp_path / "data.xlsx", "Лист", "hash", 1, ("Путь",), (row,))
     for node in (
@@ -386,7 +386,7 @@ def test_invalid_dynamic_paths_keep_origin_for_image_and_html(tmp_path: Path) ->
         ),
     ):
         component = ComponentDefinition(
-            schema_version=7, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
+            schema_version=8, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
             data=DataBinding(source="main", sheet="Лист"), elements=(node,),
         )
         try:
@@ -401,11 +401,11 @@ def test_invalid_dynamic_paths_keep_origin_for_image_and_html(tmp_path: Path) ->
 
 def test_template_unescape_never_changes_inserted_excel_or_variable_data(tmp_path: Path) -> None:
     project = ProjectDefinition(
-        schema_version=7, id="game", name="Game", version="0.1.0",
+        schema_version=8, id="game", name="Game", version="0.1.0",
         variables={"literal": r"var \{literal\}"},
     )
     component = ComponentDefinition(
-        schema_version=7, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
+        schema_version=8, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
         data=DataBinding(source="main", sheet="Лист"),
         elements=(HtmlNode(
             id="body", name="Body", type="html", x_mm=0, y_mm=0,

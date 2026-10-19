@@ -246,7 +246,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     if not window.add_html("<p><b>Проверка выпуска</b></p>", 4.0, 5.0, node_id="smoke-title"):
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     if not window.add_image(
-        "assets/images/animals/enemy/leaf.png", 8.0, 24.0,
+        "assets/images/leaf.png", 8.0, 24.0,
         node_id="smoke-image",
     ):
         return _smoke_failure(root, inspect.currentframe().f_lineno)
@@ -294,7 +294,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     if saved.model.background != "#DDEEFF" or "# Проверка текстового режима" not in saved.committed.text:
         return _smoke_failure(root, inspect.currentframe().f_lineno)
-    if saved.model.schema_version != 7 or not {node.type for node in saved.model.elements}.issuperset({"rectangle", "ellipse", "line"}):
+    if saved.model.schema_version != 8 or not {node.type for node in saved.model.elements}.issuperset({"rectangle", "ellipse", "line"}):
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     if not any(node.id == "smoke-group" for node in saved.model.elements):
         return _smoke_failure(root, inspect.currentframe().f_lineno)

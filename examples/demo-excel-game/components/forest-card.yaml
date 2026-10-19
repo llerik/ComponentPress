@@ -1,7 +1,7 @@
 %YAML 1.2
 ---
 # Статический макет с вложенной группой; на этапе 6 к нему добавлены данные Excel
-schema_version: 7
+schema_version: 8
 id: forest-card
 name: "Лесная карта"
 size_mm:

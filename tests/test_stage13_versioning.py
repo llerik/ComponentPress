@@ -116,7 +116,7 @@ def test_invalid_path_in_archive_manifest_is_rejected_before_destination_write(t
         "format_version": 1,
         "project_id": "game",
         "project_version": "0.1.0",
-        "schema_version": 7,
+        "schema_version": 8,
         "files": {"project.yaml": {"size": 0, "sha256": hashlib.sha256(b"").hexdigest()}, "../outside": {"size": 0, "sha256": hashlib.sha256(b"").hexdigest()}},
         "directories": [],
     }
@@ -234,8 +234,10 @@ def test_gui_archive_export_and_import_run_without_blocking_the_window(tmp_path:
     assert window.session.snapshot.model.version == "0.1.0"
     assert root.joinpath("project.yaml").is_file()
 
-    source = ROOT / "examples" / "demo-game" / "assets" / "images" / "animals" / "enemy"
-    imported = ("assets/images/from-folder/leaf.png",)
+    source = tmp_path / "image-source"
+    source.mkdir()
+    shutil.copy2(ROOT / "examples" / "demo-game" / "assets" / "images" / "leaf.png", source / "imported.png")
+    imported = ("assets/images/imported.png",)
     import_events = []
     window.controller.service.event_logger = lambda event, **context: import_events.append((event, context))
 
@@ -250,16 +252,16 @@ def test_gui_archive_export_and_import_run_without_blocking_the_window(tmp_path:
 
     capture = ImportCapture()
     window._image_manager_dialog = capture
-    window._start_image_folder_import(capture, window.session.snapshot.root, source, "from-folder")
+    window._start_image_folder_import(capture, window.session.snapshot.root, source, "")
     qtbot.waitUntil(lambda: window._version_task is None, timeout=15000)
     assert capture.finished[1] is None, capture.finished[1].diagnostic
     assert capture.finished == (imported, None, None)
     assert len(capture.progress) == 2
     assert all(len(progress) == 3 for progress in capture.progress)
-    assert (window.session.snapshot.root / imported[0]).read_bytes() == (source / "leaf.png").read_bytes()
+    assert (window.session.snapshot.root / imported[0]).read_bytes() == (source / "imported.png").read_bytes()
     assert window._version_busy_id is None
-    assert [item[1]["status"] for item in import_events] == ["started", "succeeded"]
-    assert all("path" not in item[1] for item in import_events)
+    assert [item[1]["status"] for item in import_events if item[1].get("operation") == "import_image_folder"] == ["started", "succeeded"]
+    assert all("path" not in item[1] for item in import_events if item[1].get("operation") == "import_image_folder")
 
     active_session = window.session
     errors = []

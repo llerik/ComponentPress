@@ -10,7 +10,7 @@ from types import MappingProxyType
 
 from pydantic import ValidationError
 from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QSignalBlocker, QSize, QThreadPool, QTimer, Qt
-from PySide6.QtGui import QAction, QActionGroup, QColor, QCloseEvent, QKeySequence, QUndoGroup
+from PySide6.QtGui import QAction, QActionGroup, QColor, QCloseEvent, QImage, QKeySequence, QUndoGroup
 from PySide6.QtWidgets import (
     QApplication,
     QColorDialog,
@@ -864,6 +864,7 @@ class MainWindow(QMainWindow):
         self.element_tree.layerDropRequested.connect(self._layer_drop)
         self.element_tree.lockToggleRequested.connect(self._toggle_element_lock)
         self.element_properties.nodeChanged.connect(self._edit_selected_node)
+        self.element_properties.selectImageRequested.connect(self.select_element_image)
         self.element_properties.rotationRequested.connect(self._rotate_selected)
         self.element_properties.insertImageRequested.connect(self.insert_html_image)
         self.element_properties.colorRequested.connect(self._pick_node_color)
@@ -1208,12 +1209,16 @@ class MainWindow(QMainWindow):
         root = self.session.snapshot.root
         dialog = ImageManagerDialog(
             root,
+            self.session.snapshot.model,
             lambda source, folder: self._import_single_image(root, source, folder),
-            lambda relative, source, expected_hash: self._replace_project_image(root, relative, source, expected_hash),
+            lambda relative, delete_file: self._unregister_project_image(root, relative, delete_file),
+            lambda name, relative, width, height: self._add_project_image_key(root, name, relative, width, height),
+            lambda original, name, width, height: self._edit_project_image_key(root, original, name, width, height),
+            lambda name: self._remove_project_image_key(root, name),
             self,
         )
         self._image_manager_dialog = dialog
-        dialog.folderImportRequested.connect(lambda source, folder: self._start_image_folder_import(dialog, root, source, folder))
+        dialog.folderImportRequested.connect(lambda source: self._start_image_folder_import(dialog, root, source, ""))
         dialog.finished.connect(lambda _result: setattr(self, "_image_manager_dialog", None))
         dialog.open()
 
@@ -1223,13 +1228,41 @@ class MainWindow(QMainWindow):
         self._resource_images_changed()
         return relative
 
-    def _replace_project_image(self, root: Path, relative: str, source: Path, expected_hash: str) -> None:
+    def _unregister_project_image(self, root: Path, relative: str, delete_file: bool) -> None:
         self._require_resource_write(root)
-        self.controller.service.replace_image(root, relative, source, expected_hash)
+        assert self.session is not None
+        self.controller.service.remove_image(self.session, relative, delete_file=delete_file)
+        self._resource_images_changed()
+
+    def _add_project_image_key(self, root: Path, name: str, relative: str, width: int, height: int) -> None:
+        self._require_resource_write(root)
+        assert self.session is not None
+        self.controller.service.add_image_key(self.session, name, relative, width, height)
+        self._resource_images_changed()
+
+    def _remove_project_image_key(self, root: Path, name: str) -> None:
+        self._require_resource_write(root)
+        assert self.session is not None
+        self.controller.service.remove_image_key(self.session, name)
+        self._resource_images_changed()
+
+    def _edit_project_image_key(self, root: Path, original: str, name: str, width: int, height: int) -> None:
+        self._require_resource_write(root)
+        assert self.session is not None
+        self.controller.service.update_image_key(self.session, original, name, width, height)
         self._resource_images_changed()
 
     def _resource_images_changed(self) -> None:
         if self.session is None:
+            return
+        try:
+            snapshot = self.controller.service.open(self.session.snapshot.root)
+            self.session.replace_snapshot(snapshot)
+            manager = getattr(self, "_image_manager_dialog", None)
+            if manager is not None and hasattr(manager, "refresh"):
+                manager.refresh(snapshot.model)
+        except ProjectError as exc:
+            self._show_error(exc)
             return
         self.controller.preview.invalidate(self.session.snapshot.root)
         for tab in self._tabs.values():
@@ -3168,6 +3201,27 @@ class MainWindow(QMainWindow):
             return ()
         return data.headers if data is not None else ()
 
+    def _initial_excel_image_size(self, column: str) -> tuple[float | None, float | None]:
+        """Capture the selected preview row's image size once when creating a node."""
+        tab = self.active_tab
+        if self.session is None or tab is None or self.controller.preview is None or tab.preview_row_number is None:
+            self._show_error(ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", "", message_key="error.image_excel_row_required")))
+            return None, None
+        try:
+            data = self.controller.preview.cached_data(self.session.snapshot, tab.component_id)
+            row = next(row for row in data.rows if row.row_number == tab.preview_row_number)
+            cell = next(value for name, value in row.values.items() if name.strip().casefold() == column.strip().casefold())
+            filename = str(cell.value).strip()
+            if not filename or Path(filename).name != filename:
+                raise ValueError(tr("error.image_excel_filename"))
+            image = QImage(str(self.session.snapshot.root / "assets" / "images" / filename))
+            if image.isNull():
+                raise ValueError(tr("error.image_source_invalid"))
+            return image.width() * 25.4 / 96, image.height() * 25.4 / 96
+        except (AttributeError, ProjectError, StopIteration, ValueError) as exc:
+            self._show_error(exc if isinstance(exc, ProjectError) else ProjectError(Diagnostic("IMAGE_SOURCE_INVALID", str(exc), message_key="error.image_source_invalid")))
+            return None, None
+
     def _place_element(self, tool: str, x_mm: float, y_mm: float) -> None:
         if self.session is None or not self._visual_editing_allowed() or not self._tool_write_allowed(tool):
             return
@@ -3194,19 +3248,33 @@ class MainWindow(QMainWindow):
                     self._apply_tree(tr("ui.add_conditional_group_action"), add_node, node, selected=(node_id,))
         elif tool == "image":
             columns = self._cached_columns()
-            dialog = ImageAddDialog(root, self._import_image, self, columns=columns)
+            dialog = ImageAddDialog(root, self._import_image, self, columns=columns, images=self.session.snapshot.model.images)
             dialog.name.setText(self._next_default_name("image"))
             accepted = dialog.exec() == dialog.DialogCode.Accepted
             if accepted:
-                self.add_image(
-                    dialog.source.text().strip(), x_mm, y_mm,
-                    name=dialog.name.text().strip(), fit=dialog.fit.currentText(),
-                    source_mode=dialog.content_mode.currentData(),
-                    source_column=dialog.content_column.currentText() or None,
-                )
+                width_mm = height_mm = None
+                if dialog.content_mode.currentData() == "column":
+                    width_mm, height_mm = self._initial_excel_image_size(dialog.content_column.currentText())
+                    if width_mm is None:
+                        accepted = False
+                else:
+                    image = QImage(str(root / dialog.source.text().strip()))
+                    if image.isNull():
+                        self._show_error(ProjectError(Diagnostic("IMAGE_SOURCE_INVALID", "", message_key="error.image_source_invalid")))
+                        accepted = False
+                    else:
+                        width_mm, height_mm = image.width() * 25.4 / 96, image.height() * 25.4 / 96
+                if accepted:
+                    self.add_image(
+                        dialog.source.text().strip(), x_mm, y_mm,
+                        name=dialog.name.text().strip(), fit=dialog.fit.currentText(),
+                        source_mode=dialog.content_mode.currentData(),
+                        source_column=dialog.content_column.currentText() or None,
+                        width_mm=width_mm, height_mm=height_mm,
+                    )
         elif tool == "html":
             try:
-                dialog = HtmlAddDialog(root, self._import_image, self, columns=self._cached_columns())
+                dialog = HtmlAddDialog(root, self._import_image, self, columns=self._cached_columns(), images=self.session.snapshot.model.images)
                 dialog.name.setText(self._next_default_name("html"))
             except ProjectError as exc:
                 self._show_error(exc)
@@ -3262,6 +3330,8 @@ class MainWindow(QMainWindow):
         fit: str = "contain",
         source_mode: str = "manual",
         source_column: str | None = None,
+        width_mm: float | None = None,
+        height_mm: float | None = None,
         node_id: str | None = None,
     ) -> bool:
         if self.session is None or self.active_tab is None or not self._visual_editing_allowed():
@@ -3269,10 +3339,11 @@ class MainWindow(QMainWindow):
         component = self.session.documents[self.active_tab.component_id].model
         name = name or self._next_default_name("image")
         node_id = node_id or self.controller.node_id(self.active_tab.component_id, name, "image")
-        width = max(0.001, min(30.0, component.size_mm.width - x_mm))
-        height = max(0.001, min(30.0, component.size_mm.height - y_mm))
+        if width_mm is None or height_mm is None:
+            width_mm = max(0.001, min(30.0, component.size_mm.width - x_mm))
+            height_mm = max(0.001, min(30.0, component.size_mm.height - y_mm))
         try:
-            node = ImageNode(id=node_id, name=name, type="image", x_mm=x_mm, y_mm=y_mm, width_mm=width, height_mm=height, source=source, source_mode=source_mode, source_column=source_column, fit=fit)
+            node = ImageNode(id=node_id, name=name, type="image", x_mm=x_mm, y_mm=y_mm, width_mm=width_mm, height_mm=height_mm, source=source, source_mode=source_mode, source_column=source_column, fit=fit)
         except ValidationError as exc:
             self._show_error(exc)
             return False
@@ -3318,7 +3389,7 @@ class MainWindow(QMainWindow):
         found = locations(self.session.documents[self.active_tab.component_id].model)[ids[0]].node
         if not isinstance(found, HtmlNode):
             return
-        picker = ResourcePickerDialog(self.session.snapshot.root, self._import_image, self)
+        picker = ResourcePickerDialog(self.session.snapshot.root, self._import_image, self, images=self.session.snapshot.model.images)
         if picker.exec() != picker.DialogCode.Accepted:
             return
         width, accepted = QInputDialog.getInt(self, tr("ui.image_size"), tr("ui.width_px"), 16, 1, 4096)
@@ -3332,6 +3403,17 @@ class MainWindow(QMainWindow):
             return
         self.element_properties.insert_html_image(picker.selected_path, width, height, align)
         self._edit_selected_node({"html": self.element_properties.html_edit.toPlainText()})
+
+    def select_element_image(self) -> None:
+        if self.session is None or self.active_tab is None or not self._user_editing_allowed():
+            return
+        picker = ResourcePickerDialog(
+            self.session.snapshot.root, self._import_image, self,
+            images=self.session.snapshot.model.images,
+        )
+        if picker.exec() == picker.DialogCode.Accepted:
+            self.element_properties.source_edit.setText(picker.selected_path)
+            self._edit_selected_node({"source": picker.selected_path})
 
     def save_active(self) -> bool:
         tab = self.active_tab

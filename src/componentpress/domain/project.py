@@ -31,13 +31,16 @@ class ComponentRef(StrictModel):
 
 class IconDefinition(StrictModel):
     path: str
-    width_mm: PositiveMM
-    height_mm: PositiveMM
+    width_px: int = Field(gt=0)
+    height_px: int = Field(gt=0)
 
-    @field_validator("width_mm", "height_mm", mode="before")
-    @classmethod
-    def finite_size(cls, value: object) -> float:
-        return _finite(value)
+
+def _validate_image_filename(value: str) -> str:
+    if (not value.startswith("assets/images/") or "/" in value[len("assets/images/"):]
+            or "\\" in value[len("assets/images/"):]
+            or not value.lower().endswith((".png", ".jpg", ".jpeg"))):
+        raise ValueError("изображение должно быть файлом PNG/JPEG в assets/images")
+    return value
 
 
 class DataSource(StrictModel):
@@ -71,6 +74,7 @@ class ProjectDefinition(StrictModel):
     name: str = Field(min_length=1)
     version: str
     variables: dict[str, str] = Field(default_factory=dict)
+    images: tuple[str, ...] = ()
     icons: dict[str, IconDefinition] = Field(default_factory=dict)
     data_source: DataSource | None = None
     copies_columns: CopiesColumns = Field(default_factory=CopiesColumns)
@@ -101,13 +105,44 @@ class ProjectDefinition(StrictModel):
             raise ValueError("версия должна содержать не более 5 символов и не содержать символы имени файла")
         return value
 
-    @field_validator("icons")
+    @field_validator("icons", mode="before")
     @classmethod
-    def icon_names(cls, value: dict[str, IconDefinition]) -> dict[str, IconDefinition]:
-        for key in value:
-            if not re.fullmatch(r"ic_[A-Za-z0-9_]+", key):
-                raise ValueError(f"неверное имя иконки {key!r}")
+    def icon_names(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        normalized: dict[str, object] = {}
+        for key, definition in value.items():
+            if (not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", key)):
+                raise ValueError(f"неверное имя ключа изображения {key!r}")
+            canonical = key.lower()
+            if canonical in normalized:
+                raise ValueError(f"повторное имя ключа изображения {key!r}")
+            normalized[canonical] = definition
+        return normalized
+
+    @field_validator("images", mode="before")
+    @classmethod
+    def image_list(cls, value: object) -> object:
+        return tuple(value) if isinstance(value, list) else value
+
+    @field_validator("images")
+    @classmethod
+    def unique_flat_images(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        for path in value:
+            _validate_image_filename(path)
+        folded = [path.casefold() for path in value]
+        if len(folded) != len(set(folded)):
+            raise ValueError("повторное имя изображения")
         return value
+
+    @model_validator(mode="after")
+    def icon_paths_are_registered(self) -> "ProjectDefinition":
+        registered = set(self.images)
+        for name, icon in self.icons.items():
+            _validate_image_filename(icon.path)
+            if icon.path not in registered:
+                raise ValueError(f"ключ {name!r} ссылается на незарегистрированное изображение")
+        return self
 
     @model_validator(mode="after")
     def unique_components(self) -> "ProjectDefinition":

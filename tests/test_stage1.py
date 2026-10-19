@@ -30,14 +30,14 @@ def demo(tmp_path: Path) -> Path:
     return root
 
 
-def test_cli_new_validate_register_and_nested_import_after_move(tmp_path: Path) -> None:
+def test_cli_new_validate_register_and_flat_import_after_move(tmp_path: Path) -> None:
     root = tmp_path / "Новая игра"
     assert cli("new", str(root), "--name", "Лесная игра").returncode == 0
     assert cli("add-component", str(root), "card", "Карта").returncode == 0
-    picture = EXAMPLE / "assets/images/animals/enemy/leaf.png"
-    imported = cli("import-image", str(root), str(picture), "--into", "animals/enemy")
+    picture = EXAMPLE / "assets/images/leaf.png"
+    imported = cli("import-image", str(root), str(picture))
     assert imported.returncode == 0, imported.stderr
-    assert "assets/images/animals/enemy/leaf.png" in imported.stdout
+    assert "assets/images/leaf.png" in imported.stdout
     destination = tmp_path / "Переезд" / "Игра"
     destination.parent.mkdir()
     shutil.move(root, destination)
@@ -50,7 +50,7 @@ def test_comments_group_ids_and_values_survive_save_cycle(tmp_path: Path) -> Non
     root = demo(tmp_path)
     repo = FileProjectRepository()
     snapshot = repo.open(root)
-    assert snapshot.model.icons["ic_leaf_6"].width_mm == 6
+    assert snapshot.model.icons["ic_leaf_6"].width_px == 32
     assert snapshot.documents["forest-card"].model.elements[1].children[1].id == "caption"
     snapshot = repo.save_project(snapshot, name="Новое название")
     size = snapshot.documents["forest-card"].model.size_mm.model_copy(update={"width": 70.5})
@@ -71,6 +71,7 @@ def test_comments_group_ids_and_values_survive_save_cycle(tmp_path: Path) -> Non
     ("replacement", "code"),
     [
         ("schema_version: 2", "SCHEMA_UNSUPPORTED"),
+        ("schema_version: 7", "SCHEMA_UNSUPPORTED"),
         ("name: [", "YAML_SYNTAX"),
         ("width: -1", "DOCUMENT_INVALID"),
         ("id: heading", "NODE_ID_DUPLICATE"),
@@ -83,7 +84,7 @@ def test_invalid_component_has_diagnostic_and_is_not_rewritten(tmp_path: Path, r
     path = root / "components/forest-card.yaml"
     original = path.read_text(encoding="utf-8")
     if code == "SCHEMA_UNSUPPORTED":
-            broken = original.replace("schema_version: 7", replacement)
+            broken = original.replace("schema_version: 8", replacement)
     elif code == "YAML_SYNTAX":
         broken = original.replace('name: "Лесная карта"', replacement)
     elif code == "DOCUMENT_INVALID":
@@ -118,10 +119,10 @@ def test_icon_and_portable_path_errors(tmp_path: Path) -> None:
     path = root / "project.yaml"
     original = path.read_text(encoding="utf-8")
     for broken, code in [
-        (original.replace("ic_leaf_6", "leaf"), "DOCUMENT_INVALID"),
-        (original.replace("width_mm: 6", "width_mm: 0"), "DOCUMENT_INVALID"),
-        (original.replace("animals/enemy/leaf.png", "../leaf.png"), "PATH_INVALID"),
-        (original.replace("animals/enemy/leaf.png", "animals/enemy/leaf.svg"), "ICON_PATH"),
+        (original.replace("ic_leaf_6", "leaf.name"), "DOCUMENT_INVALID"),
+        (original.replace("width_px: 32", "width_px: 0"), "DOCUMENT_INVALID"),
+        (original.replace("assets/images/leaf.png", "assets/images/../leaf.png"), "DOCUMENT_INVALID"),
+        (original.replace("assets/images/leaf.png", "assets/images/leaf.svg"), "DOCUMENT_INVALID"),
     ]:
         with pytest.raises(ProjectError) as caught:
             parse_project(broken, path)
@@ -143,14 +144,12 @@ def test_external_edit_blocks_save_without_overwrite(tmp_path: Path) -> None:
 
 def test_import_never_overwrites_and_rejects_traversal(tmp_path: Path) -> None:
     root = demo(tmp_path)
-    source = EXAMPLE / "assets/images/animals/enemy/leaf.png"
+    source = EXAMPLE / "assets/images/leaf.png"
     resources = ResourceRepository()
-    with pytest.raises(ProjectError) as caught:
-        resources.import_image(root, source, "animals/enemy")
-    assert caught.value.diagnostic.code == "FILE_EXISTS"
+    assert resources.import_image(root, source) == "assets/images/leaf.png"
     with pytest.raises(ProjectError) as caught:
         resources.import_image(root, source, "../outside")
-    assert caught.value.diagnostic.code == "PATH_INVALID"
+    assert caught.value.diagnostic.code == "RESOURCE_FOLDER_UNSUPPORTED"
     fake = tmp_path / "fake.png"
     fake.write_text("not an image", encoding="utf-8")
     with pytest.raises(ProjectError) as caught:
@@ -234,8 +233,8 @@ def test_invalid_size_is_not_saved_and_case_mismatch_is_rejected(tmp_path: Path)
         repo.save_component(snapshot, "forest-card", size_mm=bad_size)
     assert document.read_bytes() == original
     with pytest.raises(ProjectError) as caught:
-        ResourceRepository().import_image(root, EXAMPLE / "assets/images/animals/enemy/leaf.png", "animals/Enemy")
-    assert caught.value.diagnostic.code == "PATH_CASE_MISMATCH"
+        ResourceRepository().import_image(root, EXAMPLE / "assets/images/leaf.png", "animals/Enemy")
+    assert caught.value.diagnostic.code == "RESOURCE_FOLDER_UNSUPPORTED"
 
 
 def test_project_edits_preserve_document_validity_and_remove_deleted_icon(tmp_path: Path) -> None:
@@ -268,14 +267,14 @@ def test_component_save_checks_project_revision(tmp_path: Path) -> None:
 
 def test_project_reference_does_not_follow_symlink(tmp_path: Path) -> None:
     root = demo(tmp_path)
-    picture = root / "assets/images/animals/enemy/leaf.png"
-    link = root / "assets/images/animals/enemy/linked.png"
+    picture = root / "assets/images/leaf.png"
+    link = root / "assets/images/linked.png"
     try:
         link.symlink_to(picture)
     except OSError:
         pytest.skip("создание symlink недоступно в этой среде")
     project = root / "project.yaml"
-    project.write_text(project.read_text(encoding="utf-8").replace("animals/enemy/leaf.png", "animals/enemy/linked.png"), encoding="utf-8")
+    project.write_text(project.read_text(encoding="utf-8").replace("assets/images/leaf.png", "assets/images/linked.png"), encoding="utf-8")
     with pytest.raises(ProjectError) as caught:
         FileProjectRepository().open(root)
     assert caught.value.diagnostic.code == "PATH_SYMLINK"

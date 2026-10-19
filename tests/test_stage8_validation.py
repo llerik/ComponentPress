@@ -28,7 +28,7 @@ def test_schema_three_rejects_old_project_without_rewriting_files(tmp_path: Path
     root = copy_demo(tmp_path)
     project = root / "project.yaml"
     original = project.read_bytes()
-    project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 7", "schema_version: 2", 1), encoding="utf-8")
+    project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 8", "schema_version: 2", 1), encoding="utf-8")
     old = project.read_bytes()
     with pytest.raises(ProjectError) as caught:
         project_repository().open(root)
@@ -45,7 +45,7 @@ def test_validation_checks_zero_copy_rows_and_keeps_last_successful_snapshot(tmp
     book = load_workbook(book_path)
     sheet = book["Карты"]
     assert sheet["I3"].value == 0  # Prod excludes this row.
-    sheet["D3"] = "assets/images/not-found.png"
+    sheet["D3"] = "not-found.png"
     book.save(book_path)
     book.close()
 
@@ -57,7 +57,7 @@ def test_validation_checks_zero_copy_rows_and_keeps_last_successful_snapshot(tmp
     assert preview.cached_data(snapshot, "event-card") is not None
 
     book = load_workbook(book_path)
-    book["Карты"]["D3"] = "assets/images/animals/enemy/leaf.png"
+    book["Карты"]["D3"] = "leaf.png"
     book.save(book_path)
     book.close()
     checked = preview.refresh(snapshot, component_id)
@@ -65,7 +65,7 @@ def test_validation_checks_zero_copy_rows_and_keeps_last_successful_snapshot(tmp
     first_id = checked.rows[0].instance_id
 
     book = load_workbook(book_path)
-    book["Карты"]["D3"] = "assets/images/still-missing.png"
+    book["Карты"]["D3"] = "still-missing.png"
     book.save(book_path)
     book.close()
     with pytest.raises(ValidationIssues):
@@ -174,7 +174,7 @@ def test_validation_does_not_publish_mixed_excel_generations(tmp_path: Path) -> 
 def test_validate_all_checks_static_component_resources(tmp_path: Path) -> None:
     root = tmp_path / "static-game"
     shutil.copytree(Path(__file__).resolve().parents[1] / "examples" / "demo-game", root)
-    image_path = root / "assets" / "images" / "animals" / "enemy" / "leaf.png"
+    image_path = root / "assets" / "images" / "leaf.png"
     image_path.unlink()
     snapshot = project_repository().open(root)
 
@@ -198,7 +198,7 @@ def test_column_html_rejects_user_supplied_image_tags(tmp_path: Path) -> None:
     root = copy_demo(tmp_path)
     book_path = root / "data/game.xlsx"
     book = load_workbook(book_path)
-    book["Карты"]["K2"] = '<p><img src="assets/images/animals/enemy/leaf.png" /></p>'
+    book["Карты"]["K2"] = '<p><img src="assets/images/leaf.png" /></p>'
     book.save(book_path)
     book.close()
     snapshot = project_repository().open(root)

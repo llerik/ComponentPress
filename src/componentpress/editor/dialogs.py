@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from collections.abc import Callable
 
-from PySide6.QtCore import QDir, QSize, Qt, Signal
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QColorDialog,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
-    QFileSystemModel,
     QFormLayout,
     QHBoxLayout,
     QInputDialog,
@@ -22,18 +22,19 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QLabel,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QTreeView,
+    QSpinBox,
+    QSplitter,
     QVBoxLayout,
+    QWidget,
 )
 
 from componentpress.i18n import tr
 from componentpress.i18n.diagnostics import format_diagnostic, format_project_error
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
-from componentpress.project_io.files import file_hash
-from componentpress.project_io.paths import resolve_project_path
 from componentpress.resources.repository import ResourceRepository
 from componentpress.rendering.fonts import available_font_families
 
@@ -48,7 +49,7 @@ def format_error(error: Exception) -> str:
 
 
 class ResourcePickerDialog(QDialog):
-    def __init__(self, root: Path, importer: Callable[[Path, str], str], parent=None):
+    def __init__(self, root: Path, importer: Callable, parent=None, *, images: tuple[str, ...] | None = None):
         super().__init__(parent)
         self.root = root
         self.importer = importer
@@ -56,19 +57,21 @@ class ResourcePickerDialog(QDialog):
         self.setWindowTitle(tr("ui.resource_picker"))
         self.resize(700, 480)
         layout = QVBoxLayout(self)
-        self.model = QFileSystemModel(self)
-        self.model.setNameFilters(["*.png", "*.jpg", "*.jpeg"])
-        self.model.setNameFilterDisables(False)
-        self.model.setFilter(QDir.Filter.AllDirs | QDir.Filter.Files | QDir.Filter.NoDotAndDotDot)
-        images = root / "assets" / "images"
-        images.mkdir(parents=True, exist_ok=True)
-        self.model.setRootPath(str(images))
-        self.tree = QTreeView()
-        self.tree.setObjectName("resourceTree")
-        self.tree.setModel(self.model)
-        self.tree.setRootIndex(self.model.index(str(images)))
-        self.tree.setColumnWidth(0, 420)
-        layout.addWidget(self.tree)
+        image_root = root / "assets" / "images"
+        image_root.mkdir(parents=True, exist_ok=True)
+        available = ResourceRepository.list_images(root) if images is None else tuple(image_root / Path(item).name for item in images)
+        self.images = QListWidget()
+        self.images.setObjectName("resourceTiles")
+        self.images.setViewMode(QListWidget.ViewMode.IconMode)
+        self.images.setIconSize(QSize(72, 72))
+        for path in available:
+            pixmap = QPixmap(str(path))
+            item = QListWidgetItem(path.name)
+            item.setData(Qt.ItemDataRole.UserRole, f"assets/images/{path.name}")
+            if not pixmap.isNull():
+                item.setIcon(QIcon(pixmap.scaled(72, 72, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)))
+            self.images.addItem(item)
+        layout.addWidget(self.images)
         import_button = QPushButton(tr("ui.import_png_jpeg"))
         layout.addWidget(import_button)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -76,124 +79,311 @@ class ResourcePickerDialog(QDialog):
         import_button.clicked.connect(self._import)
         buttons.accepted.connect(self._accept_selection)
         buttons.rejected.connect(self.reject)
-        self.tree.doubleClicked.connect(lambda _index: self._accept_selection())
-
-    def _relative(self, path: Path) -> str:
-        return PurePosixPath(path.relative_to(self.root)).as_posix()
+        self.images.itemDoubleClicked.connect(lambda _item: self._accept_selection())
 
     def _accept_selection(self) -> None:
-        path = Path(self.model.filePath(self.tree.currentIndex()))
-        if not path.is_file():
-            QMessageBox.information(self, tr("ui.image_select_title"), tr("ui.image_select_format"))
+        item = self.images.currentItem()
+        if item is None:
             return
-        self.selected_path = self._relative(path)
+        self.selected_path = item.data(Qt.ItemDataRole.UserRole)
         self.accept()
 
     def _import(self) -> None:
         source, _ = QFileDialog.getOpenFileName(self, tr("ui.image_import_one"), "", tr("ui.image_filter"))
         if not source:
             return
-        folder, accepted = QInputDialog.getText(self, tr("ui.image_resource_folder"), tr("ui.image_resource_subfolder"))
-        if not accepted:
-            return
         try:
-            self.selected_path = self.importer(Path(source), folder.strip().replace("\\", "/").strip("/"))
+            self.selected_path = self.importer(Path(source), "")
         except Exception as exc:
             QMessageBox.critical(self, tr("ui.image_import_error"), format_error(exc))
             return
         self.accept()
 
 
-class ImageManagerDialog(QDialog):
-    folderImportRequested = Signal(object, str)
+class ImageKeyDialog(QDialog):
+    def __init__(self, name: str, width: int, height: int, parent=None, *, editing=False):
+        super().__init__(parent)
+        self.setWindowTitle(tr("ui.image_key_edit_title" if editing else "ui.image_key_add_title"))
+        self._ratio = width / height
+        self._updating = False
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        self.name = QLineEdit(name)
+        self.name.setObjectName("imageKeyName")
+        self.width = QSpinBox()
+        self.width.setRange(1, max(100000, width))
+        self.width.setValue(width)
+        self.height = QSpinBox()
+        self.height.setRange(1, max(100000, height))
+        self.height.setValue(height)
+        form.addRow(tr("ui.image_key_name"), self.name)
+        form.addRow(tr("ui.width_px"), self.width)
+        form.addRow(tr("ui.height_px"), self.height)
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        layout.addWidget(buttons)
+        self.width.valueChanged.connect(self._width_changed)
+        self.height.valueChanged.connect(self._height_changed)
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
 
-    def __init__(self, root: Path, importer: Callable, replacer: Callable, parent=None):
+    def _width_changed(self, value: int) -> None:
+        if not self._updating:
+            self._updating = True
+            self.height.setValue(max(1, round(value / self._ratio)))
+            self._updating = False
+
+    def _height_changed(self, value: int) -> None:
+        if not self._updating:
+            self._updating = True
+            self.width.setValue(max(1, round(value * self._ratio)))
+            self._updating = False
+
+    def _accept(self) -> None:
+        value = self.name.text()
+        if not value or not all(character.isascii() and (character.isalnum() or character in "_-") for character in value):
+            QMessageBox.information(self, tr("ui.image_key_add_title"), tr("ui.image_key_name_invalid"))
+            return
+        self.name.setText(value.lower())
+        self.accept()
+
+
+class ImageManagerDialog(QDialog):
+    folderImportRequested = Signal(object)
+
+    def __init__(self, root: Path, project, importer: Callable, unregisterer: Callable,
+                 key_creator: Callable, key_editor: Callable, key_remover: Callable, parent=None):
         super().__init__(parent)
         self.root = root
+        self.project = project
         self.importer = importer
-        self.replacer = replacer
+        self.unregisterer = unregisterer
+        self.key_creator, self.key_editor, self.key_remover = key_creator, key_editor, key_remover
         self.setWindowTitle(tr("ui.image_manager_title"))
-        self.resize(720, 520)
+        self.resize(900, 560)
         layout = QVBoxLayout(self)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.images = QListWidget()
         self.images.setObjectName("projectImages")
-        self.images.setIconSize(QSize(64, 64))
-        layout.addWidget(self.images)
-        actions = QHBoxLayout()
-        self.add_button = QPushButton(tr("ui.image_add"))
-        self.replace_button = QPushButton(tr("ui.image_replace"))
-        self.folder_button = QPushButton(tr("ui.image_import_folder"))
-        self.refresh_button = QPushButton(tr("ui.refresh"))
-        for button in (self.add_button, self.replace_button, self.folder_button, self.refresh_button):
-            actions.addWidget(button)
-        layout.addLayout(actions)
+        self.images.setViewMode(QListWidget.ViewMode.IconMode)
+        self.images.setMovement(QListWidget.Movement.Static)
+        self.images.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.images.setWrapping(True)
+        self.images.setIconSize(QSize(80, 80))
+        self.images.setGridSize(QSize(130, 116))
+        self.splitter.addWidget(self.images)
+
+        self.details = QWidget()
+        self.details.setObjectName("imageDetails")
+        self.details.setMinimumWidth(0)
+        self.details.setMaximumWidth(0)
+        details_layout = QVBoxLayout(self.details)
+        self.properties = QLabel()
+        self.properties.setObjectName("imageProperties")
+        self.copy_name_button = QPushButton(tr("ui.image_copy_name"))
+        self.keys = QListWidget()
+        self.keys.setObjectName("imageKeys")
+        self.keys.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.add_key_button = QPushButton(tr("ui.image_key_add"))
+        details_layout.addWidget(self.properties)
+        details_layout.addWidget(self.copy_name_button)
+        details_layout.addWidget(self.keys, 1)
+        details_layout.addWidget(self.add_key_button)
+        self.splitter.addWidget(self.details)
+        self.splitter.setStretchFactor(0, 1)
+        layout.addWidget(self.splitter, 1)
+
         self.import_progress = QLabel()
         self.import_progress.setObjectName("imageImportProgress")
         layout.addWidget(self.import_progress)
+        actions = QHBoxLayout()
+        self.add_button = QPushButton(tr("ui.image_manager_add"))
+        self.folder_button = QPushButton(tr("ui.image_manager_folder"))
+        self.remove_button = QPushButton(tr("ui.image_manager_remove"))
+        for button in (self.add_button, self.folder_button, self.remove_button):
+            actions.addWidget(button)
+        layout.addLayout(actions)
+        self._animation = QPropertyAnimation(self.details, b"maximumWidth", self)
+        self._animation.setDuration(180)
+        self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._animation.finished.connect(self._details_animation_finished)
+        self.images.itemSelectionChanged.connect(self._selection_changed)
+        self.images.itemDoubleClicked.connect(lambda _item: self._select_image(self.images.currentItem()))
         self.add_button.clicked.connect(self._add_image)
-        self.replace_button.clicked.connect(self._replace_image)
         self.folder_button.clicked.connect(self._import_folder)
-        self.refresh_button.clicked.connect(self.refresh)
+        self.remove_button.clicked.connect(self._remove_image)
+        self.add_key_button.clicked.connect(self._add_key)
+        self.keys.itemDoubleClicked.connect(self._edit_key)
+        self.keys.customContextMenuRequested.connect(self._key_context_menu)
+        self.copy_name_button.clicked.connect(self._copy_name)
         self.refresh()
 
-    def refresh(self) -> None:
+    def refresh(self, project=None) -> None:
+        selected = next((image.data(Qt.ItemDataRole.UserRole) for image in self.images.selectedItems()), None)
+        if project is not None:
+            self.project = project
+        self.remove_button.setEnabled(False)
         self.images.clear()
-        try:
-            paths = ResourceRepository.list_images(self.root)
-            for path in paths:
-                relative = path.relative_to(self.root).as_posix()
-                image = QPixmap(str(path))
-                size = f"{image.width()}×{image.height()} px" if not image.isNull() else tr("ui.image_unreadable")
-                item = QListWidgetItem(f"{path.name} — {relative} — {size}")
-                item.setData(Qt.ItemDataRole.UserRole, relative)
-                if not image.isNull():
-                    item.setIcon(QIcon(QPixmap(image.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))))
-                self.images.addItem(item)
-        except Exception as exc:
-            QMessageBox.warning(self, tr("ui.image_manager_title"), format_error(exc))
-        self.replace_button.setEnabled(self.images.count() > 0)
+        for relative in self.project.images:
+            path = self.root / relative
+            pixmap = QPixmap(str(path))
+            item = QListWidgetItem(path.name)
+            item.setData(Qt.ItemDataRole.UserRole, relative)
+            if not pixmap.isNull():
+                item.setIcon(QIcon(pixmap.scaled(80, 80, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)))
+                item.setToolTip(tr("ui.image_dimensions", width=pixmap.width(), height=pixmap.height()))
+            else:
+                item.setToolTip(tr("ui.image_manager_read_error"))
+            self.images.addItem(item)
+            if selected is not None and relative == selected:
+                item.setSelected(True)
+                self.images.setCurrentItem(item)
+        self._selection_changed()
 
-    def _destination_folder(self) -> str | None:
-        folder, accepted = QInputDialog.getText(self, tr("ui.image_destination"), tr("ui.image_subfolder"))
-        return folder.replace("\\", "/").strip("/") if accepted else None
+    def _selection_changed(self) -> None:
+        selected = self.images.selectedItems()
+        self._select_image(selected[0] if selected else None)
 
-    def _add_image(self) -> None:
-        source, _ = QFileDialog.getOpenFileName(self, tr("ui.image_add_title"), "", tr("ui.image_filter"))
-        if not source:
-            return
-        folder = self._destination_folder()
-        if folder is None:
-            return
-        try:
-            self.importer(Path(source), folder)
-            self.refresh()
-        except Exception as exc:
-            QMessageBox.warning(self, tr("ui.image_add_failed"), format_error(exc))
-
-    def _replace_image(self) -> None:
-        item = self.images.currentItem()
+    def _select_image(self, item) -> None:
         if item is None:
-            return
-        source, _ = QFileDialog.getOpenFileName(self, tr("ui.image_replace_title"), "", tr("ui.image_filter"))
-        if not source:
+            self.keys.clear()
+            self.add_key_button.setEnabled(False)
+            self.remove_button.setEnabled(False)
+            self._slide_details(False)
             return
         relative = item.data(Qt.ItemDataRole.UserRole)
-        if QMessageBox.question(self, tr("ui.image_replace_confirm_title"), tr("ui.image_manager_confirm", path=relative)) != QMessageBox.StandardButton.Yes:
+        path = self.root / relative
+        pixmap = QPixmap(str(path))
+        self.properties.setText(
+            tr("ui.image_properties", filename=path.name,
+               dimensions=tr("ui.image_dimensions", width=pixmap.width(), height=pixmap.height())
+               if not pixmap.isNull() else tr("ui.image_manager_read_error"))
+        )
+        self.keys.clear()
+        for name, definition in sorted(self.project.icons.items()):
+            if definition.path == relative:
+                key_item = QListWidgetItem(f"{name} — {definition.width_px}×{definition.height_px} px")
+                key_item.setData(Qt.ItemDataRole.UserRole, name)
+                self.keys.addItem(key_item)
+        self.add_key_button.setEnabled(not pixmap.isNull())
+        self.remove_button.setEnabled(True)
+        self._slide_details(True)
+
+    def _slide_details(self, visible: bool) -> None:
+        self._animation.stop()
+        start = self.details.maximumWidth()
+        end = 285 if visible else 0
+        if visible:
+            self.details.show()
+        self._animation.setStartValue(start)
+        self._animation.setEndValue(end)
+        self._animation.start()
+
+    def _details_animation_finished(self) -> None:
+        if self.details.maximumWidth() == 0:
+            self.details.hide()
+
+    def _copy_name(self) -> None:
+        selected = self.images.selectedItems()
+        item = selected[0] if selected else None
+        if item is not None:
+            from PySide6.QtGui import QGuiApplication
+            QGuiApplication.clipboard().setText(Path(item.data(Qt.ItemDataRole.UserRole)).name)
+
+    def _add_key(self) -> None:
+        selected = self.images.selectedItems()
+        item = selected[0] if selected else None
+        if item is None:
+            return
+        relative = item.data(Qt.ItemDataRole.UserRole)
+        pixmap = QPixmap(str(self.root / relative))
+        if pixmap.isNull():
+            return
+        dialog = ImageKeyDialog("", pixmap.width(), pixmap.height(), self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            target = resolve_project_path(self.root, relative)
-            self.replacer(relative, Path(source), file_hash(target))
+            self.key_creator(dialog.name.text(), relative, dialog.width.value(), dialog.height.value())
             self.refresh()
         except Exception as exc:
-            QMessageBox.warning(self, tr("ui.image_replace_failed"), format_error(exc))
+            QMessageBox.warning(self, tr("ui.image_key_add_title"), format_error(exc))
 
-    def _import_folder(self) -> None:
-        source = QFileDialog.getExistingDirectory(self, tr("ui.image_choose_folder"))
+    def _edit_key(self, item) -> None:
+        original_name = item.data(Qt.ItemDataRole.UserRole)
+        definition = self.project.icons.get(original_name)
+        if definition is None:
+            return
+        if max(definition.width_px, definition.height_px) > 2_147_483_647:
+            QMessageBox.warning(self, tr("ui.image_key_edit_title"), tr("ui.image_key_size_uneditable"))
+            return
+        dialog = ImageKeyDialog(original_name, definition.width_px, definition.height_px, self, editing=True)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            self.key_editor(original_name, dialog.name.text(), dialog.width.value(), dialog.height.value())
+            self.refresh()
+        except Exception as exc:
+            QMessageBox.warning(self, tr("ui.image_key_edit_title"), format_error(exc))
+
+    def _key_context_menu(self, position) -> None:
+        item = self.keys.itemAt(position)
+        if item is None:
+            return
+        self.keys.setCurrentItem(item)
+        menu = QMenu(self.keys)
+        remove = menu.addAction(tr("ui.image_key_remove"))
+        if menu.exec(self.keys.mapToGlobal(position)) == remove:
+            self._remove_key(item)
+
+    def _remove_key(self, item) -> None:
+        name = item.data(Qt.ItemDataRole.UserRole)
+        answer = QMessageBox.question(
+            self, tr("ui.image_key_remove_title"), tr("ui.image_key_remove_confirm", name=name),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.key_remover(name)
+            self.refresh()
+        except Exception as exc:
+            QMessageBox.warning(self, tr("ui.image_key_remove_title"), format_error(exc))
+
+    def _remove_image(self) -> None:
+        selected = self.images.selectedItems()
+        item = selected[0] if selected else None
+        if item is None:
+            return
+        relative = item.data(Qt.ItemDataRole.UserRole)
+        box = QMessageBox(QMessageBox.Icon.Warning, tr("ui.image_manager_remove_title"),
+                          tr("ui.image_manager_remove_confirm", name=Path(relative).name),
+                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, self)
+        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        box.setCheckBox(QCheckBox(tr("ui.image_manager_delete_file"), box))
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.unregisterer(relative, box.checkBox().isChecked())
+            self.refresh()
+        except Exception as exc:
+            QMessageBox.warning(self, tr("ui.image_manager_remove_title"), format_error(exc))
+
+    def _add_image(self) -> None:
+        source, _ = QFileDialog.getOpenFileName(self, tr("ui.image_manager_add_title"), "", tr("ui.image_filter"))
         if not source:
             return
-        folder = self._destination_folder()
-        if folder is not None:
-            self.folderImportRequested.emit(Path(source), folder)
+        try:
+            self.importer(Path(source), "")
+            self.refresh()
+        except Exception as exc:
+            QMessageBox.warning(self, tr("ui.image_manager_add_title"), format_error(exc))
+
+    def _import_folder(self) -> None:
+        source = QFileDialog.getExistingDirectory(self, tr("ui.image_manager_choose_folder"))
+        if source:
+            self.folder_button.setEnabled(False)
+            self.folderImportRequested.emit(Path(source))
 
     def set_import_progress(self, completed: int, total: int, message: str = "") -> None:
         self.import_progress.setText(message or tr("ui.import_progress", completed=completed, total=total))
@@ -206,16 +396,15 @@ class ImageManagerDialog(QDialog):
         if error is not None:
             self.set_import_progress(0, 0, "")
             QMessageBox.warning(self, tr("ui.image_import_title"), error_message or format_error(error))
-            self.refresh()
             return
-        self.refresh()
         self.set_import_progress(len(paths or ()), len(paths or ()), tr("ui.image_import_complete", count=len(paths or ())))
 
 class ImageAddDialog(QDialog):
-    def __init__(self, root: Path, importer: Callable[[Path, str], str], parent=None, *, columns: tuple[str, ...] = ()):
+    def __init__(self, root: Path, importer: Callable[[Path, str], str], parent=None, *, columns: tuple[str, ...] = (), images: tuple[str, ...] | None = None):
         super().__init__(parent)
         self.root = root
         self.importer = importer
+        self.images = images
         self.setWindowTitle(tr("ui.image_new"))
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -230,6 +419,7 @@ class ImageAddDialog(QDialog):
         row = QHBoxLayout()
         self.source = QLineEdit()
         self.source.setObjectName("newImageSource")
+        self.source.setReadOnly(True)
         choose = QPushButton(tr("ui.choose"))
         row.addWidget(self.source, 1)
         row.addWidget(choose)
@@ -252,7 +442,7 @@ class ImageAddDialog(QDialog):
     def _choose(self) -> None:
         if self.content_mode.currentData() != "manual":
             return
-        picker = ResourcePickerDialog(self.root, self.importer, self)
+        picker = ResourcePickerDialog(self.root, self.importer, self, images=self.images)
         if picker.exec() == QDialog.DialogCode.Accepted:
             self.source.setText(picker.selected_path)
 
@@ -275,10 +465,11 @@ class ImageAddDialog(QDialog):
 
 
 class HtmlAddDialog(QDialog):
-    def __init__(self, root: Path, importer: Callable[[Path, str], str], parent=None, *, columns: tuple[str, ...] = ()):
+    def __init__(self, root: Path, importer: Callable[[Path, str], str], parent=None, *, columns: tuple[str, ...] = (), images: tuple[str, ...] | None = None):
         super().__init__(parent)
         self.root = root
         self.importer = importer
+        self.images = images
         self.setWindowTitle(tr("ui.html_new"))
         self.resize(620, 480)
         layout = QVBoxLayout(self)
@@ -334,7 +525,7 @@ class HtmlAddDialog(QDialog):
     def _insert_image(self) -> None:
         if self.content_mode.currentData() != "manual":
             return
-        picker = ResourcePickerDialog(self.root, self.importer, self)
+        picker = ResourcePickerDialog(self.root, self.importer, self, images=self.images)
         if picker.exec() != QDialog.DialogCode.Accepted:
             return
         width, accepted = QInputDialog.getInt(self, tr("ui.image_size"), tr("ui.width_px"), 16, 1, 4096)

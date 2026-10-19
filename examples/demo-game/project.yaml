@@ -1,15 +1,17 @@
 # Пример проекта второго этапа
-schema_version: 7
+schema_version: 8
 id: demo-game
 name: "Лесная игра"
 version: "0.1.0"
 variables:
   edition: "Первый прототип"
+images:
+  - assets/images/leaf.png
 icons:
   ic_leaf_6:
-    path: assets/images/animals/enemy/leaf.png
-    width_mm: 6
-    height_mm: 6
+    path: assets/images/leaf.png
+    width_px: 32
+    height_px: 32
 data_source: null
 copies_columns:
   prod: Prod

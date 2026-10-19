@@ -95,6 +95,7 @@ class FileProjectRepository:
             f"name: {json.dumps(name, ensure_ascii=False)}\n"
             'version: "1.0"\n'
             "variables: {}\n"
+            "images: []\n"
             "icons: {}\n"
             "data_source: null\n"
             "copies_columns:\n  prod: Prod\n  test: Debug\n"
@@ -139,6 +140,9 @@ class FileProjectRepository:
         if model.data_source is not None:
             check_exact_case(root, model.data_source.path)
             resolve_project_path(root, model.data_source.path)
+        for image in model.images:
+            check_exact_case(root, image)
+            resolve_project_path(root, image)
         for item in model.icons.values():
             check_exact_case(root, item.path)
             resolve_project_path(root, item.path)

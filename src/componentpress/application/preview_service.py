@@ -87,9 +87,9 @@ def _single_node_signature(node: object) -> tuple[object, ...]:
 
 
 def _model_signature(snapshot: ProjectSnapshot, component: ComponentDefinition) -> ModelSignature:
-    icons = tuple(sorted((name, item.path, item.width_mm, item.height_mm) for name, item in snapshot.model.icons.items()))
+    icons = tuple(sorted((name, item.path, item.width_px, item.height_px) for name, item in snapshot.model.icons.items()))
     return (component.data.sheet if component.data else None, _node_signature(component.elements),
-            tuple(sorted(snapshot.model.variables.items())), icons)
+            tuple(sorted(snapshot.model.variables.items())), snapshot.model.images, icons)
 
 
 class PreviewService:

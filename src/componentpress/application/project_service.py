@@ -186,17 +186,93 @@ class ProjectService:
     def import_image(self, root: Path, source: Path, folder: str = "") -> str:
         snapshot = self.projects.open(root)
         with self.write_lock(snapshot.root):
-            return self.resources.import_image(snapshot.root, source, folder)
-
-    @_logged("replace_image")
-    def replace_image(self, root: Path, relative: str, source: Path, expected_hash: str) -> None:
-        with self.write_lock(root.resolve()):
-            self.resources.replace_image(root.resolve(), relative, source, expected_hash)
+            relative = self.resources.import_image(snapshot.root, source, folder)
+        if relative not in snapshot.model.images:
+            # A completed file copy can be registered later; don't risk deleting a
+            # file another open instance may have started using.
+            self.projects.save_project(snapshot, images=(*snapshot.model.images, relative))
+        return relative
 
     @_logged("import_image_folder")
     def import_image_folder(self, root: Path, source: Path, folder: str = "", *, cancellation=None, on_progress=None) -> tuple[str, ...]:
+        snapshot = self.projects.open(root)
         with self.write_lock(root.resolve()):
-            return self.resources.import_image_folder(root.resolve(), source, folder, cancellation=cancellation, on_progress=on_progress)
+            paths = self.resources.import_image_folder(root.resolve(), source, folder, cancellation=cancellation, on_progress=on_progress)
+        new_paths = tuple(path for path in paths if path not in snapshot.model.images)
+        if new_paths:
+            self.projects.save_project(snapshot, images=(*snapshot.model.images, *new_paths))
+        return paths
+
+    @_logged("remove")
+    def remove_image(self, session: ProjectSession, relative: str, *, delete_file: bool = False) -> None:
+        snapshot = session.snapshot
+        if relative not in snapshot.model.images:
+            raise ProjectError(Diagnostic("RESOURCE_UNKNOWN", "изображение не зарегистрировано", snapshot.root))
+        from componentpress.project_io.paths import resolve_project_path
+        target = resolve_project_path(snapshot.root, relative)
+        expected_hash = None
+        if delete_file and target.exists():
+            if target.is_symlink() or target.is_junction():
+                raise ProjectError(Diagnostic("PATH_SYMLINK", "символические ссылки не поддерживаются", target))
+            expected_hash = self.resources.image_hash(target)
+        icons = {name: item for name, item in snapshot.model.icons.items() if item.path != relative}
+        updated = self.projects.save_project(
+            snapshot,
+            images=tuple(path for path in snapshot.model.images if path != relative),
+            icons=icons,
+        )
+        session.replace_snapshot(updated)
+        if expected_hash is not None:
+            if not target.exists() or self.resources.image_hash(target) != expected_hash:
+                raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "изображение изменилось перед удалением", target))
+            target.unlink()
+
+    @_logged("register")
+    def add_image_key(self, session: ProjectSession, name: str, relative: str, width_px: int, height_px: int) -> None:
+        from componentpress.domain.project import IconDefinition
+
+        canonical = name.lower()
+        if canonical in session.snapshot.model.icons:
+            raise ProjectError(Diagnostic("IMAGE_KEY_EXISTS", "такой ключ изображения уже существует", session.snapshot.root,
+                                          message_key="error.image_key_exists", params={"name": canonical}))
+        if relative not in session.snapshot.model.images:
+            raise ProjectError(Diagnostic("RESOURCE_UNKNOWN", "изображение не зарегистрировано", session.snapshot.root))
+        icons = dict(session.snapshot.model.icons)
+        icons[canonical] = IconDefinition(path=relative, width_px=width_px, height_px=height_px)
+        updated = self.projects.save_project(session.snapshot, icons=icons)
+        session.replace_snapshot(updated)
+
+    @_logged("save")
+    def update_image_key(
+        self, session: ProjectSession, original_name: str, name: str, width_px: int, height_px: int,
+    ) -> None:
+        from componentpress.domain.project import IconDefinition
+
+        icons = dict(session.snapshot.model.icons)
+        original = icons.pop(original_name.lower(), None)
+        if original is None:
+            raise ProjectError(Diagnostic("IMAGE_KEY_UNKNOWN", "ключ изображения уже удалён", session.snapshot.root,
+                                          message_key="error.image_key_missing", params={"name": original_name.lower()}))
+        canonical = name.lower()
+        if canonical in icons:
+            raise ProjectError(Diagnostic("IMAGE_KEY_EXISTS", "такой ключ изображения уже существует", session.snapshot.root,
+                                          message_key="error.image_key_exists", params={"name": canonical}))
+        icons[canonical] = IconDefinition(
+            path=original.path, width_px=width_px, height_px=height_px,
+        )
+        updated = self.projects.save_project(session.snapshot, icons=icons)
+        session.replace_snapshot(updated)
+
+    @_logged("remove")
+    def remove_image_key(self, session: ProjectSession, name: str) -> None:
+        canonical = name.lower()
+        if canonical not in session.snapshot.model.icons:
+            raise ProjectError(Diagnostic("IMAGE_KEY_UNKNOWN", "ключ изображения уже удалён", session.snapshot.root,
+                                          message_key="error.image_key_missing", params={"name": canonical}))
+        icons = dict(session.snapshot.model.icons)
+        del icons[canonical]
+        updated = self.projects.save_project(session.snapshot, icons=icons)
+        session.replace_snapshot(updated)
 
     @_logged("import_data")
     def import_data(self, session: ProjectSession, source: Path) -> str:
@@ -211,7 +287,7 @@ class ProjectService:
     def update_project_settings(self, session: ProjectSession, *, name: str, version: str,
                                 prod: str, test: str, data_source_file: Path | None = None,
                                 clear_data_source: bool = False) -> None:
-        from componentpress.project_io.files import file_hash
+        import hashlib
         from componentpress.project_io.paths import resolve_project_path
         from pydantic import ValidationError
 
@@ -239,7 +315,7 @@ class ProjectService:
                     relative = self.resources.import_data(session.snapshot.root, data_source_file)
                 if reused_path is None:
                     created_path = resolve_project_path(session.snapshot.root, relative)
-                    created_hash = file_hash(created_path)
+                    created_hash = self.resources.image_hash(created_path)
                 source_path = relative
             elif clear_data_source:
                 source_path = None
@@ -259,8 +335,8 @@ class ProjectService:
             try:
                 project_path = session.snapshot.root / "project.yaml"
                 if (created_path is not None and created_path.exists() and created_hash is not None
-                        and file_hash(created_path) == created_hash
-                        and file_hash(project_path) == original_project_hash):
+                        and self.resources.image_hash(created_path) == created_hash
+                        and self.resources.image_hash(project_path) == original_project_hash):
                     created_path.unlink()
             except OSError:
                 pass

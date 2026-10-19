@@ -367,7 +367,7 @@ def test_menu_popup_renders_native_window_contents_with_effects_disabled(tmp_pat
     menu = window.file_menu
     menu.popup(window.menuBar().mapToGlobal(window.menuBar().actionGeometry(menu.menuAction()).bottomLeft()))
     qtbot.waitUntil(menu.isVisible, timeout=1000)
-    capture = screen.grabWindow(menu.winId()).toImage()
+    capture = menu.grab().toImage()
     assert not capture.isNull()
     colors = {capture.pixelColor(x, y).rgba() for y in range(capture.height()) for x in range(capture.width())}
     assert len(colors) >= 4
@@ -524,9 +524,9 @@ def test_import_cleanup_hash_failure_preserves_primary_error_and_reused_book(tmp
     primary_error = RuntimeError("save failure must stay primary")
     monkeypatch.setattr(service.projects, "save_project", lambda *_args, **_kwargs: (_ for _ in ()).throw(primary_error))
 
-    from componentpress.project_io import files as project_files
+    from componentpress.resources import repository as resource_repository
 
-    real_hash = project_files.file_hash
+    real_hash = resource_repository.file_hash
     calls = 0
 
     def fail_rollback_hash(path: Path) -> str:
@@ -536,7 +536,7 @@ def test_import_cleanup_hash_failure_preserves_primary_error_and_reused_book(tmp
             return real_hash(path)
         raise OSError("cleanup hash failed")
 
-    monkeypatch.setattr(project_files, "file_hash", fail_rollback_hash)
+    monkeypatch.setattr(resource_repository, "file_hash", fail_rollback_hash)
     try:
         service.update_project_settings(
             session, name=session.snapshot.model.name, version=session.snapshot.model.version,
@@ -690,7 +690,7 @@ def test_loading_excel_project_reports_bad_component_and_keeps_other_validation(
     shutil.copytree(source_root, root)
     book_path = root / "data" / "game.xlsx"
     book = load_workbook(book_path)
-    book["Карты"]["D2"] = "assets/images/missing.png"
+    book["Карты"]["D2"] = "missing.png"
     book.save(book_path)
     book.close()
 
@@ -753,7 +753,7 @@ def test_reopening_project_invalidates_previous_excel_validation(tmp_path: Path,
 
     book_path = root / "data" / "game.xlsx"
     book = load_workbook(book_path)
-    book["Карты"]["D2"] = "assets/images/missing.png"
+    book["Карты"]["D2"] = "missing.png"
     book.save(book_path)
     book.close()
     window.load_session(controller.open(root))
@@ -959,7 +959,7 @@ def test_component_creation_and_deletion_round_trip_preserves_draft_and_tab(tmp_
     monkeypatch.setattr(Path, "unlink", unlink)
     tab = window.active_tab
     document = window.session.documents["third"]
-    window._draft_changed(tab, "schema_version: 7\nid: third\nname: [неверный черновик]\n")
+    window._draft_changed(tab, "schema_version: 8\nid: third\nname: [неверный черновик]\n")
     window._undo()
     assert "third" not in window.session.documents
     assert not (root / "components" / "third.yaml").exists()
@@ -967,7 +967,7 @@ def test_component_creation_and_deletion_round_trip_preserves_draft_and_tab(tmp_
     assert window.session.documents["third"] is document
     assert window.active_tab is tab
     assert document.has_invalid_draft
-    assert document.draft_text.startswith("schema_version: 7")
+    assert document.draft_text.startswith("schema_version: 8")
     assert service.projects.open(root).documents["third"].model.name == "Третий компонент"
     assert not errors, errors
 

@@ -53,16 +53,15 @@ def main() -> None:
     (ROOT / "assets" / "images").mkdir(parents=True, exist_ok=True)
     for sheet_index, sheet in enumerate(SHEETS):
         for column in range(2):
-            folder = ROOT / "assets" / "images" / f"set-{sheet_index + 1}" / f"field-{column + 1}"
-            folder.mkdir(parents=True, exist_ok=True)
             for row in range(25):
                 image = image_for(row + column * 11, PALETTES[sheet_index])
-                if not image.save(str(folder / f"row-{row + 1:02}.png"), "PNG"):
-                    raise RuntimeError(f"Could not save image in {folder}")
+                path = ROOT / "assets" / "images" / f"set-{sheet_index + 1}_field-{column + 1}_row-{row + 1:02}.png"
+                if not image.save(str(path), "PNG"):
+                    raise RuntimeError(f"Could not save image in {path}")
 
         safe = sheet.lower()
         color, pale, accent = PALETTES[sheet_index]
-        component = f'''schema_version: 7
+        component = f'''schema_version: 8
 id: {safe}
 name: "{sheet}"
 size_mm:
@@ -142,11 +141,15 @@ elements:
         (ROOT / "components" / f"{safe}.yaml").write_text(component, encoding="utf-8")
 
     refs = "\n".join(f"- id: {sheet.lower()}\n  path: components/{sheet.lower()}.yaml" for sheet in SHEETS)
-    project = f'''schema_version: 7
+    image_names = sorted(path.name for path in (ROOT / "assets" / "images").glob("*.png"))
+    images = "\n".join(f"- assets/images/{name}" for name in image_names)
+    project = f'''schema_version: 8
 id: lorem-ipsum-load-test
 name: "Lorem Ipsum load test"
 version: "0.1.0"
 variables: {{}}
+images:
+{images}
 icons: {{}}
 data_source:
   path: data/load-test.xlsx

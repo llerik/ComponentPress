@@ -76,7 +76,7 @@ def _patch_formula_cells(path: Path) -> None:
 
 def _project(*, variables: dict[str, str] | None = None) -> ProjectDefinition:
     return ProjectDefinition(
-        schema_version=7,
+        schema_version=8,
         id="test",
         name="Тест",
         version="0.0.1",
@@ -87,7 +87,7 @@ def _project(*, variables: dict[str, str] | None = None) -> ProjectDefinition:
 
 def _html_component(html: str) -> ComponentDefinition:
     return ComponentDefinition(
-        schema_version=7,
+        schema_version=8,
         id="card",
         name="Карта",
         size_mm=SizeMM(width=40.0, height=30.0),
@@ -242,7 +242,7 @@ def test_spreadsheet_text_is_not_reinterpreted_as_template_during_render(tmp_pat
 def test_missing_dynamic_image_reports_originating_excel_cell_and_node(tmp_path: Path) -> None:
     project = _project()
     component = ComponentDefinition(
-        schema_version=7,
+        schema_version=8,
         id="card",
         name="Карта",
         size_mm=SizeMM(width=40.0, height=30.0),
@@ -274,7 +274,7 @@ def test_demo_two_sheets_icons_nested_paths_and_template_immutability(tmp_path: 
     event = service.select_row(snapshot, "event-card", row_number=2)
     forest_dump = repr(forest.component)
     event_dump = repr(event.component)
-    assert "assets/images/animals/enemy/leaf.png" in forest_dump
+    assert "assets/images/leaf.png" in forest_dump
     assert "Волк" in forest_dump and "Лесной дождь" in event_dump
     assert len(forest.row.instance_id) == 36
     assert forest.row is not None and forest.row.copies == 2
@@ -340,8 +340,9 @@ def test_cli_preview_export_and_gui_canvas_use_same_resolved_pixels(tmp_path: Pa
     tab = window.open_component("forest-card")
     assert tab is not None
     window._validate_active()
-    fox_index = window.data_row.findData(3)
-    window.data_row.setCurrentIndex(fox_index)
+    row_index = window.data_row.findData(2)
+    window.data_row.setCurrentIndex(-1)
+    window.data_row.setCurrentIndex(row_index)
     qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
     canvas_image = tab.canvas._pixmap_item.pixmap().toImage()
     exported_image = QImage(str(expected))
@@ -401,7 +402,7 @@ def test_dynamic_resource_errors_keep_excel_context_for_all_render_contexts(
     project = _project()
     if kind == "image":
         component = ComponentDefinition(
-            schema_version=7, id="card", name="Карта", size_mm=SizeMM(width=40.0, height=30.0),
+            schema_version=8, id="card", name="Карта", size_mm=SizeMM(width=40.0, height=30.0),
             data=DataBinding(source="main", sheet="Лист"),
             elements=(ImageNode(
                 id="subject", name="Ресурс", type="image", x_mm=0.0, y_mm=0.0,
@@ -415,7 +416,7 @@ def test_dynamic_resource_errors_keep_excel_context_for_all_render_contexts(
     else:
         label = "ic_test"
         project = project.model_copy(update={
-            "icons": {label: IconDefinition(path=relative, width_mm=3.0, height_mm=3.0)},
+            "icons": {label: IconDefinition(path=relative, width_px=12, height_px=12)},
         })
         component = _html_component("<p>{Значение}</p>")
         value = label
@@ -460,7 +461,7 @@ def test_preview_cache_uses_project_source_and_component_sheet(tmp_path: Path) -
     (root / "data/a.xlsx").write_bytes(b"a")
     (root / "data/b.xlsx").write_bytes(b"b")
     component = ComponentDefinition(
-        schema_version=7, id="card", name="Карта", size_mm=SizeMM(width=40, height=30),
+        schema_version=8, id="card", name="Карта", size_mm=SizeMM(width=40, height=30),
         data=DataBinding(sheet="Лист"),
         elements=(HtmlNode(id="text", name="Текст", type="html", x_mm=0, y_mm=0,
             width_mm=40, height_mm=30, font_family="Arial", font_size_pt=8,
@@ -588,7 +589,7 @@ def test_path_invalid_from_excel_keeps_full_origin(
     expected_node: str,
 ) -> None:
     component = ComponentDefinition(
-        schema_version=7, id="card", name="Карта", size_mm=SizeMM(width=40.0, height=30.0),
+        schema_version=8, id="card", name="Карта", size_mm=SizeMM(width=40.0, height=30.0),
         data=DataBinding(source="main", sheet="Лист"), elements=(node,),
     )
     data, row = _data_row(Путь="../outside.png")

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 def require_current_schema(value: Any) -> int:

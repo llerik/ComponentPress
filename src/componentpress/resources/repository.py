@@ -11,18 +11,16 @@ from componentpress.project_io.paths import check_exact_case, resolve_project_pa
 
 class ResourceRepository:
     @staticmethod
+    def image_hash(path: Path) -> str:
+        return file_hash(path)
+
+    @staticmethod
     def list_images(root: Path) -> tuple[Path, ...]:
         images = resolve_project_path(root, "assets/images")
-        found: list[Path] = []
-        for folder, directories, files in os.walk(images, topdown=True, followlinks=False):
-            current = Path(folder)
-            directories[:] = [name for name in directories if not (current / name).is_symlink() and not (current / name).is_junction()]
-            found.extend(
-                current / name for name in files
-                if (current / name).suffix.lower() in {".png", ".jpg", ".jpeg"}
-                and not (current / name).is_symlink() and not (current / name).is_junction()
-            )
-        return tuple(sorted(found, key=lambda path: path.relative_to(root).as_posix().casefold()))
+        return tuple(sorted((path for path in images.iterdir()
+                             if path.is_file() and not path.is_symlink() and not path.is_junction()
+                             and path.suffix.lower() in {".png", ".jpg", ".jpeg"}),
+                            key=lambda path: path.name.casefold()))
 
     def project_data_path(self, root: Path, source: Path) -> str | None:
         root = root.resolve()
@@ -45,30 +43,22 @@ class ResourceRepository:
         except OSError as exc:
             raise ProjectError(Diagnostic("FILE_READ", str(exc), source)) from exc
         self._validate_image_bytes(source, data)
-        folder_path = f"assets/images/{folder}" if folder else "assets/images"
-        validate_relative_path(folder_path)
-        relative = f"{folder_path}/{source.name}"
+        if folder:
+            raise ProjectError(Diagnostic("RESOURCE_FOLDER_UNSUPPORTED", "изображения хранятся непосредственно в assets/images", source))
+        relative = f"assets/images/{source.name}"
         check_exact_case(root, relative)
         target = resolve_project_path(root, relative)
-        if not target.is_relative_to(resolve_project_path(root, "assets/images")):
-            raise ProjectError(Diagnostic("PATH_ESCAPE", "ресурс вне assets/images", target))
-        parent = target.parent
-        for existing in parent.iterdir() if parent.exists() else ():
-            if existing.name.casefold() == target.name.casefold():
-                raise ProjectError(Diagnostic("FILE_EXISTS", "файл с таким именем уже есть", existing))
-        atomic_create(target, data)
+        if target.exists():
+            if target.is_symlink() or target.is_junction() or target.suffix != source.suffix:
+                raise ProjectError(Diagnostic("FILE_EXISTS", "совпадающее имя изображения с другим регистром или форматом", target))
+            if file_hash(target) != hashlib.sha256(data).hexdigest():
+                raise ProjectError(Diagnostic("FILE_EXISTS", "изображение с таким именем уже существует", target))
+        else:
+            for existing in target.parent.iterdir() if target.parent.exists() else ():
+                if existing.name.casefold() == target.name.casefold():
+                    raise ProjectError(Diagnostic("FILE_EXISTS", "совпадающее имя изображения", existing))
+            atomic_create(target, data)
         return PurePosixPath(relative).as_posix()
-
-    def replace_image(self, root: Path, relative: str, source: Path, expected_hash: str) -> None:
-        target = resolve_project_path(root, relative)
-        images_root = resolve_project_path(root, "assets/images")
-        if not target.is_relative_to(images_root) or source.suffix.lower() != target.suffix.lower():
-            raise ProjectError(Diagnostic("RESOURCE_INVALID", "замена должна иметь тот же формат в assets/images", source))
-        if not source.is_file() or source.is_symlink() or source.is_junction():
-            raise ProjectError(Diagnostic("RESOURCE_INVALID", "выберите обычный файл изображения", source))
-        data = source.read_bytes()
-        self._validate_image_bytes(source, data)
-        atomic_write(target, data, expected_hash)
 
     @staticmethod
     def _validate_image_bytes(source: Path, data: bytes) -> None:
@@ -94,13 +84,13 @@ class ResourceRepository:
             raise ProjectError(Diagnostic("RESOURCE_SOURCE_INVALID", "папку assets/images нельзя импортировать в неё же", source))
         if not source.is_dir() or source.is_symlink() or source.is_junction():
             raise ProjectError(Diagnostic("RESOURCE_SOURCE_INVALID", "выберите обычную исходную папку", source))
-        destination = f"assets/images/{folder}" if folder else "assets/images"
-        validate_relative_path(destination)
-        target_root = resolve_project_path(root, destination)
-        if not target_root.is_relative_to(images_root):
-            raise ProjectError(Diagnostic("PATH_ESCAPE", "папка назначения вне assets/images", target_root))
-        existing = {path.name.casefold() for path in target_root.iterdir()} if target_root.is_dir() else set()
+        if folder:
+            raise ProjectError(Diagnostic("RESOURCE_FOLDER_UNSUPPORTED", "изображения хранятся непосредственно в assets/images", source))
+        destination = "assets/images"
+        target_root = images_root
+        existing: dict[str, Path] = {path.name.casefold(): path for path in target_root.iterdir()} if target_root.is_dir() else {}
         entries: list[tuple[Path, str, str, int]] = []
+        result_paths: list[str] = []
         collisions: set[str] = set()
         for current_name, directories, files in os.walk(source, topdown=True, followlinks=False):
             if cancellation is not None:
@@ -116,13 +106,22 @@ class ResourceRepository:
                 target = f"{destination}/{flattened}"
                 validate_relative_path(target)
                 folded = flattened.casefold()
-                if folded in existing or folded in collisions:
+                if folded in collisions:
                     raise ProjectError(Diagnostic("FILE_EXISTS", f"совпадающее имя ресурса: {flattened}", target_root / flattened))
                 collisions.add(folded)
                 data = item.read_bytes()
                 self._validate_image_bytes(item, data)
-                entries.append((item, target, hashlib.sha256(data).hexdigest(), len(data)))
-        if not entries:
+                digest = hashlib.sha256(data).hexdigest()
+                prior = existing.get(folded)
+                if prior is not None:
+                    if prior.name != flattened or prior.suffix != item.suffix or prior.is_symlink() or prior.is_junction():
+                        raise ProjectError(Diagnostic("FILE_EXISTS", f"совпадающее имя ресурса: {flattened}", prior))
+                    if file_hash(prior) != digest:
+                        raise ProjectError(Diagnostic("FILE_EXISTS", f"изображение с таким именем уже существует: {flattened}", prior))
+                else:
+                    entries.append((item, target, digest, len(data)))
+                result_paths.append(target)
+        if not result_paths:
             return ()
 
         def verify() -> None:
@@ -138,8 +137,9 @@ class ResourceRepository:
                 if collision:
                     raise ProjectError(Diagnostic("FILE_EXISTS", f"совпадающее имя ресурса: {target_path.name}", target_path))
 
-        publish_resources(root, entries, verify=verify, cancellation=cancellation, on_progress=on_progress)
-        return tuple(target for _item, target, _digest, _size in entries)
+        if entries:
+            publish_resources(root, entries, verify=verify, cancellation=cancellation, on_progress=on_progress)
+        return tuple(result_paths)
 
     def import_data(self, root: Path, source: Path) -> str:
         if not source.is_file() or source.suffix.lower() != ".xlsx":

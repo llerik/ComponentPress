@@ -9,11 +9,11 @@ import re
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.project import IconDefinition
-from componentpress.rendering.geometry import mm_to_html_pixels
 from componentpress.rendering.resources import ProjectResourceLoader
 
 
 _ICON = re.compile(r"(?<!\w)(\\?)(ic_[A-Za-z0-9_]+)(?!\w)", re.UNICODE)
+_KEY = re.compile(r"(\\)?\{([A-Za-z0-9_-]+)(\\)?\}")
 
 
 class _HtmlIconParser(HTMLParser):
@@ -30,6 +30,7 @@ class _HtmlIconParser(HTMLParser):
         sheet: str,
         cell: str,
         node_id: str,
+        strict_unknown: bool,
     ):
         super().__init__(convert_charrefs=False)
         self.icons = icons
@@ -40,6 +41,7 @@ class _HtmlIconParser(HTMLParser):
         self.sheet = sheet
         self.cell = cell
         self.node_id = node_id
+        self.strict_unknown = strict_unknown
         self.output: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -58,7 +60,10 @@ class _HtmlIconParser(HTMLParser):
         self.output.append(f"</{tag}>")
 
     def handle_data(self, data: str) -> None:
-        self.output.append(expand_icons(
+        expanded = _KEY.sub(lambda match: _expand_key(
+            match, self.icons, self.loader, self.owner, self.field, self.source,
+            self.sheet, self.cell, self.node_id, strict_unknown=self.strict_unknown,
+        ), expand_icons(
             data,
             self.icons,
             loader=self.loader,
@@ -69,6 +74,9 @@ class _HtmlIconParser(HTMLParser):
             cell=self.cell,
             node_id=self.node_id,
         ))
+        if self.strict_unknown:
+            expanded = expanded.replace(r"\{", "{").replace(r"\}", "}")
+        self.output.append(expanded)
 
     def handle_entityref(self, name: str) -> None:
         self.output.append(f"&{name};")
@@ -103,7 +111,7 @@ def expand_icons(
         if escaped:
             pieces.append(escape(name, quote=False))
         else:
-            icon = icons.get(name)
+            icon = icons.get(name.lower())
             if icon is None:
                 raise ProjectError(Diagnostic(
                     "ICON_UNKNOWN", f"нет именованной иконки {name!r}", owner, field,
@@ -119,11 +127,9 @@ def expand_icons(
                         message_key=exc.diagnostic.message_key, params=exc.diagnostic.params,
                         incident_id=exc.diagnostic.incident_id,
                     )) from exc
-            width = mm_to_html_pixels(icon.width_mm)
-            height = mm_to_html_pixels(icon.height_mm)
             pieces.append(
                 f'<img src="{escape(icon.path, quote=True)}" '
-                f'width="{width:.4f}" height="{height:.4f}" alt="{escape(name, quote=True)}" />'
+                f'width="{icon.width_px}" height="{icon.height_px}" alt="{escape(name, quote=True)}" />'
             )
         position = match.end()
     pieces.append(escape(text[position:], quote=False))
@@ -141,6 +147,7 @@ def expand_html_icons(
     sheet: str,
     cell: str,
     node_id: str,
+    strict_unknown: bool = True,
 ) -> str:
     """Expand icon labels in HTML text nodes without escaping the HTML tags."""
     parser = _HtmlIconParser(
@@ -152,7 +159,37 @@ def expand_html_icons(
         sheet=sheet,
         cell=cell,
         node_id=node_id,
+        strict_unknown=strict_unknown,
     )
     parser.feed(html)
     parser.close()
     return "".join(parser.output)
+
+
+def _expand_key(
+    match: re.Match[str], icons: dict[str, IconDefinition],
+    loader: ProjectResourceLoader | None, owner: Path, field: str,
+    source: str, sheet: str, cell: str, node_id: str, *, strict_unknown: bool = True,
+) -> str:
+    escaped_open, name, escaped_close = match.groups()
+    if escaped_open or escaped_close:
+        return escape("{" + name + "}", quote=False)
+    icon = icons.get(name.lower())
+    if icon is None:
+        if not strict_unknown:
+            return match.group(0)
+        raise ProjectError(Diagnostic(
+            "IMAGE_KEY_UNKNOWN", f"нет ключа изображения {name!r}", owner, field,
+            source=source, sheet=sheet, cell=cell, node_id=node_id,
+            message_key="error.image_key_unknown", params={"name": name},
+        ))
+    if loader is not None:
+        try:
+            loader.image(icon.path, owner=owner, field=field)
+        except ProjectError as exc:
+            raise ProjectError(Diagnostic(
+                exc.diagnostic.code, exc.diagnostic.message, owner, field,
+                source=source, sheet=sheet, cell=cell, node_id=node_id,
+            )) from exc
+    return (f'<img src="{escape(icon.path, quote=True)}" width="{icon.width_px}" '
+            f'height="{icon.height_px}" alt="{escape(name, quote=True)}" />')

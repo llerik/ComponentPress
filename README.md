@@ -105,3 +105,7 @@ releases/0.15/ComponentPress-0.15-win-x64.exe — автономный GUI-фа�
 ## Выпуск 0.18
 
 [releases/0.18/ComponentPress-0.18-win-x64.exe](releases/0.18/ComponentPress-0.18-win-x64.exe) — автономный GUI-файл для Windows 10 x64; schema 7. Размер, SHA-256, проверки и ограничения указаны в [CHANGES.txt](releases/0.18/CHANGES.txt).
+
+## Выпуск этапа 20
+
+[releases/0.19/ComponentPress-0.19-win-x64.exe](releases/0.19/ComponentPress-0.19-win-x64.exe) — автономный GUI-файл для Windows 10 x64 со schema 8 и менеджером изображений/ключей. Не-UI проверки: 483 passed, 1 skipped; UI: 162 passed; frozen smoke прошёл. Размер, SHA-256 и ограничения приведены в [CHANGES.txt](releases/0.19/CHANGES.txt).
