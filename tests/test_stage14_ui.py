@@ -154,6 +154,8 @@ def test_copy_mode_switch_changes_label_color_and_keyboard_state(qtbot) -> None:
 def test_build_request_uses_copy_switch_mode(tmp_path: Path, qtbot, monkeypatch, mode: str) -> None:
     from types import SimpleNamespace
     from componentpress.application.contracts import BuildRequest
+    from componentpress.domain.project import PrintSettings
+    from componentpress.user_preferences import ProgramPreferences
 
     _root, window, _service = make_window(tmp_path, qtbot)
     window.data_mode.setChecked(mode == "test")
@@ -161,31 +163,16 @@ def test_build_request_uses_copy_switch_mode(tmp_path: Path, qtbot, monkeypatch,
     window.controller.build = SimpleNamespace(cancel=lambda _job_id: True)
     requests = []
 
-    class Dialog:
-        class DialogCode:
-            Accepted = 1
-
-        class Workers:
-            @staticmethod
-            def value():
-                return 2
-
-        def __init__(self, _settings, _parent, *, mode):
-            self.mode = mode
-            self.workers = self.Workers()
-
-        def exec(self):
-            return self.DialogCode.Accepted
-
-        def print_settings(self):
-            return window.session.snapshot.model.print
-
-    monkeypatch.setattr(main_window_module, "BuildOptionsDialog", Dialog)
+    window._program_preferences = ProgramPreferences(
+        print_settings=PrintSettings(cut_lines=False, dpi=450), png_workers=5,
+    )
     monkeypatch.setattr(window.controller, "start_build", lambda request, **_kwargs: (requests.append(request), "job")[1])
     window._start_build(active_only=False)
 
     assert isinstance(requests[0], BuildRequest)
     assert requests[0].mode == mode
+    assert requests[0].print_settings == PrintSettings(cut_lines=False, dpi=450)
+    assert requests[0].max_render_workers == 5
     assert window._build_progress is not None
     assert not window.build_active_widget_action.isVisible()
     assert not window.build_all_widget_action.isVisible()
@@ -462,7 +449,7 @@ def test_invalid_version_is_localized_and_rejected_before_excel_copy(tmp_path: P
     window.load_session(service.open_session(root))
     qtbot.addWidget(window)
     events.clear()
-    before = (root / "project.yaml").read_bytes()
+    before = (root / "project.cpress").read_bytes()
 
     from componentpress.domain.diagnostics import ProjectError
 
@@ -473,7 +460,7 @@ def test_invalid_version_is_localized_and_rejected_before_excel_copy(tmp_path: P
         )
     assert caught.value.diagnostic.code == "PROJECT_VERSION_INVALID"
     assert tr("error.project_version_invalid") in format_error(caught.value)
-    assert (root / "project.yaml").read_bytes() == before
+    assert (root / "project.cpress").read_bytes() == before
     assert not (root / "data/outside.xlsx").exists()
     assert events[0][1] == {"operation": "project_settings", "status": "started"}
     assert events[-1][1]["code"] == "PROJECT_VERSION_INVALID"
@@ -499,7 +486,7 @@ def test_project_settings_external_nested_book_and_conflict_are_safe(tmp_path: P
     conflict.write_bytes(b"not an xlsx")
     errors = []
     window._show_error = errors.append
-    before_project = (root / "project.yaml").read_bytes()
+    before_project = (root / "project.cpress").read_bytes()
     before_book = (root / "data/book.xlsx").read_bytes()
     try:
         window.controller.update_project_settings(name="Game", version="0.1.0", prod="Prod", test="Debug", data_source_file=conflict)
@@ -507,7 +494,7 @@ def test_project_settings_external_nested_book_and_conflict_are_safe(tmp_path: P
         assert str(exc).strip()
     else:
         raise AssertionError("invalid external XLSX unexpectedly accepted")
-    assert (root / "project.yaml").read_bytes() == before_project
+    assert (root / "project.cpress").read_bytes() == before_project
     assert (root / "data/book.xlsx").read_bytes() == before_book
 
 
@@ -520,7 +507,7 @@ def test_import_cleanup_hash_failure_preserves_primary_error_and_reused_book(tmp
     source = tmp_path / "new.xlsx"
     shutil.copy2(root / "data/game.xlsx", source)
     original_book = (root / "data/game.xlsx").read_bytes()
-    project_before = (root / "project.yaml").read_bytes()
+    project_before = (root / "project.cpress").read_bytes()
     primary_error = RuntimeError("save failure must stay primary")
     monkeypatch.setattr(service.projects, "save_project", lambda *_args, **_kwargs: (_ for _ in ()).throw(primary_error))
 
@@ -549,7 +536,7 @@ def test_import_cleanup_hash_failure_preserves_primary_error_and_reused_book(tmp
 
     assert calls == 2
     assert (root / "data/game.xlsx").read_bytes() == original_book
-    assert (root / "project.yaml").read_bytes() == project_before
+    assert (root / "project.cpress").read_bytes() == project_before
 
 
 def test_blank_errors_and_invalid_project_version_have_useful_message(tmp_path: Path, qtbot, monkeypatch) -> None:
@@ -783,9 +770,8 @@ def test_compact_shell_has_icon_tools_and_project_docks(tmp_path: Path, qtbot) -
 
 
 def test_command_and_instance_buttons_use_the_assigned_png_icons(tmp_path: Path, qtbot, monkeypatch) -> None:
-    theme_settings = QSettings(str(tmp_path / "theme.ini"), QSettings.Format.IniFormat)
-    theme_settings.setValue("theme", "light")
-    monkeypatch.setattr(main_window_module, "theme_settings", lambda: theme_settings)
+    from componentpress.user_preferences import ProgramPreferences
+    monkeypatch.setattr(main_window_module, "load_preferences", lambda: ProgramPreferences(theme="light"))
     _root, window, _service = make_window(tmp_path, qtbot)
     assets = Path(__file__).resolve().parents[1] / "src" / "componentpress" / "app_assets"
 
@@ -987,7 +973,7 @@ def test_failed_component_delete_does_not_hide_tab_or_advance_history(tmp_path: 
     window._undo()
     redo_entry = window._component_history.redo_entry()
     before = window._component_history_index
-    (root / "project.yaml").write_text("external change\n", encoding="utf-8")
+    (root / "project.cpress").write_text("external change\n", encoding="utf-8")
     errors = []
     monkeypatch.setattr(window, "_show_error", errors.append)
 
@@ -1020,8 +1006,8 @@ def test_ui_layout_preferences_are_local_and_restored(tmp_path: Path, qtbot) -> 
     assert restored_sizes[0] / sum(restored_sizes) == pytest.approx(
         saved_sizes[0] / sum(saved_sizes), abs=0.03
     )
-    assert (root / "project.yaml").exists()
-    assert ".componentpress" not in (root / "project.yaml").read_text(encoding="utf-8")
+    assert (root / "project.cpress").exists()
+    assert ".componentpress" not in (root / "project.cpress").read_text(encoding="utf-8")
 
 
 def test_component_dialog_keeps_fractional_existing_size_and_lists_presets(qtbot) -> None:

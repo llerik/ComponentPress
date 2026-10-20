@@ -20,6 +20,7 @@ from componentpress.domain.html_resources import html_image_sources
 from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, Node
 from componentpress.domain.project import PrintSettings
 from componentpress.domain.render_plan import ResolvedComponent
+from componentpress.domain.schema import PROJECT_MANIFEST
 from componentpress.domain.values import DataRow, DataSheetSnapshot
 from componentpress.project_io.files import file_hash
 from componentpress.project_io.paths import check_exact_case, resolve_project_path
@@ -205,8 +206,8 @@ class InputSnapshotBuilder:
 
     def _collect_instances(self, source: ProjectSnapshot, ordered: tuple[str, ...], mode: str,
                            token: Cancellation) -> _BuildPlan:
-        plan = _BuildPlan(input_hashes={"project.yaml": source.disk_hash},
-                          source_hashes={source.root / "project.yaml": source.disk_hash})
+        plan = _BuildPlan(input_hashes={PROJECT_MANIFEST: source.disk_hash},
+                          source_hashes={source.root / PROJECT_MANIFEST: source.disk_hash})
         resolver: ComponentResolver = BindingResolver(
             source.root, source.model, ProjectResourceLoader(source.root))
         for component_id in ordered:

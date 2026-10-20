@@ -55,7 +55,7 @@ def test_comments_group_ids_and_values_survive_save_cycle(tmp_path: Path) -> Non
     snapshot = repo.save_project(snapshot, name="Новое название")
     size = snapshot.documents["forest-card"].model.size_mm.model_copy(update={"width": 70.5})
     repo.save_component(snapshot, "forest-card", size_mm=size)
-    project_text = (root / "project.yaml").read_text(encoding="utf-8")
+    project_text = (root / "project.cpress").read_text(encoding="utf-8")
     component_text = (root / "components/forest-card.yaml").read_text(encoding="utf-8")
     assert "# Пример проекта второго этапа" in project_text
     assert "# Статический макет с вложенной группой" in component_text
@@ -116,7 +116,7 @@ def test_old_row_syntax_reports_field_and_line(tmp_path: Path) -> None:
 
 def test_icon_and_portable_path_errors(tmp_path: Path) -> None:
     root = demo(tmp_path)
-    path = root / "project.yaml"
+    path = root / "project.cpress"
     original = path.read_text(encoding="utf-8")
     for broken, code in [
         (original.replace("ic_leaf_6", "leaf.name"), "DOCUMENT_INVALID"),
@@ -133,7 +133,7 @@ def test_external_edit_blocks_save_without_overwrite(tmp_path: Path) -> None:
     root = demo(tmp_path)
     repo = FileProjectRepository()
     snapshot = repo.open(root)
-    path = root / "project.yaml"
+    path = root / "project.cpress"
     external = path.read_text(encoding="utf-8") + "# Изменено снаружи\n"
     path.write_text(external, encoding="utf-8")
     with pytest.raises(ProjectError) as caught:
@@ -167,7 +167,7 @@ def test_grammar_accepts_only_public_forms() -> None:
 
 def test_column_content_requires_a_sheet_binding(tmp_path: Path) -> None:
     root = demo(tmp_path)
-    project = root / "project.yaml"
+    project = root / "project.cpress"
     project.write_text(project.read_text(encoding="utf-8").replace("data_source: null", "data_source:\n  path: data/game.xlsx"), encoding="utf-8")
     (root / "data").mkdir(exist_ok=True)
     shutil.copy2(EXAMPLE.parent / "demo-excel-game" / "data" / "game.xlsx", root / "data" / "game.xlsx")
@@ -194,7 +194,7 @@ def test_interrupted_registration_removes_only_its_unchanged_file(tmp_path: Path
     journal.write_text(json.dumps({
         "component": "components/orphan.yaml",
         "component_hash": hashlib.sha256(content).hexdigest(),
-        "old_project_hash": file_hash(root / "project.yaml"),
+        "old_project_hash": file_hash(root / "project.cpress"),
         "new_project_hash": "not-committed",
     }), encoding="utf-8")
     FileProjectRepository().open(root)
@@ -212,7 +212,7 @@ def test_conflicting_interrupted_registration_preserves_files(tmp_path: Path) ->
     journal.write_text(json.dumps({
         "component": "components/orphan.yaml",
         "component_hash": "different-hash",
-        "old_project_hash": file_hash(root / "project.yaml"),
+        "old_project_hash": file_hash(root / "project.cpress"),
         "new_project_hash": "not-committed",
     }), encoding="utf-8")
     with pytest.raises(ProjectError) as caught:
@@ -241,21 +241,21 @@ def test_project_edits_preserve_document_validity_and_remove_deleted_icon(tmp_pa
     root = demo(tmp_path)
     repo = FileProjectRepository()
     snapshot = repo.open(root)
-    original = (root / "project.yaml").read_bytes()
+    original = (root / "project.cpress").read_bytes()
     with pytest.raises(ProjectError) as caught:
         repo.save_project(snapshot, variables={})
     assert caught.value.diagnostic.code == "VARIABLE_UNKNOWN"
-    assert (root / "project.yaml").read_bytes() == original
+    assert (root / "project.cpress").read_bytes() == original
     saved = repo.save_project(snapshot, icons={})
     assert saved.model.icons == {}
-    assert "ic_leaf_6" not in (root / "project.yaml").read_text(encoding="utf-8")
+    assert "ic_leaf_6" not in (root / "project.cpress").read_text(encoding="utf-8")
 
 
 def test_component_save_checks_project_revision(tmp_path: Path) -> None:
     root = demo(tmp_path)
     repo = FileProjectRepository()
     snapshot = repo.open(root)
-    project = root / "project.yaml"
+    project = root / "project.cpress"
     project.write_text(project.read_text(encoding="utf-8") + "# external\n", encoding="utf-8")
     document = root / "components/forest-card.yaml"
     original = document.read_bytes()
@@ -273,7 +273,7 @@ def test_project_reference_does_not_follow_symlink(tmp_path: Path) -> None:
         link.symlink_to(picture)
     except OSError:
         pytest.skip("создание symlink недоступно в этой среде")
-    project = root / "project.yaml"
+    project = root / "project.cpress"
     project.write_text(project.read_text(encoding="utf-8").replace("assets/images/leaf.png", "assets/images/linked.png"), encoding="utf-8")
     with pytest.raises(ProjectError) as caught:
         FileProjectRepository().open(root)

@@ -183,7 +183,7 @@ def test_project_and_new_component_templates_use_shared_schema_eight(tmp_path: P
 def test_old_or_mistyped_project_schema_is_rejected_without_rewriting(tmp_path: Path, version: object) -> None:
     root = tmp_path / "game"
     shutil.copytree(ROOT / "examples" / "demo-game", root)
-    project = root / "project.yaml"
+    project = root / "project.cpress"
     source = project.read_text(encoding="utf-8")
     scalar = repr(version) if isinstance(version, str) else str(version)
     if version == "true":

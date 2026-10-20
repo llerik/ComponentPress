@@ -39,7 +39,7 @@ def make_window(root: Path, qtbot) -> MainWindow:
 
 def test_legacy_project_is_rejected_without_migration_or_writes(tmp_path: Path) -> None:
     root = copy_example(tmp_path)
-    project = root / "project.yaml"
+    project = root / "project.cpress"
     component = root / "components/forest-card.yaml"
     project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 8", "schema_version: 2"), encoding="utf-8")
     originals = (project.read_bytes(), component.read_bytes())
@@ -56,7 +56,7 @@ def test_legacy_project_is_rejected_without_migration_or_writes(tmp_path: Path) 
 
 def test_legacy_migration_entry_point_is_read_only(tmp_path: Path, monkeypatch) -> None:
     root = copy_example(tmp_path)
-    project = root / "project.yaml"
+    project = root / "project.cpress"
     component = root / "components/forest-card.yaml"
     project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 8", "schema_version: 1"), encoding="utf-8")
     component.write_text(component.read_text(encoding="utf-8").replace("schema_version: 8", "schema_version: 1"), encoding="utf-8")

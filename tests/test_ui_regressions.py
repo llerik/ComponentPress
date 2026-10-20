@@ -310,9 +310,8 @@ def test_resolver_keeps_shapes_and_signed_line_visible_in_nested_trees(tmp_path,
 def make_editor(tmp_path, qtbot, monkeypatch):
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
     QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path / "settings"))
-    theme_settings = QSettings(str(tmp_path / "theme.ini"), QSettings.Format.IniFormat)
-    theme_settings.setValue("theme", "light")
-    monkeypatch.setattr("componentpress.editor.main_window.theme_settings", lambda: theme_settings)
+    from componentpress.user_preferences import ProgramPreferences
+    monkeypatch.setattr("componentpress.editor.main_window.load_preferences", lambda: ProgramPreferences(theme="light"))
 
     def make(excel=False):
         apply_theme("light")
@@ -351,29 +350,11 @@ def test_empty_preview_invalidates_late_worker_result(make_editor, monkeypatch, 
 
 
 def test_build_reservation_rejects_preview_from_dialog_event_loop(make_editor, monkeypatch):
-    from types import SimpleNamespace
-    from PySide6.QtWidgets import QDialog
-    from componentpress.editor import main_window as main_window_module
-
     window, _root, _errors = make_editor()
     tab = window.active_tab
     starts = []
     monkeypatch.setattr(window.controller, "start_build", lambda request, **_kwargs: starts.append(request) or "test-job")
 
-    class Dialog:
-        DialogCode = QDialog.DialogCode
-
-        def __init__(self, *_args, **_kwargs):
-            self.workers = SimpleNamespace(value=lambda: 2)
-
-        def exec(self):
-            tab.previewRequested.emit()
-            return QDialog.DialogCode.Accepted
-
-        def print_settings(self):
-            return window.session.snapshot.model.print
-
-    monkeypatch.setattr(main_window_module, "BuildOptionsDialog", Dialog)
     window._preview_coordinator.active = object()
     window._start_build(False)
     assert window._build_pending_active_only is False and not starts
@@ -512,25 +493,23 @@ def test_version_replacement_dialog_keeps_operation_admission(make_editor, monke
     window._version_busy_id = None
 
 
-def test_build_dialog_cancel_releases_reservation_and_resumes_preview(make_editor, monkeypatch):
-    from PySide6.QtWidgets import QDialog
-    from componentpress.editor import main_window as main_window_module
-
+def test_build_runs_after_preview_and_releases_reservation(make_editor, monkeypatch):
     window, _root, _errors = make_editor()
-
-    class Dialog:
-        DialogCode = QDialog.DialogCode
-
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def exec(self):
-            return QDialog.DialogCode.Rejected
-
-    monkeypatch.setattr(main_window_module, "BuildOptionsDialog", Dialog)
+    requests = []
+    monkeypatch.setattr(window.controller, "start_build", lambda request, **_kwargs: requests.append(request) or "test-job")
+    window._preview_coordinator.active = object()
     window._start_build(False)
+    assert window._reserved_build_request is not None
+    assert not requests
+    window._preview_coordinator.active = None
+    window._continue_build_after_preview()
+    assert len(requests) == 1
     assert window._build_pending_active_only is None
-    assert window.active_tab.preview_timer.isActive()
+    assert window._reserved_build_request is None
+    window._active_build_job = None
+    window._build_progress.close()
+    window._build_progress.deleteLater()
+    window._build_progress = None
 
 
 def test_build_reservation_rejects_project_switch_methods(make_editor, monkeypatch, tmp_path):

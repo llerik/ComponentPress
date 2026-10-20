@@ -26,7 +26,7 @@ def copy_demo(tmp_path: Path) -> Path:
 
 def test_schema_three_rejects_old_project_without_rewriting_files(tmp_path: Path) -> None:
     root = copy_demo(tmp_path)
-    project = root / "project.yaml"
+    project = root / "project.cpress"
     original = project.read_bytes()
     project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 8", "schema_version: 2", 1), encoding="utf-8")
     old = project.read_bytes()

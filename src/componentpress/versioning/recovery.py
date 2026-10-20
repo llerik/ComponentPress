@@ -12,6 +12,7 @@ from componentpress.diagnostics.logging import log_event
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.platforms.services import ProjectWriteLock
 from componentpress.project_io.files import file_hash
+from componentpress.domain.schema import PROJECT_MANIFEST
 from componentpress.project_io.yaml_codec import parse_project
 from componentpress.versioning.repository import _verify_archive
 
@@ -61,7 +62,7 @@ def _warning(code: str, message: str, path: Path) -> Diagnostic:
 
 
 def _recover_project_versions_locked(root: Path, operation_root: Path) -> tuple[Diagnostic, ...]:
-    project_path = root / "project.yaml"
+    project_path = root / PROJECT_MANIFEST
     try:
         current_project, _ = parse_project(project_path.read_text(encoding="utf-8"), project_path)
     except (OSError, UnicodeError, ProjectError) as exc:

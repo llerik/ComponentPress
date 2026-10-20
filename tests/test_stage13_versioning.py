@@ -117,12 +117,12 @@ def test_invalid_path_in_archive_manifest_is_rejected_before_destination_write(t
         "project_id": "game",
         "project_version": "0.1.0",
         "schema_version": 8,
-        "files": {"project.yaml": {"size": 0, "sha256": hashlib.sha256(b"").hexdigest()}, "../outside": {"size": 0, "sha256": hashlib.sha256(b"").hexdigest()}},
+        "files": {"project.cpress": {"size": 0, "sha256": hashlib.sha256(b"").hexdigest()}, "../outside": {"size": 0, "sha256": hashlib.sha256(b"").hexdigest()}},
         "directories": [],
     }
     with zipfile.ZipFile(archive_path, "w") as archive:
         archive.writestr("manifest.json", json.dumps(manifest))
-        archive.writestr("project/project.yaml", b"")
+        archive.writestr("project/project.cpress", b"")
         archive.writestr("project/../outside", b"")
     destination = tmp_path / "restored"
 
@@ -160,8 +160,8 @@ def test_recovery_cleans_published_archive_journal_without_changing_project(tmp_
     # A legacy journal field is ignored; recovery never applies the former patch.
     record["next_version"] = "0.1.1"
     journal.write_text(json.dumps(record), encoding="utf-8")
-    monkeypatch.setattr(module, "atomic_write", lambda *args, **kwargs: pytest.fail("recovery must not write project.yaml"))
-    project_path = root / "project.yaml"
+    monkeypatch.setattr(module, "atomic_write", lambda *args, **kwargs: pytest.fail("recovery must not write project.cpress"))
+    project_path = root / "project.cpress"
     project_path.write_bytes(project_path.read_bytes().replace(b'version: "0.1.0"', b'version: "later"'))
     saved_project = project_path.read_bytes()
     reopened = repository.open(root)
@@ -232,7 +232,7 @@ def test_gui_archive_export_and_import_run_without_blocking_the_window(tmp_path:
     qtbot.waitUntil(lambda: window._version_task is None, timeout=15000)
     assert window.session.snapshot.root == parent / "restored"
     assert window.session.snapshot.model.version == "0.1.0"
-    assert root.joinpath("project.yaml").is_file()
+    assert root.joinpath("project.cpress").is_file()
 
     source = tmp_path / "image-source"
     source.mkdir()

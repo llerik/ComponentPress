@@ -106,12 +106,12 @@ def test_add_journal_cleanup_failure_keeps_session_consistent(
     preserved = session.documents["forest-card"]
     preserved.set_draft("invalid draft", ())
     preserved.update(name="Unsaved name")
-    original_project = (root / "project.yaml").read_bytes()
+    original_project = (root / "project.cpress").read_bytes()
     with pytest.raises(ProjectError) as caught:
         service.add_to_session(session, "Unbound data", "unbound-data", data=DataBinding(sheet="Cards"))
     assert caught.value.diagnostic.code == "DATA_SOURCE_UNKNOWN"
     assert not (root / "components/unbound-data.yaml").exists()
-    assert (root / "project.yaml").read_bytes() == original_project
+    assert (root / "project.cpress").read_bytes() == original_project
     unlink = Path.unlink
 
     def fail_after_registration(path, *args, **kwargs):
@@ -132,12 +132,12 @@ def test_add_journal_cleanup_failure_keeps_session_consistent(
         service.add_to_session(session, "Another component", "another-component")
     assert caught.value.diagnostic.code == "TRANSACTION_CONFLICT"
     assert not (root / "components/another-component.yaml").exists()
-    original_project = (root / "project.yaml").read_bytes()
+    original_project = (root / "project.cpress").read_bytes()
     with pytest.raises(ProjectError):
         service.set_project_details(session, name="Changed", version="0.2.0")
     with pytest.raises(ProjectError):
         service.versions.export(session.snapshot, archive)
-    assert (root / "project.yaml").read_bytes() == original_project
+    assert (root / "project.cpress").read_bytes() == original_project
     assert not archive.exists()
 
     monkeypatch.setattr(Path, "unlink", unlink)
@@ -189,7 +189,7 @@ def test_add_rejects_a_changed_existing_document_before_commit(tmp_path: Path) -
     shutil.copytree(DEMO, root)
     repository = FileProjectRepository()
     snapshot = repository.open(root)
-    original_project = (root / "project.yaml").read_bytes()
+    original_project = (root / "project.cpress").read_bytes()
     document = root / "components/forest-card.yaml"
     document.write_text(document.read_text(encoding="utf-8") + "# external edit\n", encoding="utf-8")
 
@@ -197,7 +197,7 @@ def test_add_rejects_a_changed_existing_document_before_commit(tmp_path: Path) -
         repository.add_component(snapshot, "new-card", "New card")
 
     assert caught.value.diagnostic.code == "FILE_CHANGED_EXTERNALLY"
-    assert (root / "project.yaml").read_bytes() == original_project
+    assert (root / "project.cpress").read_bytes() == original_project
     assert not (root / "components/new-card.yaml").exists()
 
 

@@ -22,6 +22,8 @@ from componentpress.project_io.archive_snapshots import snapshot_sources, verify
 from componentpress.project_io.archive_snapshots import EXCLUDED_ROOTS
 from componentpress.project_io.files import atomic_write, file_hash
 from componentpress.project_io.paths import validate_relative_path
+from componentpress.project_io.paths import LEGACY_PROJECT_MANIFEST
+from componentpress.domain.schema import PROJECT_MANIFEST
 from componentpress.application.ports import ProjectRepository, WriteLockFactory
 from componentpress.project_io.yaml_codec import parse_project
 from componentpress.project_io.yaml_codec import parse_component
@@ -159,8 +161,10 @@ def _manifest_for(archive: zipfile.ZipFile) -> dict:
     for relative, entry in files.items():
         _register_manifest_path(relative, True, entry, explicit, spellings)
         expected.add(PREFIX + relative)
-    if "project.yaml" not in files:
-        raise ProjectError(Diagnostic("ARCHIVE_MANIFEST", "в архиве нет project.yaml"))
+    if LEGACY_PROJECT_MANIFEST in files:
+        raise ProjectError(Diagnostic("ARCHIVE_MANIFEST_LEGACY", "архив project.yaml не поддерживается; извлеките его в отдельную папку и вручную переименуйте файл в project.cpress", message_key="error.project_archive_legacy"))
+    if PROJECT_MANIFEST not in files:
+        raise ProjectError(Diagnostic("ARCHIVE_MANIFEST", "в архиве нет project.cpress"))
     for relative in directories:
         _register_manifest_path(relative, False, None, explicit, spellings)
         expected.add(PREFIX + relative + "/")
@@ -299,7 +303,7 @@ def _check_export_target(snapshot, target, replace):
 
 
 def _validate_export_location(snapshot, root, target):
-    if target == root / "project.yaml" or any(target == item.path for item in snapshot.documents.values()):
+    if target == root / PROJECT_MANIFEST or any(target == item.path for item in snapshot.documents.values()):
         raise ProjectError(Diagnostic("ARCHIVE_SOURCE_TARGET", "нельзя заменить исходный файл проекта архивом", target))
     try:
         target.relative_to(root)
@@ -327,7 +331,7 @@ def _new_export(snapshot, target, replace, cancellation, on_progress, formatter,
     return _Export(
         snapshot, target, root, operation_id, replace, cancellation, on_progress, formatter,
         snapshot.model.version, operation_root,
-        operation_root / "snapshot", root / "project.yaml",
+        operation_root / "snapshot", root / PROJECT_MANIFEST,
     )
 
 
@@ -359,11 +363,11 @@ def _check_snapshot_target(state):
 
 
 def _check_snapshot_project(state):
-    project_path = state.copied / "project.yaml"
+    project_path = state.copied / PROJECT_MANIFEST
     archived, _ = parse_project(project_path.read_text(encoding="utf-8"), project_path)
     if archived.id != state.snapshot.model.id or archived.version != state.project_version:
         raise ProjectError(Diagnostic("ARCHIVE_SOURCE_CHANGED", "проект изменился после подготовки снимка", state.project_path))
-    if state.files["project.yaml"]["sha256"] != state.snapshot.disk_hash:
+    if state.files[PROJECT_MANIFEST]["sha256"] != state.snapshot.disk_hash:
         raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "описание проекта изменилось после чтения", state.project_path))
     for document in state.snapshot.documents.values():
         _check_snapshot_document(state, document)
@@ -548,8 +552,8 @@ def _validate_archive_components(archive, metadata, project_model, archive_path)
 
 
 def _validate_archive_project(archive, metadata, archive_path, destination_parent):
-    text = archive.read(PREFIX + "project.yaml").decode("utf-8")
-    project, _ = parse_project(text, Path("project.yaml"))
+    text = archive.read(PREFIX + PROJECT_MANIFEST).decode("utf-8")
+    project, _ = parse_project(text, Path(PROJECT_MANIFEST))
     _validate_archive_components(archive, metadata, project, archive_path)
     expected = (project.id, project.version, project.schema_version)
     actual = (metadata.get("project_id"), metadata.get("project_version"), metadata.get("schema_version"))

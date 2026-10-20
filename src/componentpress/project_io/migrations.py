@@ -9,7 +9,7 @@ from pathlib import Path
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.schema import SCHEMA_VERSION
 from .files import atomic_write
-from .paths import resolve_project_path
+from .paths import PROJECT_MANIFEST, resolve_project_path
 from .yaml_codec import _load
 
 
@@ -79,7 +79,7 @@ def migrate_v1_to_v2(root: Path) -> Path | None:
 
     preflight_project_schemas(root)
     recover_migration(root)
-    project_path = root / "project.yaml"
+    project_path = root / PROJECT_MANIFEST
     project_bytes = project_path.read_bytes()
     project_tree = _load(project_bytes.decode("utf-8"), project_path)
     version = project_tree.get("schema_version")

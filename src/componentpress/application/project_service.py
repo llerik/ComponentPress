@@ -8,6 +8,7 @@ from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.application.edits import ensure_visual_edit_respects_locks
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.project import CopiesColumns, DataSource
+from componentpress.domain.schema import PROJECT_MANIFEST
 import re
 import unicodedata
 from uuid import uuid4
@@ -333,7 +334,7 @@ class ProjectService:
             )
         except Exception:
             try:
-                project_path = session.snapshot.root / "project.yaml"
+                project_path = session.snapshot.root / PROJECT_MANIFEST
                 if (created_path is not None and created_path.exists() and created_hash is not None
                         and self.resources.image_hash(created_path) == created_hash
                         and self.resources.image_hash(project_path) == original_project_hash):

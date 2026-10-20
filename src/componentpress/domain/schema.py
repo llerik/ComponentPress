@@ -3,6 +3,7 @@
 from typing import Any
 
 SCHEMA_VERSION = 8
+PROJECT_MANIFEST = "project.cpress"
 
 
 def require_current_schema(value: Any) -> int:

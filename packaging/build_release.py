@@ -69,7 +69,8 @@ def main() -> int:
         return 3
     with tempfile.TemporaryDirectory(prefix="componentpress-release-smoke-") as temporary:
         temporary_root = Path(temporary)
-        smoke_project = temporary_root / "project"
+        smoke_project = temporary_root / "Проверка с пробелами" / "Новая игра"
+        smoke_project.parent.mkdir(parents=True)
         shutil.copytree(
             ROOT / "examples" / "demo-excel-game",
             smoke_project,
@@ -95,6 +96,16 @@ def main() -> int:
                 print(diagnostics.read_text(encoding="utf-8"), file=sys.stderr)
             print(f"Smoke-проверка EXE завершилась с кодом {smoke.returncode}", file=sys.stderr)
             return 5
+        opened = subprocess.run(
+            [str(staged), "--release-smoke-open", str(smoke_project / "project.cpress")],
+            cwd=temporary_root,
+            env=environment,
+            check=False,
+            timeout=30,
+        )
+        if opened.returncode != 0:
+            print(f"EXE не открыл project.cpress из пути с пробелами и кириллицей: {opened.returncode}", file=sys.stderr)
+            return 13
         saved_component = smoke_project / "components" / "release-smoke.yaml"
         if not saved_component.is_file():
             print("Smoke-проверка не создала второй компонент", file=sys.stderr)

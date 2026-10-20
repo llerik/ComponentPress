@@ -162,7 +162,6 @@ def test_main_window_clears_busy_state_after_synchronous_submit_failure(tmp_path
     ensure_gui_application()
     import shutil
     from componentpress.editor import main_window
-
     demo = Path(__file__).resolve().parents[1] / "examples" / "demo-game"
     root = tmp_path / "demo"
     shutil.copytree(demo, root)
@@ -177,22 +176,6 @@ def test_main_window_clears_busy_state_after_synchronous_submit_failure(tmp_path
     qtbot.addWidget(window)
     window.load_session(session)
 
-    class Dialog:
-        class DialogCode:
-            Accepted = 1
-
-        workers = SimpleNamespace(value=lambda: 2)
-
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def exec(self):
-            return self.DialogCode.Accepted
-
-        def print_settings(self):
-            return None
-
-    monkeypatch.setattr(main_window, "BuildOptionsDialog", Dialog)
     monkeypatch.setattr(main_window.QMessageBox, "warning", lambda *_args: None)
     window._start_build(False)
     assert window._active_build_job is not None

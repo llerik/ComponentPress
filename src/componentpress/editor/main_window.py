@@ -10,7 +10,7 @@ from types import MappingProxyType
 
 from pydantic import ValidationError
 from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QSignalBlocker, QSize, QThreadPool, QTimer, Qt
-from PySide6.QtGui import QAction, QActionGroup, QColor, QCloseEvent, QImage, QKeySequence, QUndoGroup
+from PySide6.QtGui import QAction, QColor, QCloseEvent, QImage, QKeySequence, QUndoGroup
 from PySide6.QtWidgets import (
     QApplication,
     QColorDialog,
@@ -52,6 +52,7 @@ from componentpress.application.preview_service import ValidationIssues
 from componentpress.execution.cancellation import CancellationToken
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.project_io.paths import validate_relative_path
+from componentpress.domain.schema import PROJECT_MANIFEST
 from componentpress.domain.copy_mode import copies_for_mode
 from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, LineNode, ShapeNode
 from componentpress.rendering.fonts import ProjectFonts
@@ -83,7 +84,6 @@ from .controllers import ProjectController
 from .action_policy import BuildContext, EditingContext, HistoryContext, HistoryTarget, OperationContext, build_actions, editing_actions, history_target, operation_allowed
 from .commands import ReplaceComponentCommand
 from .dialogs import HtmlAddDialog, ImageAddDialog, ImageManagerDialog, ResourcePickerDialog, format_error
-from .build_dialog import BuildOptionsDialog
 from .document_tab import DocumentTab
 from .properties import ComponentProperties, ElementProperties
 from componentpress.preview_coordinator import PreviewCoordinator, PreviewJob, PreviewPhase, PreviewRequest
@@ -111,7 +111,9 @@ from .component_dialog import ComponentDialog
 from .ui_state import UiState
 from .project_settings_dialog import ProjectSettingsDialog
 from .copy_mode_switch import CopyModeSwitch
-from .theme import THEMES, apply_theme, saved_theme, theme_settings
+from .theme import apply_theme
+from componentpress.user_preferences import load_preferences, save_preferences
+from .program_settings_dialog import ProgramSettingsDialog
 from componentpress.i18n import language, set_language, tr
 from componentpress.diagnostics import logging as technical_log
 import zipfile
@@ -168,8 +170,9 @@ class MainWindow(QMainWindow):
         self._history_tabs: dict[str, DocumentTab | None] = {}
         self._history_documents = {}
         self._project_history_focus = False
-        self._theme_settings = theme_settings()
-        self._theme = saved_theme(self._theme_settings)
+        self._program_preferences = load_preferences()
+        self._theme = self._program_preferences.theme
+        self._reserved_build_request: BuildRequest | None = None
         apply_theme(self._theme)
         self.ui_state = UiState()
         self.setObjectName("mainWindow")
@@ -229,6 +232,7 @@ class MainWindow(QMainWindow):
         self.export_png_zip_action = self._action(tr("action.export_png"))
         self.add_component_action = self._action(tr("action.add_component"), "Ctrl+Shift+N")
         self.project_settings_action = self._action(tr("action.project_settings"))
+        self.program_settings_action = self._action(tr("action.program_settings"))
         self.image_manager_action = self._action(tr("ui.image_manager"))
         self.about_action = self._action(tr("menu.about"))
         self.undo_action = self._action(tr("action.undo"), QKeySequence.StandardKey.Undo)
@@ -250,21 +254,6 @@ class MainWindow(QMainWindow):
         self.validate_active_action = self._action(tr("action.validate_active"))
         self.validate_all_action = self._action(tr("action.validate_all"))
         self.file_menu = self.menuBar().addMenu(tr("menu.file"))
-        self.theme_menu = self.file_menu.addMenu(tr("ui.theme"))
-        self.theme_actions = {}
-        self.theme_action_group = QActionGroup(self)
-        self.theme_action_group.setExclusive(True)
-        for mode in THEMES:
-            action = QAction(tr(f"ui.theme.{mode}"), self)
-            action.setCheckable(True)
-            action.setData(mode)
-            action.setChecked(mode == self._theme)
-            action.triggered.connect(
-                lambda checked, selected=mode: self._select_theme(selected) if checked else None
-            )
-            self.theme_action_group.addAction(action)
-            self.theme_menu.addAction(action)
-            self.theme_actions[mode] = action
         self.file_menu.addActions([self.new_action, self.open_action])
         self.file_menu.addSeparator()
         self.import_menu = self.file_menu.addMenu(tr("menu.import"))
@@ -272,12 +261,14 @@ class MainWindow(QMainWindow):
         self.export_menu = self.file_menu.addMenu(tr("menu.export"))
         self.export_menu.addActions([self.export_png_zip_action, self.export_project_archive_action])
         self.file_menu.addSeparator()
-        self.file_menu.addActions([self.project_settings_action, self.image_manager_action, self.add_component_action])
+        self.file_menu.addActions([self.image_manager_action, self.add_component_action])
         self.windows_menu = self.file_menu.addMenu(tr("menu.windows"))
         self.file_menu.addSeparator()
         self.file_menu.addActions([self.save_action, self.save_all_action, self.close_tab_action])
         self.file_menu.addSeparator()
         self.file_menu.addAction(self.exit_action)
+        self.settings_menu = self.menuBar().addMenu(tr("menu.settings"))
+        self.settings_menu.addActions([self.project_settings_action, self.program_settings_action])
         self.edit_menu = self.menuBar().addMenu(tr("menu.edit"))
         self.edit_menu.addActions([self.undo_action, self.redo_action])
         self.edit_menu.addSeparator()
@@ -293,15 +284,47 @@ class MainWindow(QMainWindow):
         self.about_menu = self.menuBar().addMenu(tr("menu.about"))
         self.about_menu.addAction(self.about_action)
 
-    def _select_theme(self, mode: str) -> None:
-        if mode not in THEMES:
+    def _show_program_settings(self) -> None:
+        dialog = ProgramSettingsDialog(self._program_preferences, self._register_file_type, self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
             return
-        self._theme = mode
-        self._theme_settings.setValue("theme", mode)
-        self._theme_settings.sync()
-        apply_theme(mode)
-        for value, action in self.theme_actions.items():
-            action.setChecked(value == mode)
+        try:
+            preferences = dialog.preferences()
+        except (ValueError, TypeError) as exc:
+            QMessageBox.warning(self, tr("ui.program_settings"), tr("error.program_settings_save"))
+            technical_log.log_event("application.settings_save", operation="program_settings",
+                                    phase="preparation", status="failed", code="PROGRAM_SETTINGS_INVALID")
+            return
+        operation_id = uuid4().hex
+        technical_log.log_event("application.settings_save", operation="program_settings",
+                                operation_id=operation_id, phase="publishing", status="started")
+        if not save_preferences(preferences):
+            QMessageBox.warning(self, tr("ui.program_settings"), tr("error.program_settings_save"))
+            technical_log.log_event("application.settings_save", operation="program_settings",
+                                    operation_id=operation_id, phase="finished", status="failed",
+                                    code="PROGRAM_SETTINGS_WRITE")
+            return
+        self._program_preferences = preferences
+        self._theme = preferences.theme
+        apply_theme(preferences.theme)
+        technical_log.log_event("application.settings_save", operation="program_settings",
+                                operation_id=operation_id, phase="finished", status="succeeded")
+
+    def _register_file_type(self) -> None:
+        operation_id = uuid4().hex
+        technical_log.log_event("application.file_association", operation="file_association",
+                                operation_id=operation_id, phase="preparation", status="started")
+        from componentpress.platforms.windows_association import register_current_executable
+
+        succeeded, code = register_current_executable()
+        technical_log.log_event("application.file_association", operation="file_association",
+                                operation_id=operation_id, phase="finished",
+                                status="succeeded" if succeeded else "failed", code=code)
+        message = tr(f"error.{code.lower()}")
+        if succeeded:
+            QMessageBox.information(self, tr("ui.program_settings"), message)
+        else:
+            QMessageBox.warning(self, tr("ui.program_settings"), message)
 
     def _build_ui(self) -> None:
         self.data_mode = CopyModeSwitch()
@@ -364,15 +387,6 @@ class MainWindow(QMainWindow):
         self.validate_all_button.setToolTip(self.validate_all_action.text())
         self.validate_all_button.setAccessibleName(self.validate_all_action.text())
         self._update_build_toolbar()
-        self.theme_button = QToolButton()
-        self.theme_button.setObjectName("themeButton")
-        self.theme_button.setText(tr("ui.theme"))
-        self.theme_button.setToolTip(tr("ui.theme"))
-        self.theme_button.setAccessibleName(tr("ui.theme"))
-        self.theme_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.theme_button.setMenu(self.theme_menu)
-        self.quick_toolbar.addSeparator()
-        self.quick_toolbar.addWidget(self.theme_button)
         self._build_icon_toolbar()
         self.status_project = QLabel(tr("ui.project_closed"))
         self.status_zoom = QLabel("")
@@ -697,8 +711,7 @@ class MainWindow(QMainWindow):
         from importlib import import_module
         from importlib.metadata import PackageNotFoundError, metadata, version
         from PySide6 import __version__ as qt_version
-        from PySide6.QtCore import QSettings
-        from PySide6.QtWidgets import QComboBox, QFileDialog, QFormLayout, QHBoxLayout
+        from PySide6.QtWidgets import QFileDialog, QFormLayout
         import platform
 
         from componentpress.version import APPLICATION_VERSION
@@ -741,32 +754,12 @@ class MainWindow(QMainWindow):
         details.addRow(QLabel(tr("about.theme_licenses")))
         layout.addLayout(details)
 
-        language_row = QHBoxLayout()
-        language_row.addWidget(QLabel(tr("about.language")))
-        selector = QComboBox()
-        selector.setObjectName("languageSelector")
-        selector.addItem(tr("language.ru"), "ru")
-        selector.addItem(tr("language.en"), "en")
-        selector.setCurrentIndex(0 if language() == "ru" else 1)
-        language_row.addWidget(selector)
-        layout.addLayout(language_row)
-        restart = QLabel(tr("about.restart"))
-        layout.addWidget(restart)
-
         actions = QDialogButtonBox()
         open_logs = actions.addButton(tr("about.open_logs"), QDialogButtonBox.ButtonRole.ActionRole)
         report = actions.addButton(tr("about.create_report"), QDialogButtonBox.ButtonRole.ActionRole)
         close_button = actions.addButton(QDialogButtonBox.StandardButton.Close)
         close_button.setText(tr("ui.close"))
         layout.addWidget(actions)
-
-        def save_language(index: int) -> None:
-            selected = selector.itemData(index)
-            if selected != language():
-                settings = QSettings(QSettings.Format.IniFormat, QSettings.Scope.UserScope, "ComponentPress", "ComponentPress")
-                settings.setValue("language", selected)
-                settings.sync()
-                restart.setText(tr("about.restart"))
 
         def show_report() -> None:
             filename, _filter = QFileDialog.getSaveFileName(
@@ -799,7 +792,6 @@ class MainWindow(QMainWindow):
             if folder is None or not folder.exists() or not PlatformServices.open_path(folder):
                 QMessageBox.information(dialog, tr("about.title"), tr("about.open_logs_failed"))
 
-        selector.currentIndexChanged.connect(save_language)
         open_logs.clicked.connect(show_log_folder)
         report.clicked.connect(show_report)
         actions.rejected.connect(dialog.reject)
@@ -821,6 +813,7 @@ class MainWindow(QMainWindow):
         self.export_png_zip_action.triggered.connect(self._export_png_archive)
         self.add_component_action.triggered.connect(self.add_component_dialog)
         self.project_settings_action.triggered.connect(self.project_settings_dialog)
+        self.program_settings_action.triggered.connect(self._show_program_settings)
         self.image_manager_action.triggered.connect(self.open_image_manager)
         self.about_action.triggered.connect(self._show_about)
         self.validate_active_action.triggered.connect(self._validate_active)
@@ -2035,7 +2028,7 @@ class MainWindow(QMainWindow):
 
     def _require_preview_fonts(self, job: PreviewJob) -> None:
         for family in self._preview_font_families(job.request.component):
-            job.fonts.require(family, owner=job.request.snapshot.root / "project.yaml", field="font_family")
+            job.fonts.require(family, owner=job.request.snapshot.root / PROJECT_MANIFEST, field="font_family")
 
     def _start_preview_render(self, job: PreviewJob | None) -> None:
         if job is None:
@@ -2091,7 +2084,7 @@ class MainWindow(QMainWindow):
 
     def _continue_build_after_preview(self) -> None:
         if self._build_pending_active_only is not None and self._preview_coordinator.active is None:
-            self._show_build_options(self._build_pending_active_only)
+            self._launch_reserved_build(self._build_pending_active_only)
 
     def _show_preview_failure(self, job: PreviewJob, error: Exception) -> None:
         message = format_diagnostic(error.diagnostic) if isinstance(error, ProjectError) else str(error)
@@ -2416,6 +2409,13 @@ class MainWindow(QMainWindow):
         self._build_session = self.session
         self._build_tab = self.active_tab
         self._build_mode = self.data_mode.mode
+        component_ids = (self._build_tab.component_id,) if active_only and self._build_tab is not None else None
+        self._reserved_build_request = BuildRequest(
+            component_ids=component_ids,
+            mode=self._build_mode,
+            print_settings=self._program_preferences.print_settings,
+            max_render_workers=self._program_preferences.png_workers,
+        )
         if not self._save_all_for_reservation(self._build_operation_id):
             self._cancel_pending_build()
             return
@@ -2427,38 +2427,22 @@ class MainWindow(QMainWindow):
         if self._preview_coordinator.active is not None:
             self.statusBar().showMessage("Предпросмотр завершает работу; сборка начнётся сразу после неё")
             return
-        self._show_build_options(active_only)
+        self._launch_reserved_build(active_only)
 
-    def _show_build_options(self, active_only: bool) -> None:
+    def _launch_reserved_build(self, active_only: bool) -> None:
         if self._build_pending_active_only is None or self.session is None:
             return
         if self._build_session is not self.session or active_only and self._build_tab is not self.active_tab:
-            self._cancel_pending_build()
-            return
-        dialog = BuildOptionsDialog(self.session.snapshot.model.print, self, mode=self._build_mode)
-        if dialog.exec() != dialog.DialogCode.Accepted:
             self._cancel_pending_build()
             return
         if (self._build_pending_active_only is None or self.session is None
                 or self._build_session is not self.session or active_only and self._build_tab is not self.active_tab):
             self._cancel_pending_build()
             return
-        self._launch_build(dialog, active_only, self._build_mode)
-
-    def _launch_build(self, dialog, active_only: bool, mode: str) -> None:
-        component_ids = None
-        if active_only:
-            if self._build_tab is None:
-                self._cancel_pending_build()
-                return
-            component_ids = (self._build_tab.component_id,)
-        request = BuildRequest(
-            component_ids=component_ids,
-            mode=mode,
-            print_settings=dialog.print_settings(),
-            max_render_workers=dialog.workers.value(),
-        )
-        self._start_build_request(request)
+        if self._reserved_build_request is None:
+            self._cancel_pending_build()
+            return
+        self._start_build_request(self._reserved_build_request)
 
     def _start_build_request(self, request: BuildRequest) -> None:
         try:
@@ -2487,6 +2471,7 @@ class MainWindow(QMainWindow):
     def _release_build_reservation(self) -> None:
         self._build_pending_active_only = self._build_operation_id = None
         self._build_session = self._build_tab = self._build_mode = None
+        self._reserved_build_request = None
 
     def _build_progress_dialog(self) -> QProgressDialog:
         progress = QProgressDialog(tr("ui.build_prepare"), tr("action.cancel_build"), 0, 0, self)
@@ -2505,6 +2490,7 @@ class MainWindow(QMainWindow):
         self._build_session = None
         self._build_tab = None
         self._build_mode = None
+        self._reserved_build_request = None
         if resume_preview:
             self._resume_deferred_preview()
         self._update_actions()

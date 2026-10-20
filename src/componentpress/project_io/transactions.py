@@ -1,4 +1,4 @@
-"""Recoverable two-file component registration; project.yaml is committed last."""
+"""Recoverable two-file component registration; project.cpress is committed last."""
 
 import hashlib
 import json
@@ -6,7 +6,7 @@ from pathlib import Path
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from .files import atomic_create, atomic_move, atomic_write, file_hash
-from .paths import resolve_project_path
+from .paths import PROJECT_MANIFEST, resolve_project_path
 from componentpress.diagnostics.logging import log_event
 
 
@@ -48,7 +48,7 @@ def _recover_add_component(root: Path, journal: Path) -> None:
     record = json.loads(journal.read_text(encoding="utf-8"))
     if record.get("ownership_conflict"):
         raise ProjectError(Diagnostic("TRANSACTION_CONFLICT", "файл компонента уже существовал; автоматическое восстановление остановлено", journal))
-    project = root / "project.yaml"
+    project = root / PROJECT_MANIFEST
     component = resolve_project_path(root, record["component"])
     current_project = file_hash(project) if project.exists() else None
     current_component = file_hash(component) if component.exists() else None
@@ -78,7 +78,7 @@ def recover_component_membership(root: Path) -> None:
         record = json.loads(journal.read_text(encoding="utf-8"))
         target = resolve_project_path(root, record["component"])
         backup = resolve_project_path(root, record["backup"])
-        project = root / "project.yaml"
+        project = root / PROJECT_MANIFEST
         project_hash = file_hash(project) if project.exists() else None
         target_hash = file_hash(target) if target.exists() else None
         backup_hash = file_hash(backup) if backup.exists() else None
@@ -150,7 +150,7 @@ def change_component_membership(root: Path, *, operation: str, relative_path: st
             atomic_move(backup, target)
         else:
             raise ValueError(f"unknown membership operation: {operation}")
-        atomic_write(root / "project.yaml", project_bytes, old_project_hash)
+        atomic_write(root / PROJECT_MANIFEST, project_bytes, old_project_hash)
     except Exception:
         recover_component_membership(root)
         raise
@@ -193,7 +193,7 @@ def _register_files(root: Path, journal: Path, target: Path, record: dict, compo
     try:
         atomic_create(target, component_bytes)
         created = True
-        atomic_write(root / "project.yaml", project_bytes, old_project_hash)
+        atomic_write(root / PROJECT_MANIFEST, project_bytes, old_project_hash)
     except ProjectError as exc:
         _handle_registration_failure(root, journal, record, created, exc)
         raise

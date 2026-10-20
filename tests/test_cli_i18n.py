@@ -79,12 +79,12 @@ def test_cli_commands_preserve_user_names_and_localize_results(
     custom = tmp_path / "custom"
     created = _cli(language, "new", str(custom), "--name", "Forest card 🦊")
     assert created.returncode == 0, created.stderr
-    project_file = custom / "project.yaml"
+    project_file = custom / "project.cpress"
     assert parse_project(project_file.read_text(encoding="utf-8"), project_file)[0].name == "Forest card 🦊"
     default = tmp_path / "default"
     assert _cli(language, "new", str(default)).returncode == 0
     expected_default = "Новая игра" if language == "ru" else "New game"
-    default_file = default / "project.yaml"
+    default_file = default / "project.cpress"
     assert parse_project(default_file.read_text(encoding="utf-8"), default_file)[0].name == expected_default
 
     assert _cli(language, "add-component", str(custom), "card", "Card").returncode == 0
@@ -110,7 +110,7 @@ def test_render_and_build_report_success_and_project_diagnostics(
         project,
         ignore=shutil.ignore_patterns("output", "archive", ".componentpress"),
     )
-    project_file = project / "project.yaml"
+    project_file = project / "project.cpress"
     project_file.write_text(project_file.read_text(encoding="utf-8").replace("dpi: 300", "dpi: 10"), encoding="utf-8")
     rendered = _cli(language, "render", str(project), "--component", "forest-card", "--output", str(tmp_path / "preview.png"))
     assert rendered.returncode == 0, rendered.stderr
@@ -138,7 +138,7 @@ def test_cli_subject_failures_preserve_diagnostic_code_and_address(language: str
     assert "COMPONENT_UNKNOWN" in bad_size.stderr and str(project) in bad_size.stderr
     absent = tmp_path / "missing-project"
     absent.mkdir()
-    (absent / "project.yaml").write_text("invalid: [", encoding="utf-8")
+    (absent / "project.cpress").write_text("invalid: [", encoding="utf-8")
     commands = (
         ("import-image", str(absent), "missing.png"),
         ("render", str(absent), "--component", "card", "--output", "preview.png"),
@@ -148,7 +148,7 @@ def test_cli_subject_failures_preserve_diagnostic_code_and_address(language: str
         result = _cli(language, *arguments)
         assert result.returncode == 2
         assert "YAML_SYNTAX" in result.stderr
-        assert str(absent / "project.yaml") in result.stderr
+        assert str(absent / "project.cpress") in result.stderr
 
 
 @pytest.mark.parametrize(

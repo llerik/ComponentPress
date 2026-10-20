@@ -70,7 +70,7 @@ def _bound_project(tmp_path: Path) -> Path:
     from io import StringIO
     from ruamel.yaml import YAML
     yaml = YAML(typ="rt")
-    project = root / "project.yaml"
+    project = root / "project.cpress"
     tree = yaml.load(project.read_text(encoding="utf-8"))
     tree["data_source"] = {"path": "data/game.xlsx"}
     tree["icons"]["ic_leaf_3"] = {"path": "assets/images/leaf.png", "width_px": 12, "height_px": 12}

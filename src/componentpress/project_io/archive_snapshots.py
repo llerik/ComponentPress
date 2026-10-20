@@ -12,6 +12,7 @@ import zipfile
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.i18n import tr
+from .paths import PROJECT_MANIFEST, project_manifest_path
 
 
 EXCLUDED_ROOTS = {"archive", "output", ".componentpress", ".git"}
@@ -46,9 +47,7 @@ def snapshot_sources(root: Path, destination: Path, *, cancellation=None, on_pro
     root = root.resolve()
     files: dict[str, dict[str, object]] = {}
     directories: list[str] = []
-    root_names = {item.name.casefold() for item in root.iterdir()}
-    if "project.yaml" not in root_names:
-        raise ProjectError(Diagnostic("ARCHIVE_PROJECT", "в папке отсутствует project.yaml", root))
+    project_manifest_path(root)
 
     original_files: dict[str, tuple[str, int]] = {}
     original_directories: set[str] = set()
@@ -133,8 +132,7 @@ def snapshot_sources(root: Path, destination: Path, *, cancellation=None, on_pro
             except OSError as exc:
                 raise ProjectError(Diagnostic("ARCHIVE_READ", f"не удалось зафиксировать файл: {exc}", source)) from exc
             files[relative] = {"size": size, "sha256": digest.hexdigest()}
-    if "project.yaml" not in files:
-        raise ProjectError(Diagnostic("ARCHIVE_PROJECT", "в папке отсутствует project.yaml", root))
+    project_manifest_path(root)
     if set(files) != set(original_files) or set(directories) != original_directories:
         raise ProjectError(Diagnostic("ARCHIVE_SOURCE_CHANGED", "состав файлов или папок проекта изменился во время создания архива", root))
     return files, sorted(set(directories))

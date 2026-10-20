@@ -5,8 +5,8 @@ from pathlib import Path
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.schema import SCHEMA_VERSION
 
-from .paths import resolve_project_path
-from .yaml_codec import _load
+from .paths import PROJECT_MANIFEST, project_manifest_path, resolve_project_path
+from .yaml_codec import _load, parse_project
 
 
 def check_schema(path: Path) -> dict:
@@ -23,8 +23,9 @@ def check_schema(path: Path) -> dict:
 def preflight_project_schemas(root: Path) -> None:
     """Reject every unsupported document before locks or journals can alter the tree."""
     root = root.resolve()
-    project_path = root / "project.yaml"
+    project_path = project_manifest_path(root)
     project = check_schema(project_path)
+    parse_project(project_path.read_text(encoding="utf-8"), project_path)
     references = project.get("components", [])
     if not isinstance(references, list):
         return  # The normal parser reports the structural error without recovering files.
@@ -87,7 +88,7 @@ def preflight_project_schemas(root: Path) -> None:
             if not isinstance(files, dict):
                 return
             for relative in files:
-                if relative == "project.yaml" or (
+                if relative == PROJECT_MANIFEST or (
                     isinstance(relative, str)
                     and relative.startswith("components/")
                     and relative.endswith(".yaml")

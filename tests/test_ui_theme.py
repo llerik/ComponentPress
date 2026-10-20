@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication, QPushButton
 from componentpress.app_assets import load_icon, set_themed_icon
 from componentpress.bootstrap import project_controller
 from componentpress.editor.main_window import MainWindow
-from componentpress.editor.theme import THEMES, apply_theme, is_dark_theme, theme_palette
+from componentpress.editor.theme import apply_theme, is_dark_theme, theme_palette
 from componentpress.i18n import language, set_language, validate_catalogs
 
 
@@ -16,15 +16,16 @@ from componentpress.i18n import language, set_language, validate_catalogs
 def isolated_theme(tmp_path: Path, qapp, monkeypatch):
     from qdarktheme import _style_loader
     from qdarktheme._template import filter as theme_filter
-    from componentpress.editor import main_window as main_window_module, theme as theme_module
+    from componentpress.editor import theme as theme_module
+    from componentpress.user_preferences import user_settings
 
     original_language = language()
     original_palette = qapp.palette()
     original_stylesheet = qapp.styleSheet()
     original_dark = bool(qapp.property("componentpressDarkTheme"))
-    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path))
+    settings = user_settings()
     settings.clear()
-    monkeypatch.setattr(main_window_module, "theme_settings", lambda: settings)
     cache = tmp_path / "theme-cache"
     cache.mkdir()
     monkeypatch.setattr(theme_filter, "get_cash_root_path", lambda _version: cache)
@@ -45,36 +46,45 @@ def isolated_theme(tmp_path: Path, qapp, monkeypatch):
         ("en", {"system": "System", "light": "Light", "dark": "Dark"}),
     ),
 )
-def test_theme_menu_applies_and_persists_all_modes(isolated_theme, qtbot, locale, labels) -> None:
+def test_program_settings_save_theme_without_file_or_toolbar_control(isolated_theme, qtbot, locale, labels) -> None:
+    from PySide6.QtCore import QTimer
+
     settings = isolated_theme
     validate_catalogs()
     set_language(locale)
     window = MainWindow(project_controller())
     qtbot.addWidget(window)
 
-    assert tuple(window.theme_actions) == THEMES
-    for mode in THEMES:
-        action = window.theme_actions[mode]
-        assert action.text() == labels[mode]
-        action.trigger()
-        assert settings.value("theme") == mode
-        assert action.isChecked()
-        assert window.theme_menu.isEnabled()
-        assert QApplication.instance().styleSheet()
+    assert window.settings_menu.title() == ("Настройки" if locale == "ru" else "Settings")
+    assert not hasattr(window, "theme_menu")
+    assert not hasattr(window, "theme_button")
+
+    def accept_settings():
+        dialog = QApplication.activeModalWidget()
+        assert dialog is not None
+        for mode, label in (("system", labels["system"]), ("light", labels["light"]), ("dark", labels["dark"])):
+            index = dialog.theme.findData(mode)
+            assert dialog.theme.itemText(index) == label
+        dialog.theme.setCurrentIndex(dialog.theme.findData("dark"))
+        dialog.accept()
+
+    QTimer.singleShot(0, accept_settings)
+    window._show_program_settings()
+    assert settings.value("theme") == "dark"
+    assert window._theme == "dark"
+    assert QApplication.instance().styleSheet()
 
     reopened = MainWindow(project_controller())
     qtbot.addWidget(reopened)
     assert reopened._theme == "dark"
-    assert reopened.theme_actions["dark"].isChecked()
 
 
 def test_invalid_saved_theme_falls_back_to_system(isolated_theme, qtbot) -> None:
-    isolated_theme.setValue("theme", "unknown")
+    isolated_theme.setValue("program/preferences", '{"language":"ru","theme":"unknown"}')
     window = MainWindow(project_controller())
     qtbot.addWidget(window)
 
     assert window._theme == "system"
-    assert window.theme_actions["system"].isChecked()
 
 
 def test_system_theme_follows_os_and_manual_theme_ignores_it(isolated_theme, qapp, qtbot) -> None:

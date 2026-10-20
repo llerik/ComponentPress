@@ -3,13 +3,13 @@ from pathlib import Path
 import re
 import sys
 import atexit
-from PySide6.QtCore import QSettings
 
 from componentpress.bootstrap import build_service, project_service
 from componentpress.application.contracts import BuildRequest
 from componentpress.domain.diagnostics import ProjectError
 from componentpress.diagnostics import logging as technical_log
 from componentpress.i18n import set_language, validate_catalogs, tr
+from componentpress.user_preferences import load_preferences
 from componentpress.i18n.diagnostics import format_diagnostic
 from componentpress.execution.qt_wait import run_build
 
@@ -129,7 +129,7 @@ def _initialize_cli() -> None:
     technical_log.install_exception_hooks()
     atexit.register(technical_log.shutdown)
     validate_catalogs()
-    set_language(QSettings("ComponentPress", "ComponentPress").value("language", "ru", type=str))
+    set_language(load_preferences().language)
     if not sys.stdout.isatty():
         sys.stdout.reconfigure(encoding="utf-8")
     if not sys.stderr.isatty():

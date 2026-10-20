@@ -37,5 +37,5 @@ def test_game_version_text_round_trips_yaml_without_normalization(version: str, 
     model = _project(version=version)
     tree = CommentedMap()
     update_tree(tree, model)
-    loaded, _ = parse_project(dump_yaml(tree), tmp_path / "project.yaml")
+    loaded, _ = parse_project(dump_yaml(tree), tmp_path / "project.cpress")
     assert loaded.version == version

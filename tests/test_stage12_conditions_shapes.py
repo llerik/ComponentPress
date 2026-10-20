@@ -255,7 +255,7 @@ def test_schema_preflight_rejects_old_referenced_and_journal_documents_without_w
 def test_schema_rejects_previous_project_version_before_migrate_can_create_lock(tmp_path: Path) -> None:
     root = tmp_path / "game"
     shutil.copytree(ROOT / "examples" / "demo-game", root)
-    project = root / "project.yaml"
+    project = root / "project.cpress"
     project.write_text(project.read_text(encoding="utf-8").replace("schema_version: 8", "schema_version: 4", 1), encoding="utf-8")
     original = {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
     with pytest.raises(ProjectError) as caught:

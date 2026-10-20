@@ -5,6 +5,36 @@ import os
 import re
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.domain.schema import PROJECT_MANIFEST
+
+LEGACY_PROJECT_MANIFEST = "project.yaml"
+
+
+def project_manifest_path(root: Path) -> Path:
+    """Resolve the only supported project manifest without changing the tree."""
+    manifest = root / PROJECT_MANIFEST
+    legacy = root / LEGACY_PROJECT_MANIFEST
+    if manifest.is_symlink() or legacy.is_symlink():
+        raise ProjectError(Diagnostic(
+            "PROJECT_MANIFEST_LINK", "символические ссылки на файл проекта не поддерживаются",
+            root, message_key="error.project_manifest_link",
+        ))
+    if manifest.exists() and legacy.exists():
+        raise ProjectError(Diagnostic(
+            "PROJECT_MANIFEST_AMBIGUOUS", "проект содержит два файла описания; оставьте только project.cpress",
+            root, message_key="error.project_manifest_ambiguous",
+        ))
+    if legacy.exists():
+        raise ProjectError(Diagnostic(
+            "PROJECT_MANIFEST_LEGACY", "переименуйте project.yaml в project.cpress вручную",
+            legacy, message_key="error.project_manifest_legacy",
+        ))
+    if not manifest.is_file():
+        raise ProjectError(Diagnostic(
+            "PROJECT_MANIFEST_MISSING", "файл project.cpress не найден",
+            manifest, message_key="error.project_manifest_missing",
+        ))
+    return manifest
 
 
 _DEVICE = re.compile(r"(?i)^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$")

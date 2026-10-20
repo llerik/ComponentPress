@@ -83,27 +83,23 @@ def test_unsaved_alert_and_about_close_buttons_use_both_catalogs(tmp_path: Path,
     set_language("ru")
 
 
-def test_about_saves_language_for_restart(monkeypatch, tmp_path: Path, qtbot) -> None:
+def test_about_keeps_language_in_program_settings(monkeypatch, tmp_path: Path, qtbot) -> None:
     from test_stage14_ui import make_window
 
     _root, window, _service = make_window(tmp_path, qtbot)
 
-    def choose_english() -> None:
+    def inspect_about() -> None:
         dialog = QApplication.activeModalWidget()
-        selector = dialog.findChild(QComboBox, "languageSelector")
-        assert selector is not None
+        assert dialog.findChild(QComboBox, "languageSelector") is None
         labels = [label.text() for label in dialog.findChildren(QLabel)]
         assert any("GNU GPL" in label for label in labels)
         assert any(APPLICATION_VERSION in label for label in labels)
         assert any(str(SCHEMA_VERSION) in label for label in labels)
-        selector.setCurrentIndex(1)
-        dialog.accept()
+        dialog.reject()
 
-    QTimer.singleShot(0, choose_english)
+    QTimer.singleShot(0, inspect_about)
     window._show_about()
-    settings = QSettings(QSettings.Format.IniFormat, QSettings.Scope.UserScope, "ComponentPress", "ComponentPress")
-    settings.sync()
-    assert settings.value("language") == "en"
+    assert any(action is window.program_settings_action for action in window.settings_menu.actions())
     assert language() == "ru"
     set_language("en")
     english_tmp = tmp_path / "english"
@@ -178,7 +174,7 @@ def test_editor_panels_and_dynamic_controls_use_english_catalog(tmp_path: Path, 
         assert html.html == "<p>Keep this text</p>"
 
         diagnostic = ImageQuality("node", "assets/icon.png", 80, 60, 20, 15, 101.6, 101.6).diagnostic(
-            tmp_path / "project.yaml", source="main", sheet="Cards",
+            tmp_path / "project.cpress", source="main", sheet="Cards",
         )
         assert diagnostic is not None
         rendered = format_diagnostic(diagnostic)

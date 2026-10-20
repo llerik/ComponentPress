@@ -163,13 +163,13 @@ def test_image_key_edit_renames_and_resizes_atomically(tmp_path: Path) -> None:
     assert session.snapshot.model.icons["other"].width_px == 8
 
     original_snapshot = session.snapshot
-    original_file = (root / "project.yaml").read_bytes()
+    original_file = (root / "project.cpress").read_bytes()
     with pytest.raises(ProjectError):
         service.update_image_key(session, "magic", "other", 1, 1)
     assert session.snapshot is original_snapshot
-    assert (root / "project.yaml").read_bytes() == original_file
+    assert (root / "project.cpress").read_bytes() == original_file
 
     with pytest.raises(ProjectError):
         service.update_image_key(session, "magic", "bad name", 1, 1)
     assert session.snapshot is original_snapshot
-    assert (root / "project.yaml").read_bytes() == original_file
+    assert (root / "project.cpress").read_bytes() == original_file

@@ -167,7 +167,7 @@ print:
   cut_lines: true
   cut_line_width_mm: 0.2
 '''
-    (ROOT / "project.yaml").write_text(project, encoding="utf-8")
+    (ROOT / "project.cpress").write_text(project, encoding="utf-8")
     source = (
         "Lorem Ipsum test data uses the standard Lorem Ipsum passage and sections 1.10.32–1.10.33.\n"
         "Source: https://www.lipsum.com/\n"

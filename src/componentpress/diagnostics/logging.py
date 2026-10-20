@@ -46,7 +46,7 @@ def _directory() -> Path:
 _EVENT_RE = re.compile(r"^[a-z][a-z0-9_.]{0,79}$")
 _CODE_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,79}$")
 _TOKEN_RE = re.compile(r"^[a-zA-Z0-9_-]{1,80}$")
-_OPERATIONS = {"create", "open", "migrate", "rename", "resize", "register", "save", "project_settings", "import_image", "import_image_folder", "import_data", "build", "render", "preview", "archive", "export", "import", "dialog", "remove", "restore", "png_export", "add_component", "remove_component", "restore_component", "discard_component_history_backup"}
+_OPERATIONS = {"create", "open", "migrate", "rename", "resize", "register", "file_association", "program_settings", "save", "project_settings", "import_image", "import_image_folder", "import_data", "build", "render", "preview", "archive", "export", "import", "dialog", "remove", "restore", "png_export", "add_component", "remove_component", "restore_component", "discard_component_history_backup"}
 _PHASES = {"preparing", "preparation", "rendering", "render", "fonts", "png", "assembling_pdf", "publishing", "finished", "failed", "cancelled", "coordinator", "font_cleanup", "lock_release", "completion", "cancelling", "succeeded", "cleanup", "export", "import"}
 
 

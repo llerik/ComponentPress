@@ -75,7 +75,7 @@ def test_cut_grid_deduplicates_touching_cells_when_gap_is_zero() -> None:
 def test_pdf_omits_cut_grid_when_setting_is_disabled(tmp_path: Path) -> None:
     ensure_gui_application()
     root = _copy_demo(tmp_path)
-    project_file = root / "project.yaml"
+    project_file = root / "project.cpress"
     project_file.write_text(project_file.read_text(encoding="utf-8").replace(
         "cut_lines: true", "cut_lines: false", 1
     ), encoding="utf-8")
@@ -266,7 +266,7 @@ def test_external_change_during_snapshot_is_diagnosed(tmp_path: Path, monkeypatc
 
     def changing_hash(path: Path) -> str:
         nonlocal changed
-        if not changed and path.name == "project.yaml":
+        if not changed and path.name == "project.cpress":
             changed = True
             path.write_text(path.read_text(encoding="utf-8") + "# external\n", encoding="utf-8")
         return original(path)

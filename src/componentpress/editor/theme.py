@@ -3,7 +3,7 @@
 from pathlib import Path
 from tempfile import gettempdir
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
@@ -11,11 +11,6 @@ THEMES = ("system", "light", "dark")
 _CURRENT_THEME = "system"
 _SYSTEM_WATCHING = False
 _CACHE_CONFIGURED = False
-
-
-def saved_theme(settings: QSettings) -> str:
-    value = settings.value("theme", "system", type=str)
-    return value if value in THEMES else "system"
 
 
 def apply_theme(theme: str) -> None:
@@ -111,12 +106,3 @@ def refresh_theme_widgets() -> None:
             style_warning(widget, bool(widget.text()))
         elif widget.objectName() == "imageQuality":
             style_warning(widget, bool(widget.property("componentpressWarning")))
-
-
-def theme_settings() -> QSettings:
-    return QSettings(
-        QSettings.Format.IniFormat,
-        QSettings.Scope.UserScope,
-        "ComponentPress",
-        "ComponentPress",
-    )

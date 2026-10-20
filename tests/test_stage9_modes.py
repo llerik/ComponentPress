@@ -179,7 +179,7 @@ def test_empty_selected_mode_and_cancelled_archive_publish_nothing(tmp_path: Pat
 def test_identical_quantity_column_names_apply_to_both_modes(tmp_path: Path) -> None:
     ensure_gui_application()
     root = _copy_demo(tmp_path)
-    project_path = root / "project.yaml"
+    project_path = root / "project.cpress"
     project_text = project_path.read_text(encoding="utf-8").replace("test: Debug", "test: Prod")
     project_path.write_text(project_text, encoding="utf-8")
     service = project_service()

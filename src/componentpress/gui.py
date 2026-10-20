@@ -22,7 +22,11 @@ from componentpress.execution.qt_wait import run_build
 from componentpress.app_assets import load_application_icon
 from componentpress.editor import MainWindow
 from componentpress.diagnostics import logging as technical_log
-from componentpress.i18n import language as current_language, set_language, validate_catalogs
+from componentpress.i18n import language as current_language, set_language, tr, validate_catalogs
+from componentpress.user_preferences import load_preferences, user_settings
+from componentpress.i18n.diagnostics import format_diagnostic
+from componentpress.domain.diagnostics import Diagnostic, ProjectError
+from componentpress.domain.schema import PROJECT_MANIFEST
 from componentpress.version import APPLICATION_VERSION
 
 
@@ -433,9 +437,8 @@ def main(argv: list[str] | None = None) -> int:
     application.aboutToQuit.connect(technical_log.shutdown)
     atexit.register(technical_log.shutdown)
     validate_catalogs()
-    settings = QSettings(QSettings.Format.IniFormat, QSettings.Scope.UserScope, "ComponentPress", "ComponentPress")
-    language = settings.value("language", "ru", type=str)
-    set_language(language)
+    preferences = load_preferences(user_settings())
+    set_language(preferences.language)
     language = current_language()
     if language != "ru":
         import PySide6
@@ -449,8 +452,26 @@ def main(argv: list[str] | None = None) -> int:
             application._componentpress_translator = translator
     technical_log.log_event("application.language", language=language)
     window = MainWindow(project_controller())
+    smoke_open = len(arguments) == 2 and arguments[0] == "--release-smoke-open"
     if arguments and not smoke:
-        return 2
+        manifest_argument = arguments[1] if smoke_open else arguments[0]
+        if (len(arguments) != (2 if smoke_open else 1)
+                or Path(manifest_argument).name.casefold() not in {PROJECT_MANIFEST.casefold(), "project.yaml"}):
+            error = ProjectError(Diagnostic(
+                "PROJECT_ARGUMENT", "укажите путь к файлу project.cpress",
+                message_key="error.project_argument",
+            ))
+            QMessageBox.critical(None, tr("app.name"), format_diagnostic(error.diagnostic))
+            return 2
+        manifest = Path(manifest_argument)
+        technical_log.log_event("application.project_open", operation="open", phase="preparation", status="started")
+        try:
+            window.load_session(window.controller.open(manifest.parent))
+        except ProjectError as exc:
+            technical_log.log_event("application.project_open", operation="open", phase="finished", status="failed", code=exc.diagnostic.code)
+            QMessageBox.critical(None, tr("app.name"), format_diagnostic(exc.diagnostic))
+            return 2
+        technical_log.log_event("application.project_open", operation="open", phase="finished", status="succeeded")
     if smoke:
         smoke_root = Path(arguments[1])
         try:
@@ -463,7 +484,7 @@ def main(argv: list[str] | None = None) -> int:
         if not passed:
             return 3
     window.show()
-    if smoke:
+    if smoke or smoke_open:
         QTimer.singleShot(750, application.quit)
     if not owns_application:
         return 0
