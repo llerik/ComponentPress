@@ -4,8 +4,8 @@ from pathlib import Path
 import shutil
 import pytest
 
-from PySide6.QtCore import QPoint, QSettings, QSize, Qt, QTimer
-from PySide6.QtGui import QIcon, QImage, QPixmap
+from PySide6.QtCore import QEvent, QPoint, QSettings, QSize, Qt, QTimer
+from PySide6.QtGui import QHelpEvent, QIcon, QImage, QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox, QTreeView
 
@@ -157,19 +157,22 @@ def test_copy_mode_switch_changes_label_color_and_keyboard_state(qtbot) -> None:
     assert switch.mode == "prod" and switch.text() == "Полный набор (prod)"
 
 
-def test_copy_mode_info_uses_tooltip_without_changing_mode_or_preview(tmp_path: Path, qtbot, monkeypatch) -> None:
+def test_copy_mode_info_uses_tooltip_without_changing_mode_or_preview(tmp_path: Path, qtbot) -> None:
     _root, window, _service = make_window(tmp_path, qtbot)
     assert window.open_component("forest-card") is not None
-    shown = []
-    monkeypatch.setattr(main_window_module.QToolTip, "showText", staticmethod(lambda _point, text, *_args: shown.append(text)))
     mode = window.data_mode.mode
     generation = window.active_tab.preview_generation
+    point = window.mode_info_button.mapToGlobal(QPoint(1, 1))
+    QApplication.sendEvent(
+        window.mode_info_button,
+        QHelpEvent(QEvent.Type.ToolTip, QPoint(1, 1), point),
+    )
+    assert window._mode_info_tooltip.text() == window.mode_info_button.accessibleName()
 
     QTest.keyClick(window.mode_info_button, Qt.Key.Key_Space)
 
-    assert len(shown) == 1
-    assert "Prod" in shown[0]
-    assert "Debug" in shown[0]
+    assert "Prod" in window._mode_info_tooltip.text()
+    assert "Debug" in window._mode_info_tooltip.text()
     assert window.data_mode.mode == mode
     assert window.active_tab.preview_generation == generation
 

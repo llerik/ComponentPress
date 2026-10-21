@@ -10,7 +10,7 @@ from types import MappingProxyType
 
 from pydantic import ValidationError
 from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QSignalBlocker, QSize, QThreadPool, QTimer, Qt, QPoint
-from PySide6.QtGui import QAction, QColor, QCloseEvent, QImage, QKeySequence, QUndoGroup
+from PySide6.QtGui import QAction, QColor, QCloseEvent, QImage, QKeySequence, QPalette, QUndoGroup
 from PySide6.QtWidgets import (
     QApplication,
     QColorDialog,
@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QToolTip,
 )
+from PySide6.QtGui import QHelpEvent
 
 from componentpress.i18n import catalogs, tr
 from componentpress.application.contracts import ComponentHistoryEntry, ComponentOperation
@@ -334,7 +335,28 @@ class MainWindow(QMainWindow):
         test_column = project.copies_columns.test if project is not None else "Test"
         message = tr("ui.copy_mode_info", prod_column=prod_column, test_column=test_column)
         point = self.mode_info_button.mapToGlobal(QPoint(0, self.mode_info_button.height()))
-        QToolTip.showText(point, message, self.mode_info_button)
+        self._show_themed_tooltip(message, point)
+
+    def _show_themed_tooltip(self, text: str, point: QPoint) -> None:
+        palette = self.palette()
+        tooltip = QLabel(text, self, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+        tooltip.setWordWrap(True)
+        tooltip.setMaximumWidth(420)
+        tooltip.setMargin(7)
+        tooltip.setAutoFillBackground(True)
+        tooltip.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        tooltip.setPalette(palette)
+        tooltip.setStyleSheet(
+            "QLabel {"
+            f"background-color: {palette.color(QPalette.ColorRole.ToolTipBase).name()}; "
+            f"color: {palette.color(QPalette.ColorRole.ToolTipText).name()}; "
+            f"border: 1px solid {palette.color(QPalette.ColorRole.Mid).name()}; border-radius: 4px;}}"
+        )
+        tooltip.adjustSize()
+        tooltip.move(point)
+        tooltip.show()
+        self._mode_info_tooltip = tooltip
+        QTimer.singleShot(8000, tooltip.close)
 
     def _register_file_type(self, parent=None) -> None:
         operation_id = uuid4().hex
@@ -386,12 +408,12 @@ class MainWindow(QMainWindow):
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.quick_toolbar)
         self.quick_toolbar.addWidget(self.data_mode)
         self.mode_info_button = QToolButton(self.quick_toolbar)
-        self.mode_info_button.setObjectName("copyModeInfo")
         set_themed_icon(self.mode_info_button, "info.png")
         self.mode_info_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        self.mode_info_button.setToolTip(tr("ui.copy_mode_info_tip"))
+        self.mode_info_button.setToolTip("")
         self.mode_info_button.setAccessibleName(tr("ui.copy_mode_info_tip"))
         self.mode_info_button.clicked.connect(self._show_copy_mode_tooltip)
+        self.mode_info_button.installEventFilter(self)
         self.quick_toolbar.addWidget(self.mode_info_button)
         self.quick_toolbar.addSeparator()
         for action in (self.add_component_action, self.project_settings_action, self.save_action, self.undo_action, self.redo_action):
@@ -435,6 +457,9 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, watched, event) -> bool:
         if self._route_text_history_shortcut(watched, event):
+            return True
+        if watched is getattr(self, "mode_info_button", None) and event.type() == QEvent.Type.ToolTip:
+            self._show_themed_tooltip(tr("ui.copy_mode_info_tip"), event.globalPos())
             return True
         if event.type() == QEvent.Type.MouseButtonPress:
             tab = getattr(self, "active_tab", None)

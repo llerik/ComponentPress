@@ -56,16 +56,14 @@ def test_program_settings_are_grouped_and_print_scope_is_explicit(qtbot):
         ("en", "Interface language", "The interface language will change after restarting ComponentPress.", "100% zoom"),
     ),
 )
-def test_program_settings_language_tooltip_and_width(qtbot, monkeypatch, locale, language_label, restart_tip, zoom_label):
+def test_program_settings_language_tooltip_and_width(qtbot, locale, language_label, restart_tip, zoom_label):
     from componentpress.i18n import tr
     from componentpress.user_preferences import ProgramPreferences
+    from componentpress.editor.theme import apply_theme, theme_palette
+
     set_language(locale)
     validate_catalogs()
-    shown = []
-    monkeypatch.setattr(
-        "componentpress.editor.program_settings_dialog.QToolTip.showText",
-        lambda _point, text, *_args: shown.append(text),
-    )
+    apply_theme("dark")
     dialog = ProgramSettingsDialog(ProgramPreferences(), lambda: None)
     qtbot.addWidget(dialog)
     assert dialog.layout().itemAt(0).widget().horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
@@ -82,10 +80,15 @@ def test_program_settings_language_tooltip_and_width(qtbot, monkeypatch, locale,
     interface_group = next(group for group in dialog.findChildren(QGroupBox) if group.title() == tr("ui.settings_interface"))
     assert interface_group.layout().labelForField(dialog.language).text() == language_label
     assert not any(restart_tip in label.text() for label in dialog.findChildren(QLabel))
-    assert shown == []
     dialog.language.setCurrentIndex(1)
     dialog.language.activated.emit(1)
-    assert shown == [restart_tip]
+    qtbot.wait(10)
+    assert dialog._language_tooltip.text() == restart_tip
+    image = dialog._language_tooltip.grab().toImage()
+    colors = [image.pixelColor(x, y) for x in range(image.width()) for y in range(image.height())]
+    assert colors.count(theme_palette().color(theme_palette().ColorRole.ToolTipBase)) > colors.count(
+        theme_palette().color(theme_palette().ColorRole.ToolTipText)
+    )
     assert tr("ui.zoom_actual") == zoom_label
     assert "96" in tr("ui.zoom_actual_tip")
 

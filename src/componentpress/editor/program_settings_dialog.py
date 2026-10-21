@@ -2,9 +2,10 @@
 
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
-    QGroupBox, QLabel, QPushButton, QScrollArea, QSpinBox, QToolTip, QVBoxLayout, QWidget,
+    QGroupBox, QLabel, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QTimer, Qt
+from PySide6.QtGui import QPalette
 
 from componentpress.domain.project import PrintSettings
 from componentpress.i18n import tr
@@ -35,7 +36,7 @@ class ProgramSettingsDialog(QDialog):
         content_layout.addStretch(1)
         scroll.setWidget(content)
         scroll.setMinimumWidth(
-            content.sizeHint().width() + 2 * scroll.frameWidth() + scroll.verticalScrollBar().sizeHint().width()
+            content.sizeHint().width() + 2 * scroll.frameWidth() + scroll.verticalScrollBar().sizeHint().width() + 8
         )
         return scroll
 
@@ -60,7 +61,24 @@ class ProgramSettingsDialog(QDialog):
 
     def _show_language_tooltip(self, _index: int) -> None:
         point = self.language.mapToGlobal(QPoint(0, self.language.height()))
-        QToolTip.showText(point, tr("ui.language_restart"), self.language)
+        palette = self.palette()
+        tooltip = QLabel(tr("ui.language_restart"), self, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+        tooltip.setWordWrap(True)
+        tooltip.setMargin(7)
+        tooltip.setAutoFillBackground(True)
+        tooltip.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        tooltip.setPalette(palette)
+        tooltip.setStyleSheet(
+            "QLabel {"
+            f"background-color: {palette.color(QPalette.ColorRole.ToolTipBase).name()}; "
+            f"color: {palette.color(QPalette.ColorRole.ToolTipText).name()}; "
+            f"border: 1px solid {palette.color(QPalette.ColorRole.Mid).name()}; border-radius: 4px;}}"
+        )
+        tooltip.adjustSize()
+        tooltip.move(point)
+        tooltip.show()
+        self._language_tooltip = tooltip
+        QTimer.singleShot(8000, tooltip.close)
 
     def _add_print_settings(self, content_layout, settings):
         self._create_print_widgets(settings)
