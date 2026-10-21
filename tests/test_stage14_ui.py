@@ -43,9 +43,9 @@ def use_temp_ui_settings(window: MainWindow, tmp_path: Path) -> None:
     window.ui_state = UiState(QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat))
 
 
-@pytest.mark.parametrize(("locale", "about_title"), (("ru", "О программе"), ("en", "About")))
+@pytest.mark.parametrize(("locale", "help_title"), (("ru", "Справка"), ("en", "Help")))
 def test_startup_menus_receive_clicks_without_project_and_after_restore(
-    tmp_path: Path, qtbot, monkeypatch, locale: str, about_title: str
+    tmp_path: Path, qtbot, monkeypatch, locale: str, help_title: str
 ) -> None:
     from componentpress.i18n import language, set_language
 
@@ -63,8 +63,14 @@ def test_startup_menus_receive_clicks_without_project_and_after_restore(
         window.show()
         qtbot.waitUntil(window.menuBar().isVisible)
         bar = window.menuBar()
+        expected_menus = (
+            ["Файл", "Правка", "Проект", "Вид", "Сборка", "Настройки", "Справка"]
+            if locale == "ru"
+            else ["File", "Edit", "Project", "View", "Build", "Settings", "Help"]
+        )
+        assert [action.text() for action in bar.actions() if action.menu()] == expected_menus
 
-        for menu in (window.file_menu, window.about_menu):
+        for menu in (window.file_menu, window.help_menu):
             rect = bar.actionGeometry(menu.menuAction())
             for x in (rect.left() + 2, rect.center().x(), rect.right() - 2):
                 point = bar.mapToGlobal(QPoint(x, rect.center().y()))
@@ -79,14 +85,14 @@ def test_startup_menus_receive_clicks_without_project_and_after_restore(
         assert window.open_action.isEnabled()
         assert not window.project_settings_action.isEnabled()
 
-        about_bar_rect = bar.actionGeometry(window.about_menu.menuAction())
+        about_bar_rect = bar.actionGeometry(window.help_menu.menuAction())
         about_bar_point = bar.mapToGlobal(about_bar_rect.center())
         QTest.mouseClick(bar, Qt.MouseButton.LeftButton, pos=bar.mapFromGlobal(about_bar_point))
-        qtbot.waitUntil(window.about_menu.isVisible)
-        about_rect = window.about_menu.actionGeometry(window.about_action)
-        about_point = window.about_menu.mapToGlobal(about_rect.center())
+        qtbot.waitUntil(window.help_menu.isVisible)
+        about_rect = window.help_menu.actionGeometry(window.about_action)
+        about_point = window.help_menu.mapToGlobal(about_rect.center())
         about_receiver = QApplication.widgetAt(about_point)
-        assert about_receiver is window.about_menu
+        assert about_receiver is window.help_menu
         about_opened = []
 
         def close_about() -> None:
@@ -102,7 +108,8 @@ def test_startup_menus_receive_clicks_without_project_and_after_restore(
             pos=about_receiver.mapFromGlobal(about_point),
         )
         assert about_opened == [True]
-        assert window.about_menu.title() == about_title
+        assert window.help_menu.title() == help_title
+        assert not hasattr(window, "about_menu")
 
         root = tmp_path / "game"
         shutil.copytree(DEMO, root)
@@ -128,9 +135,9 @@ def test_copy_mode_switch_changes_label_color_and_keyboard_state(qtbot) -> None:
     switch = CopyModeSwitch()
     qtbot.addWidget(switch)
     switch.show()
-    assert switch.mode == "prod" and switch.text() == "Prod"
+    assert switch.mode == "prod" and switch.text() == "Полный набор (prod)"
     assert switch.accessibleName() == "Режим тиража"
-    assert switch.accessibleDescription() == "Режим тиража: Prod"
+    assert switch.accessibleDescription() == "Режим тиража: Полный набор (prod)"
 
     def pixel(x: int, y: int) -> tuple[int, int, int]:
         image = QImage(switch.size(), QImage.Format.Format_ARGB32)
@@ -142,12 +149,66 @@ def test_copy_mode_switch_changes_label_color_and_keyboard_state(qtbot) -> None:
     assert pixel(25, 15) == (197, 143, 143)
     assert pixel(13, 15) == (255, 255, 255)
     QTest.mouseClick(switch, Qt.MouseButton.LeftButton, pos=switch.rect().center())
-    assert switch.mode == "test" and switch.text() == "Test"
-    assert switch.accessibleDescription() == "Режим тиража: Test"
+    assert switch.mode == "test" and switch.text() == "Частичный набор (test)"
+    assert switch.accessibleDescription() == "Режим тиража: Частичный набор (test)"
     assert pixel(10, 15) == (143, 181, 154)
     assert pixel(38, 15) == (255, 255, 255)
     QTest.keyClick(switch, Qt.Key.Key_Space)
-    assert switch.mode == "prod" and switch.text() == "Prod"
+    assert switch.mode == "prod" and switch.text() == "Полный набор (prod)"
+
+
+def test_copy_mode_info_uses_tooltip_without_changing_mode_or_preview(tmp_path: Path, qtbot, monkeypatch) -> None:
+    _root, window, _service = make_window(tmp_path, qtbot)
+    assert window.open_component("forest-card") is not None
+    shown = []
+    monkeypatch.setattr(main_window_module.QToolTip, "showText", staticmethod(lambda _point, text, *_args: shown.append(text)))
+    mode = window.data_mode.mode
+    generation = window.active_tab.preview_generation
+
+    QTest.keyClick(window.mode_info_button, Qt.Key.Key_Space)
+
+    assert len(shown) == 1
+    assert "Prod" in shown[0]
+    assert "Debug" in shown[0]
+    assert window.data_mode.mode == mode
+    assert window.active_tab.preview_generation == generation
+
+
+def test_events_hide_project_path_and_copy_visible_selection(tmp_path: Path, qtbot, monkeypatch) -> None:
+    from componentpress.domain.diagnostics import Diagnostic
+    from componentpress.i18n.diagnostics import format_diagnostic
+
+    root, window, _service = make_window(tmp_path, qtbot)
+    shown = []
+    monkeypatch.setattr(main_window_module.QToolTip, "showText", staticmethod(lambda _point, text, *_args: shown.append(text)))
+    diagnostic = Diagnostic(
+        "RESOURCE_MISSING", "Файл не найден", root / "components" / "forest-card.yaml",
+        line=7, node_id="picture",
+    )
+    window._add_events((diagnostic,))
+    item = window.event_list.item(0)
+    original_text = item.text()
+
+    assert window.hide_event_project_path.isChecked()
+    assert "forest-card.yaml" in original_text
+    assert str(root) not in original_text
+    assert item.toolTip() == format_diagnostic(diagnostic)
+    assert item.data(Qt.ItemDataRole.UserRole) == (diagnostic, root)
+
+    window.hide_event_project_path.setChecked(False)
+    assert str(root) in item.text()
+    window.hide_event_project_path.setChecked(True)
+    window.event_list.setCurrentItem(item)
+    window.copy_event.click()
+    assert QApplication.clipboard().text() == item.text()
+    assert shown == ["Строка события скопирована"]
+
+    window.event_search.setText("строка отсутствует")
+    assert item.isHidden() and not window.copy_event.isEnabled()
+    window.event_search.clear()
+    assert not item.isHidden() and window.copy_event.isEnabled()
+    window.clear_events.click()
+    assert window.event_list.count() == 0 and not window.copy_event.isEnabled()
 
 
 @pytest.mark.parametrize("mode", ("prod", "test"))
@@ -284,6 +345,10 @@ def test_project_settings_action_tracks_project_and_tab_state(tmp_path: Path, qt
     use_temp_ui_settings(window, tmp_path)
     qtbot.addWidget(window)
     assert not window.project_settings_action.isEnabled()
+    assert not window.edit_menu.menuAction().isVisible()
+    assert not window.view_menu.menuAction().isVisible()
+    assert not window.build_menu.menuAction().isVisible()
+    assert window.import_project_archive_action.isVisible()
     window.load_session(service.open_session(root))
     assert window.project_settings_action.isEnabled()  # A project can have no open document.
     window.session.documents.clear()
@@ -292,6 +357,11 @@ def test_project_settings_action_tracks_project_and_tab_state(tmp_path: Path, qt
     window.controller.set_session(None)
     window._update_actions()
     assert not window.project_settings_action.isEnabled()
+    assert not window.project_settings_action.isVisible()
+    assert not window.edit_menu.menuAction().isVisible()
+    assert not window.view_menu.menuAction().isVisible()
+    assert not window.build_menu.menuAction().isVisible()
+    assert window.import_project_archive_action.isVisible()
 
 
 def test_window_menu_actions_toggle_panels_and_sync_close_button(tmp_path: Path, qtbot) -> None:
@@ -766,7 +836,7 @@ def test_compact_shell_has_icon_tools_and_project_docks(tmp_path: Path, qtbot) -
     assert window.select_tool.icon().isNull() is False
     assert window.select_tool.text() == ""
     assert window.select_tool.toolTip() == "Выбор"
-    assert window.about_menu.title() == "О программе"
+    assert window.help_menu.title() == "Справка"
 
 
 def test_command_and_instance_buttons_use_the_assigned_png_icons(tmp_path: Path, qtbot, monkeypatch) -> None:

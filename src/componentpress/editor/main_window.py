@@ -9,7 +9,7 @@ from uuid import uuid4
 from types import MappingProxyType
 
 from pydantic import ValidationError
-from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QSignalBlocker, QSize, QThreadPool, QTimer, Qt
+from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QSignalBlocker, QSize, QThreadPool, QTimer, Qt, QPoint
 from PySide6.QtGui import QAction, QColor, QCloseEvent, QImage, QKeySequence, QUndoGroup
 from PySide6.QtWidgets import (
     QApplication,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -39,11 +40,13 @@ from PySide6.QtWidgets import (
     QTreeView,
     QVBoxLayout,
     QWidget,
+    QCheckBox,
+    QToolTip,
 )
 
 from componentpress.i18n import catalogs, tr
 from componentpress.application.contracts import ComponentHistoryEntry, ComponentOperation
-from componentpress.i18n.diagnostics import format_diagnostic
+from componentpress.i18n.diagnostics import format_diagnostic, format_diagnostic_event
 from componentpress.application.sessions import ProjectSession
 from componentpress.application.contracts import ArchiveExportResult, BuildRequest, BuildResult, BuildProgress
 from componentpress.domain.component import ComponentDefinition, SizeMM
@@ -261,43 +264,40 @@ class MainWindow(QMainWindow):
         self.file_menu = self.menuBar().addMenu(tr("menu.file"))
         self.file_menu.addActions([self.new_action, self.open_action])
         self.file_menu.addMenu(self.recent_projects_menu)
-        self.file_menu.addSeparator()
-        self.import_menu = self.file_menu.addMenu(tr("menu.import"))
-        self.import_menu.addAction(self.import_project_archive_action)
-        self.export_menu = self.file_menu.addMenu(tr("menu.export"))
-        self.export_menu.addActions([self.export_png_zip_action, self.export_project_archive_action])
-        self.file_menu.addSeparator()
-        self.file_menu.addActions([self.image_manager_action, self.add_component_action])
-        self.file_menu.addSeparator()
+        self.file_project_separator = self.file_menu.addSeparator()
         self.file_menu.addActions([self.save_action, self.save_all_action, self.close_tab_action])
-        self.file_menu.addSeparator()
+        self.file_exit_separator = self.file_menu.addSeparator()
         self.file_menu.addAction(self.exit_action)
-        self.project_menu = self.menuBar().addMenu(tr("menu.project"))
-        self.project_menu.addAction(self.import_project_archive_action)
-        self.project_menu.addSeparator()
-        self.project_menu.addAction(self.project_settings_action)
-        self.settings_menu = self.menuBar().addMenu(tr("menu.settings"))
-        self.settings_menu.addActions([self.project_settings_action, self.program_settings_action])
         self.edit_menu = self.menuBar().addMenu(tr("menu.edit"))
         self.edit_menu.addActions([self.undo_action, self.redo_action])
         self.edit_menu.addSeparator()
-        self.edit_menu.addActions([self.delete_action, self.delete_component_action, self.group_action, self.ungroup_action])
+        self.edit_menu.addActions([self.delete_action, self.group_action, self.ungroup_action])
+        self.project_menu = self.menuBar().addMenu(tr("menu.project"))
+        self.project_menu.addActions([self.add_component_action, self.delete_component_action, self.image_manager_action])
+        self.project_archive_separator = self.project_menu.addSeparator()
+        self.project_menu.addActions([self.export_project_archive_action, self.import_project_archive_action])
         self.view_menu = self.menuBar().addMenu(tr("menu.view"))
         self.view_menu.addActions([self.zoom_in_action, self.zoom_out_action, self.fit_action, self.actual_size_action])
         self.view_menu.addSeparator()
         self.windows_menu = self.view_menu.addMenu(tr("menu.windows"))
         self.build_menu = self.menuBar().addMenu(tr("menu.build"))
         self.build_menu.addActions([
+            self.validate_all_action,
+            self.validate_active_action,
+            self.export_png_zip_action,
+            self.build_menu.addSeparator(),
             self.build_all_action,
             self.build_active_action,
             self.cancel_build_action,
             self.open_build_action,
             self.open_pdf_action,
         ])
+        self.settings_menu = self.menuBar().addMenu(tr("menu.settings"))
+        self.settings_menu.addActions([self.project_settings_action, self.program_settings_action])
         self.help_menu = self.menuBar().addMenu(tr("menu.help"))
         self.help_menu.addActions([self.help_action, self.hotkeys_action, self.error_report_action])
-        self.about_menu = self.menuBar().addMenu(tr("menu.about"))
-        self.about_menu.addAction(self.about_action)
+        self.help_menu.addSeparator()
+        self.help_menu.addAction(self.about_action)
 
     def _show_program_settings(self) -> None:
         dialog = ProgramSettingsDialog(self._program_preferences, self._register_file_type, self)
@@ -326,6 +326,14 @@ class MainWindow(QMainWindow):
         apply_theme(preferences.theme)
         technical_log.log_event("application.settings_save", operation="program_settings",
                                 operation_id=operation_id, phase="finished", status="succeeded")
+
+    def _show_copy_mode_tooltip(self) -> None:
+        project = self.session.snapshot.model if self.session is not None else None
+        prod_column = project.copies_columns.prod if project is not None else "Prod"
+        test_column = project.copies_columns.test if project is not None else "Test"
+        message = tr("ui.copy_mode_info", prod_column=prod_column, test_column=test_column)
+        point = self.mode_info_button.mapToGlobal(QPoint(0, self.mode_info_button.height()))
+        QToolTip.showText(point, message, self.mode_info_button)
 
     def _register_file_type(self) -> None:
         operation_id = uuid4().hex
@@ -376,6 +384,14 @@ class MainWindow(QMainWindow):
         self.quick_toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.quick_toolbar)
         self.quick_toolbar.addWidget(self.data_mode)
+        self.mode_info_button = QToolButton(self.quick_toolbar)
+        self.mode_info_button.setObjectName("copyModeInfo")
+        self.mode_info_button.setText("i")
+        self.mode_info_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.mode_info_button.setToolTip(tr("ui.copy_mode_info_tip"))
+        self.mode_info_button.setAccessibleName(tr("ui.copy_mode_info_tip"))
+        self.mode_info_button.clicked.connect(self._show_copy_mode_tooltip)
+        self.quick_toolbar.addWidget(self.mode_info_button)
         self.quick_toolbar.addSeparator()
         for action in (self.add_component_action, self.project_settings_action, self.save_action, self.undo_action, self.redo_action):
             self.quick_toolbar.addAction(action)
@@ -541,12 +557,29 @@ class MainWindow(QMainWindow):
         self.event_search = QLineEdit()
         self.event_search.setPlaceholderText(tr("event.search"))
         self.event_list = QListWidget()
+        self.hide_event_project_path = QCheckBox(tr("event.hide_project_path"))
+        self.hide_event_project_path.setObjectName("hideEventProjectPath")
+        self.hide_event_project_path.setChecked(True)
+        self.copy_event = QToolButton()
+        self.copy_event.setObjectName("copyEvent")
+        self.copy_event.setToolTip(tr("event.copy"))
+        self.copy_event.setAccessibleName(tr("event.copy"))
+        set_themed_icon(self.copy_event, "copy.png")
+        self.copy_event.setEnabled(False)
         self.clear_events = QPushButton(tr("event.clear"))
         set_themed_icon(self.clear_events, "delete.png")
-        self.clear_events.clicked.connect(self.event_list.clear)
+        self.clear_events.clicked.connect(self._clear_events)
+        self.copy_event.clicked.connect(self._copy_selected_event)
+        self.hide_event_project_path.toggled.connect(self._format_event_items)
+        self.event_list.currentItemChanged.connect(lambda *_: self._update_copy_event_enabled())
+        options = QHBoxLayout()
+        options.addWidget(self.hide_event_project_path)
+        options.addWidget(self.copy_event)
+        options.addStretch(1)
+        options.addWidget(self.clear_events)
         events_layout.addWidget(self.event_search)
         events_layout.addWidget(self.event_list, 1)
-        events_layout.addWidget(self.clear_events)
+        events_layout.addLayout(options)
         return panel
 
     def _build_icon_toolbar(self) -> None:
@@ -659,6 +692,7 @@ class MainWindow(QMainWindow):
     def _update_project_visibility(self) -> None:
         has_project = self.session is not None
         self.edit_menu.menuAction().setVisible(has_project)
+        self.view_menu.menuAction().setVisible(has_project)
         self.build_menu.menuAction().setVisible(has_project)
         self.quick_toolbar.setVisible(has_project)
         self.icon_toolbar.setVisible(has_project)
@@ -672,8 +706,15 @@ class MainWindow(QMainWindow):
                     dock.setVisible(self._saved_dock_visibility.get(dock.objectName(), True))
                 else:
                     dock.hide()
-        self.import_menu.menuAction().setVisible(has_project)
-        self.export_menu.menuAction().setVisible(has_project)
+        self.recent_projects_menu.menuAction().setVisible(bool(self._program_preferences.recent_projects))
+        self.file_project_separator.setVisible(has_project)
+        self.file_exit_separator.setVisible(has_project)
+        self.project_archive_separator.setVisible(has_project)
+        for action in (self.save_action, self.save_all_action, self.close_tab_action,
+                       self.add_component_action, self.delete_component_action,
+                       self.image_manager_action, self.export_project_archive_action,
+                       self.export_png_zip_action):
+            action.setVisible(has_project)
         self.project_settings_action.setVisible(has_project)
 
     def _suppress_docks(self) -> None:
@@ -1784,29 +1825,55 @@ class MainWindow(QMainWindow):
             data = self.controller.preview.cached_data(self.session.snapshot, self.active_tab.component_id)
         self._populate_rows(data)
         if self.active_tab is not None:
-            is_excel = self.session.documents[self.active_tab.component_id].model.data is not None
-            if data is None and is_excel:
-                self.active_tab.preview_row_number = None
-                self.active_tab.canvas.clear_document()
-                self.statusBar().showMessage(tr("ui.mode_requires_validation"), 5000)
-            elif is_excel and data is not None and not any(copies_for_mode(row, self.data_mode.mode) > 0 for row in data.rows):
-                self.active_tab.preview_row_number = None
-                self.active_tab.canvas.clear_document()
-                self.statusBar().showMessage(tr("ui.preview_no_instances"), 5000)
-            else:
-                self._refresh_preview(self.active_tab)
+            self._refresh_preview(self.active_tab)
             self._update_preview_navigation()
 
     def _add_events(self, diagnostics) -> None:
         reveal = False
         for diagnostic in diagnostics:
             technical_log.log_event("project.diagnostic", code=getattr(diagnostic, "code", "UNKNOWN"), status=getattr(diagnostic, "severity", "error"))
-            self.event_list.addItem(format_diagnostic(diagnostic))
+            item = QListWidgetItem()
+            root = self.session.snapshot.root if self.session is not None else None
+            item.setData(Qt.ItemDataRole.UserRole, (diagnostic, root))
+            item.setToolTip(format_diagnostic(diagnostic))
+            self.event_list.addItem(item)
             if getattr(diagnostic, "severity", "error") != "info":
                 reveal = True
+        self._format_event_items()
         self._filter_events(self.event_search.text())
         if reveal:
             self.events_dock.show()
+
+    def _format_event_items(self) -> None:
+        for index in range(self.event_list.count()):
+            item = self.event_list.item(index)
+            stored = item.data(Qt.ItemDataRole.UserRole)
+            if not stored:
+                continue
+            diagnostic, root = stored
+            item.setText(format_diagnostic_event(
+                diagnostic, project_root=root,
+                hide_project_path=self.hide_event_project_path.isChecked(),
+            ))
+            item.setToolTip(format_diagnostic(diagnostic))
+        self._filter_events(self.event_search.text())
+
+    def _copy_selected_event(self) -> None:
+        item = self.event_list.currentItem()
+        if item is None or item.isHidden():
+            self._update_copy_event_enabled()
+            return
+        QApplication.clipboard().setText(item.text())
+        point = self.copy_event.mapToGlobal(QPoint(0, self.copy_event.height()))
+        QToolTip.showText(point, tr("event.copied"), self.copy_event)
+
+    def _clear_events(self) -> None:
+        self.event_list.clear()
+        self._update_copy_event_enabled()
+
+    def _update_copy_event_enabled(self) -> None:
+        item = self.event_list.currentItem()
+        self.copy_event.setEnabled(item is not None and not item.isHidden())
 
     def _snapshot_for_current_documents(self):
         if self.session is None:
@@ -1821,6 +1888,7 @@ class MainWindow(QMainWindow):
         for index in range(self.event_list.count()):
             item = self.event_list.item(index)
             item.setHidden(needle not in item.text().casefold())
+        self._update_copy_event_enabled()
 
     def _validate_active(self) -> None:
         if self.session is None or self.active_tab is None or self.controller.preview is None:
@@ -1914,21 +1982,25 @@ class MainWindow(QMainWindow):
         if self.session is None:
             return False
         document = self.session.documents[tab.component_id]
+        source_label = tr("ui.preview_source_static")
         if document.model.data is None or self.controller.preview is None:
             tab.resolved_component = None
             active_component = document.model
             bindings_resolved = False
             self._update_preview_navigation(tab)
         else:
+            source = self.session.snapshot.model.data_source
+            source_path = source.path if source is not None else ""
+            source_label = tr("ui.preview_source_excel", path=source_path, sheet=document.model.data.sheet, row="—")
             tab.resolved_component = None
             cached = self.controller.preview.cached_data(self.session.snapshot, tab.component_id, component=document.model)
             if cached is None:
-                self._clear_preview(tab)
+                self._clear_preview(tab, source_label, tr("ui.preview_source_no_data"))
                 return False
             eligible = [row for row in cached.rows if copies_for_mode(row, self.data_mode.mode) > 0]
             if not eligible:
                 tab.preview_row_number = None
-                self._clear_preview(tab)
+                self._clear_preview(tab, source_label, tr("ui.preview_source_no_instances"))
                 return False
             if tab.preview_row_number not in {row.row_number for row in eligible}:
                 tab.preview_row_number = eligible[0].row_number
@@ -1940,11 +2012,21 @@ class MainWindow(QMainWindow):
                     validate_resources=False,
                 )
             except ProjectError as exc:
+                tab.fail_preview_source(source_label)
                 tab.previewError.emit(format_diagnostic(exc.diagnostic))
                 if self.active_tab is tab and len(tab.canvas.selected_ids) == 1:
                     self._show_selection(tab.canvas.selected_ids)
                 return False
             tab.preview_row_number = resolved.row.row_number if resolved.row else None
+            if resolved.row is not None:
+                try:
+                    display_path = cached.path.resolve().relative_to(self.session.snapshot.root.resolve()).as_posix()
+                except (OSError, ValueError):
+                    display_path = cached.path.as_posix()
+                source_label = tr(
+                    "ui.preview_source_excel", path=display_path,
+                    sheet=cached.sheet, row=resolved.row.row_number,
+                )
             tab.resolved_component = resolved.component
             active_component = resolved.component
             bindings_resolved = True
@@ -1952,12 +2034,14 @@ class MainWindow(QMainWindow):
         tab.queue_preview(
             self.session, component=active_component, dpi=dpi, fit=fit,
             selected=selected, bindings_resolved=bindings_resolved,
+            source_label=source_label,
         )
         self._update_preview_navigation(tab)
         return True
 
-    def _clear_preview(self, tab: DocumentTab) -> None:
+    def _clear_preview(self, tab: DocumentTab, source_label: str = "", status: str = "") -> None:
         tab.invalidate_preview()
+        tab.set_preview_source(source_label, status)
         tab.canvas.clear_document()
         self._update_preview_navigation(tab)
 
@@ -3726,6 +3810,7 @@ class MainWindow(QMainWindow):
         return editing_actions(self._editing_context()).layout
 
     def _update_actions(self) -> None:
+        self._update_project_visibility()
         context = self._editing_context()
         decisions = editing_actions(context)
         build = build_actions(BuildContext(
@@ -3796,8 +3881,10 @@ class MainWindow(QMainWindow):
         self.export_png_zip_action.setEnabled(has_project and idle)
         self.export_project_archive_action.setEnabled(has_project and idle)
         self.import_project_archive_action.setEnabled(idle)
-        self.new_action.setEnabled(idle)
-        self.open_action.setEnabled(idle)
+        can_switch_project = self._operation_allowed("project_switch")
+        self.new_action.setEnabled(can_switch_project)
+        self.open_action.setEnabled(can_switch_project)
+        self.recent_projects_menu.setEnabled(can_switch_project)
 
     def _show_error(self, error: Exception) -> None:
         if isinstance(error, ProjectError):

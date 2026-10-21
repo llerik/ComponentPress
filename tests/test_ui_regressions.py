@@ -349,6 +349,25 @@ def test_empty_preview_invalidates_late_worker_result(make_editor, monkeypatch, 
     assert not tab.apply_preview(QImage(1, 1, QImage.Format.Format_ARGB32), generation=old_generation)
 
 
+def test_preview_source_tracks_displayed_excel_row_and_stale_frame(make_editor, qtbot):
+    window, root, _errors = make_editor(excel=True)
+    tab = window.open_component("forest-card")
+    qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
+    data = window.controller.preview.cached_data(window.session.snapshot, tab.component_id)
+    source = tab.preview_source.text()
+    assert data is not None and tab.preview_row_number is not None
+    assert data.path.resolve().relative_to(root.resolve()).as_posix() in source
+    assert data.sheet in source
+    assert f"строка {tab.preview_row_number}" in source
+
+    tab.queue_preview(window.session, source_label="Следующий источник")
+    assert tab.preview_source.text() == source
+    assert tab.preview_status.text() == "Обновление…"
+    tab.fail_preview_source("Следующий источник")
+    assert tab.preview_source.text() == source
+    assert tab.preview_status.text() == "Не удалось обновить; показан предыдущий кадр"
+
+
 def test_build_reservation_rejects_preview_from_dialog_event_loop(make_editor, monkeypatch):
     window, _root, _errors = make_editor()
     tab = window.active_tab

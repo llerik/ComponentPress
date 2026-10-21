@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -74,6 +75,16 @@ def _snapshot(tmp_path, count=4, workers=2):
     )
 
 
+def _drain_manual_thread(pool, thread):
+    deadline = time.monotonic() + 2
+    while thread.is_alive() and time.monotonic() < deadline:
+        if pool.tasks:
+            pool.tasks.pop(0).run()
+        else:
+            thread.join(timeout=0.01)
+    thread.join(timeout=max(0, deadline - time.monotonic()))
+
+
 def test_renderer_keeps_only_worker_window_submitted_and_refills(monkeypatch):
     pool = ManualPool()
     monkeypatch.setattr(render_pool, "QThreadPool", lambda: pool)
@@ -82,13 +93,18 @@ def test_renderer_keeps_only_worker_window_submitted_and_refills(monkeypatch):
     token = CancellationToken()
     finished = threading.Thread(target=render_pool.render_instances, args=(snapshot, token, lambda _item: None), daemon=True)
     finished.start()
-    assert len(pool.tasks) == 2
-    pool.tasks.pop(0).run()
-    assert len(pool.tasks) == 2
-    pool.tasks.pop(0).run()
-    pool.tasks.pop(0).run()
-    pool.tasks.pop(0).run()
-    finished.join(timeout=2)
+    try:
+        assert pool.ready.wait(timeout=2)
+        assert len(pool.tasks) == 2
+        pool.ready.clear()
+        pool.tasks.pop(0).run()
+        assert pool.ready.wait(timeout=2)
+        assert len(pool.tasks) == 2
+        pool.tasks.pop(0).run()
+        pool.tasks.pop(0).run()
+        pool.tasks.pop(0).run()
+    finally:
+        _drain_manual_thread(pool, finished)
     assert not finished.is_alive()
     assert pool.attempts == 4
 
@@ -101,10 +117,12 @@ def test_rejected_png_submit_preserves_failure_and_waits_for_accepted_task(monke
     errors = []
     thread = threading.Thread(target=lambda: _capture(errors, render_pool.render_instances, _snapshot(Path(".")), CancellationToken(), lambda _item: None), daemon=True)
     thread.start()
-    assert pool.failed.wait(timeout=2)
-    assert len(pool.tasks) == 1
-    pool.tasks[0].run()
-    thread.join(timeout=2)
+    try:
+        assert pool.failed.wait(timeout=2)
+        assert len(pool.tasks) == 1
+        pool.tasks[0].run()
+    finally:
+        _drain_manual_thread(pool, thread)
     assert not thread.is_alive()
     assert isinstance(errors[0], ProjectError)
     assert errors[0].diagnostic.code == "RENDER_FAILED"
@@ -127,10 +145,13 @@ def test_first_render_error_survives_cancellation_errors_from_other_tasks(monkey
     errors = []
     thread = threading.Thread(target=lambda: _capture(errors, render_pool.render_instances, _snapshot(Path(".")), token, lambda _item: None), daemon=True)
     thread.start()
-    assert len(pool.tasks) == 2
-    pool.tasks.pop(0).run()
-    pool.tasks.pop(0).run()
-    thread.join(timeout=2)
+    try:
+        assert pool.ready.wait(timeout=2)
+        assert len(pool.tasks) == 2
+        pool.tasks.pop(0).run()
+        pool.tasks.pop(0).run()
+    finally:
+        _drain_manual_thread(pool, thread)
     assert not thread.is_alive()
     assert errors[0].diagnostic.code == "PRIMARY_RENDER"
 

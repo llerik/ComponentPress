@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication, QComboBox, QDialogButtonBox, QLabel,
 from componentpress.domain.diagnostics import Diagnostic
 from componentpress.domain.schema import SCHEMA_VERSION
 from componentpress.i18n import catalogs, language, set_language, tr, validate_catalogs
-from componentpress.i18n.diagnostics import format_diagnostic
+from componentpress.i18n.diagnostics import format_diagnostic, format_diagnostic_event
 from componentpress.version import APPLICATION_VERSION
 from componentpress.editor.component_dialog import ComponentDialog
 from componentpress.editor.copy_mode_switch import CopyModeSwitch
@@ -139,9 +139,9 @@ def test_editor_panels_and_dynamic_controls_use_english_catalog(tmp_path: Path, 
         switch = CopyModeSwitch()
         qtbot.addWidget(switch)
         assert switch.accessibleName() == "Copy mode"
-        assert switch.toolTip() == "Copy mode: Prod"
+        assert switch.toolTip() == "Copy mode: Full set (prod)"
         switch.setChecked(True)
-        assert switch.accessibleDescription() == "Copy mode: Test"
+        assert switch.accessibleDescription() == "Copy mode: Partial set (test)"
 
         tab = DocumentTab("card")
         qtbot.addWidget(tab)
@@ -194,7 +194,9 @@ def test_event_list_uses_the_selected_diagnostic_language(tmp_path: Path, qtbot)
         _root, window, _service = make_window(tmp_path, qtbot)
         diagnostic = Diagnostic("FILE_READ", "файл недоступен", tmp_path / "game.yaml")
         window._add_events((diagnostic,))
-        assert window.event_list.item(0).text() == format_diagnostic(diagnostic)
+        assert window.event_list.item(0).text() == format_diagnostic_event(
+            diagnostic, project_root=window.session.snapshot.root, hide_project_path=True,
+        )
         assert "The operation needs attention (FILE_READ)." in window.event_list.item(0).text()
     finally:
         set_language(previous)

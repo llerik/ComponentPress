@@ -506,10 +506,10 @@
     "src/componentpress/editor/document_tab.py|DocumentTab.__init__": {
       "path": "src/componentpress/editor/document_tab.py",
       "name": "DocumentTab.__init__",
-      "line": 94,
-      "length": 130,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/editor"
+      "line": 95,
+      "length": 139,
+      "stage": "0.21.1",
+      "owner": "UX and diagnostics release"
     },
     "src/componentpress/editor/help_dialog.py|HelpDialog.__init__": {
       "path": "src/componentpress/editor/help_dialog.py",
@@ -546,9 +546,25 @@
     "src/componentpress/editor/main_window.py|MainWindow._build_ui": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._build_ui",
-      "line": 346,
-      "length": 72,
-      "stage": "0.21.0",
+      "line": 354,
+      "length": 80,
+      "stage": "0.21.1",
+      "owner": "UX and diagnostics release"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._events_panel": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._events_panel",
+      "line": 554,
+      "length": 30,
+      "stage": "0.21.1",
+      "owner": "UX and diagnostics release"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow._update_project_visibility": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow._update_project_visibility",
+      "line": 692,
+      "length": 27,
+      "stage": "0.21.1",
       "owner": "UX and diagnostics release"
     },
     "src/componentpress/editor/main_window.py|MainWindow._left_panel": {
@@ -650,10 +666,10 @@
     "src/componentpress/editor/main_window.py|MainWindow._refresh_preview": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._refresh_preview",
-      "line": 1913,
-      "length": 45,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
+      "line": 1981,
+      "length": 60,
+      "stage": "0.21.1",
+      "owner": "UX and diagnostics release"
     },
     "src/componentpress/editor/main_window.py|MainWindow._update_preview_navigation": {
       "path": "src/componentpress/editor/main_window.py",
@@ -842,10 +858,10 @@
     "src/componentpress/editor/ui_state.py|UiState.restore": {
       "path": "src/componentpress/editor/ui_state.py",
       "name": "UiState.restore",
-      "line": 24,
-      "length": 29,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/editor"
+      "line": 25,
+      "length": 32,
+      "stage": "0.21.1",
+      "owner": "UX and diagnostics release"
     },
     "src/componentpress/execution/cleanup.py|cleanup_job_directory": {
       "path": "src/componentpress/execution/cleanup.py",

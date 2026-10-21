@@ -40,6 +40,7 @@ class PreviewArguments:
     selected_ids: tuple[str, ...]
     bindings_resolved: bool
     row_number: int | None
+    source_label: str
 
 
 @dataclass(frozen=True)
@@ -187,6 +188,15 @@ class DocumentTab(QWidget):
             controls.addWidget(widget)
         self.zoom_controls = (minus, plus, fit, actual, self.zoom_label)
         layout.addLayout(controls)
+        source_row = QHBoxLayout()
+        self.preview_source = QLabel()
+        self.preview_source.setObjectName("previewSource")
+        self.preview_source.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.preview_status = QLabel()
+        self.preview_status.setObjectName("previewSourceStatus")
+        source_row.addWidget(self.preview_source, 1)
+        source_row.addWidget(self.preview_status)
+        layout.addLayout(source_row)
         self.canvas = ComponentCanvas()
         self.preview_timer = QTimer(self)
         self.preview_timer.setSingleShot(True)
@@ -295,6 +305,20 @@ class DocumentTab(QWidget):
         self._preview_arguments = None
         self._deferred_preview = None
 
+    def set_preview_source(self, label: str = "", status: str = "") -> None:
+        self.preview_source.setText(label)
+        self.preview_source.setToolTip(label)
+        self.preview_status.setText(status)
+
+    def fail_preview_source(self, source_label: str) -> None:
+        self.invalidate_preview()
+        status = tr("ui.preview_source_error_previous") if self.preview_source.text() else tr("ui.preview_source_error")
+        if not self.preview_source.text():
+            self.set_preview_source(source_label, status)
+        else:
+            self.preview_status.setText(status)
+        self.canvas.set_preview_pending(False)
+
     def update_preview_resolution(self, dpi: int) -> bool:
         arguments = self._preview_arguments
         if arguments is None or arguments.dpi == dpi:
@@ -302,12 +326,13 @@ class DocumentTab(QWidget):
         self._preview_arguments = PreviewArguments(
             arguments.snapshot, arguments.component, arguments.revision, dpi,
             False, arguments.selected_ids, arguments.bindings_resolved, arguments.row_number,
+            arguments.source_label,
         )
         self.preview_generation += 1
         self.preview_timer.start()
         return True
 
-    def queue_preview(self, session: ProjectSession, *, component: ComponentDefinition | None = None, dpi: int = 96, fit: bool = False, selected: tuple[str, ...] | None = None, bindings_resolved: bool | None = None) -> int:
+    def queue_preview(self, session: ProjectSession, *, component: ComponentDefinition | None = None, dpi: int = 96, fit: bool = False, selected: tuple[str, ...] | None = None, bindings_resolved: bool | None = None, source_label: str = "") -> int:
         document = session.documents[self.component_id]
         active_component = component or document.model
         if selected is None:
@@ -318,7 +343,11 @@ class DocumentTab(QWidget):
         self._preview_arguments = PreviewArguments(
             session.snapshot, active_component, document.revision, dpi, fit, selected,
             component is not None if bindings_resolved is None else bindings_resolved,
-            self.preview_row_number,
+            self.preview_row_number, source_label,
+        )
+        self.preview_status.setText(
+            tr("ui.preview_source_updating") if self.preview_source.text()
+            else tr("ui.preview_source_waiting")
         )
         self.preview_timer.start()
         return self.preview_generation
@@ -356,6 +385,7 @@ class DocumentTab(QWidget):
             self._applying_image = False
         self.displayed_generation = generation
         self.image_quality = tuple(quality)
+        self.set_preview_source(self._preview_arguments.source_label)
 
     def _apply_deferred_preview(self) -> None:
         deferred = getattr(self, "_deferred_preview", None)
@@ -373,6 +403,10 @@ class DocumentTab(QWidget):
             return False
         arguments = self._preview_arguments
         self.canvas.set_component_model(arguments.component, arguments.selected_ids)
+        if not self.preview_source.text():
+            self.set_preview_source(arguments.source_label, tr("ui.preview_source_error"))
+        else:
+            self.preview_status.setText(tr("ui.preview_source_error_previous"))
         self.previewError.emit(message)
         return True
 

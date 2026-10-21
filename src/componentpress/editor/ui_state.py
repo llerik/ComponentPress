@@ -14,6 +14,7 @@ class UiState:
         settings.setValue("geometry", window.saveGeometry())
         settings.setValue("rightTab", window.right_tabs.currentIndex())
         settings.setValue("rightSplitterSizes", window.right_splitter.sizes())
+        settings.setValue("hideEventProjectPath", window.hide_event_project_path.isChecked())
         if window.session is not None:
             settings.setValue("state", window.saveState())
             for dock in window.docks:
@@ -49,4 +50,7 @@ class UiState:
         index = settings.value("rightTab", 0, type=int)
         if 0 <= index < window.right_tabs.count():
             window.right_tabs.setCurrentIndex(index)
+        window.hide_event_project_path.setChecked(
+            settings.value("hideEventProjectPath", True, type=bool)
+        )
         settings.endGroup()

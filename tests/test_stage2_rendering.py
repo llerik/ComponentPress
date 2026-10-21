@@ -23,7 +23,10 @@ EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "demo-game"
 
 
 def cli(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, "-m", "componentpress", *args], text=True, capture_output=True, encoding="utf-8")
+    return subprocess.run(
+        [sys.executable, "-m", "componentpress", *args],
+        text=True, capture_output=True, encoding="utf-8", timeout=120,
+    )
 
 
 def demo(tmp_path: Path) -> Path:

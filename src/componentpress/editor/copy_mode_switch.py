@@ -8,12 +8,15 @@ from componentpress.i18n import tr
 
 class CopyModeSwitch(QCheckBox):
     def __init__(self, parent=None) -> None:
-        super().__init__("Prod", parent)
+        super().__init__(parent)
         self.setObjectName("dataMode")
         self.setAccessibleName(tr("ui.copy_mode"))
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setToolTip(tr("ui.copy_mode_value", mode="Prod"))
-        self.setAccessibleDescription(tr("ui.copy_mode_value", mode="Prod"))
+        self._labels = (tr("ui.copy_mode_prod"), tr("ui.copy_mode_test"))
+        self._label_width = max(self.fontMetrics().horizontalAdvance(label) for label in self._labels)
+        self.setText(self._labels[0])
+        self.setToolTip(tr("ui.copy_mode_value", mode=self._labels[0]))
+        self.setAccessibleDescription(tr("ui.copy_mode_value", mode=self._labels[0]))
         self.toggled.connect(self._update_label)
 
     @property
@@ -21,7 +24,7 @@ class CopyModeSwitch(QCheckBox):
         return "test" if self.isChecked() else "prod"
 
     def sizeHint(self) -> QSize:
-        return QSize(60 + self.fontMetrics().horizontalAdvance(self.text()), 30)
+        return QSize(60 + self._label_width, 30)
 
     def hitButton(self, position) -> bool:
         return self.rect().contains(position)
@@ -45,9 +48,9 @@ class CopyModeSwitch(QCheckBox):
             self.style().drawPrimitive(QStyle.PrimitiveElement.PE_FrameFocusRect, focus, painter, self)
 
     def _update_label(self, checked: bool) -> None:
-        mode = "Test" if checked else "Prod"
-        self.setText(mode)
-        self.setToolTip(tr("ui.copy_mode_value", mode=mode))
-        self.setAccessibleDescription(tr("ui.copy_mode_value", mode=mode))
+        label = self._labels[1 if checked else 0]
+        self.setText(label)
+        self.setToolTip(tr("ui.copy_mode_value", mode=label))
+        self.setAccessibleDescription(tr("ui.copy_mode_value", mode=label))
         self.updateGeometry()
         self.update()
