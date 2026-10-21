@@ -179,7 +179,7 @@ class DocumentTab(QWidget):
         actual.setObjectName("zoomActual")
         set_themed_icon(actual, "real_size.png")
         actual.setIconSize(QSize(22, 22))
-        actual.setToolTip(tr("ui.zoom_actual"))
+        actual.setToolTip(tr("ui.zoom_actual_tip"))
         actual.setAccessibleName(actual.toolTip())
         actual.setFixedSize(34, 34)
         self.zoom_label = QLabel("100%")

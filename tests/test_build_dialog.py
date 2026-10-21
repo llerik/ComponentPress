@@ -4,7 +4,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from PySide6.QtWidgets import QGroupBox, QLabel
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QGroupBox, QLabel, QScrollArea
 from componentpress.application.contracts import BuildResult
 from componentpress.domain.project import PrintSettings
 from componentpress.editor.build_dialog import BuildDialog
@@ -46,6 +47,49 @@ def test_program_settings_are_grouped_and_print_scope_is_explicit(qtbot):
         "Интерфейс", "Печать", "Производительность", "Интеграция с Windows",
     }
     assert any("всем проектам" in label.text() for label in dialog.findChildren(QLabel))
+
+
+@pytest.mark.parametrize(
+    ("locale", "language_label", "restart_tip", "zoom_label"),
+    (
+        ("ru", "Язык интерфейса", "Новый язык интерфейса включится после перезапуска ComponentPress.", "Масштаб 100%"),
+        ("en", "Interface language", "The interface language will change after restarting ComponentPress.", "100% zoom"),
+    ),
+)
+def test_program_settings_language_tooltip_and_width(qtbot, monkeypatch, locale, language_label, restart_tip, zoom_label):
+    from componentpress.i18n import tr
+    from componentpress.user_preferences import ProgramPreferences
+    set_language(locale)
+    validate_catalogs()
+    shown = []
+    monkeypatch.setattr(
+        "componentpress.editor.program_settings_dialog.QToolTip.showText",
+        lambda _point, text, *_args: shown.append(text),
+    )
+    dialog = ProgramSettingsDialog(ProgramPreferences(), lambda: None)
+    qtbot.addWidget(dialog)
+    assert dialog.layout().itemAt(0).widget().horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    dialog.show()
+    qtbot.wait(10)
+    assert dialog.minimumWidth() >= dialog.sizeHint().width()
+    assert dialog.layout().itemAt(0).widget().horizontalScrollBar().maximum() == 0
+    minimum = dialog.minimumWidth()
+    dialog.resize(minimum - 1, dialog.height())
+    assert dialog.width() >= minimum
+    assert dialog.findChild(QScrollArea).horizontalScrollBar().maximum() == 0
+
+    assert dialog.layout().itemAt(0).widget().widget().findChildren(QGroupBox)
+    interface_group = next(group for group in dialog.findChildren(QGroupBox) if group.title() == tr("ui.settings_interface"))
+    assert interface_group.layout().labelForField(dialog.language).text() == language_label
+    assert not any(restart_tip in label.text() for label in dialog.findChildren(QLabel))
+    assert shown == []
+    dialog.language.setCurrentIndex(1)
+    dialog.language.activated.emit(1)
+    assert shown == [restart_tip]
+    assert tr("ui.zoom_actual") == zoom_label
+    assert "96" in tr("ui.zoom_actual_tip")
+
+    dialog.close()
 
 
 def _window(tmp_path, qtbot, monkeypatch, action="pdf"):

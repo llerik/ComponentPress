@@ -2,8 +2,9 @@
 
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
-    QGroupBox, QLabel, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
+    QGroupBox, QLabel, QPushButton, QScrollArea, QSpinBox, QToolTip, QVBoxLayout, QWidget,
 )
+from PySide6.QtCore import QPoint, Qt
 
 from componentpress.domain.project import PrintSettings
 from componentpress.i18n import tr
@@ -15,22 +16,28 @@ class ProgramSettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(tr("ui.program_settings"))
         layout = QVBoxLayout(self)
+        layout.addWidget(self._settings_scroll(preferences, on_register), 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _settings_scroll(self, preferences, on_register) -> QScrollArea:
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         content = QWidget(scroll)
         content_layout = QVBoxLayout(content)
         self._add_interface_settings(content_layout, preferences)
         self._add_print_settings(content_layout, preferences.print_settings)
         self._add_performance_settings(content_layout, preferences.png_workers)
         self._add_windows_settings(content_layout, on_register)
-        content_layout.addWidget(QLabel(tr("ui.language_restart")))
         content_layout.addStretch(1)
         scroll.setWidget(content)
-        layout.addWidget(scroll, 1)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        scroll.setMinimumWidth(
+            content.sizeHint().width() + 2 * scroll.frameWidth() + scroll.verticalScrollBar().sizeHint().width()
+        )
+        return scroll
 
     def _add_interface_settings(self, content_layout, preferences):
         self.language = QComboBox()
@@ -38,6 +45,7 @@ class ProgramSettingsDialog(QDialog):
         self.language.addItem(tr("language.ru"), "ru")
         self.language.addItem(tr("language.en"), "en")
         self.language.setCurrentIndex(0 if preferences.language == "ru" else 1)
+        self.language.activated.connect(self._show_language_tooltip)
         self.theme = QComboBox()
         self.theme.setObjectName("programTheme")
         for value in ("system", "light", "dark"):
@@ -46,9 +54,13 @@ class ProgramSettingsDialog(QDialog):
 
         group = QGroupBox(tr("ui.settings_interface"))
         form = QFormLayout(group)
-        form.addRow(tr("ui.language"), self.language)
+        form.addRow(tr("about.language"), self.language)
         form.addRow(tr("ui.theme"), self.theme)
         content_layout.addWidget(group)
+
+    def _show_language_tooltip(self, _index: int) -> None:
+        point = self.language.mapToGlobal(QPoint(0, self.language.height()))
+        QToolTip.showText(point, tr("ui.language_restart"), self.language)
 
     def _add_print_settings(self, content_layout, settings):
         self._create_print_widgets(settings)

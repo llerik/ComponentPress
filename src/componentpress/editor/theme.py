@@ -5,7 +5,7 @@ from tempfile import gettempdir
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QToolTip
 
 THEMES = ("system", "light", "dark")
 _CURRENT_THEME = "system"
@@ -60,9 +60,9 @@ def _apply_library_theme(mode: str) -> None:
         application.setStyleSheet(
             qdarktheme.load_stylesheet(mode, default_theme="light", custom_colors=custom_colors)
         )
-        application.setPalette(
-            qdarktheme.load_palette(mode, default_theme="light", custom_colors=custom_colors)
-        )
+        palette = qdarktheme.load_palette(mode, default_theme="light", custom_colors=custom_colors)
+        application.setPalette(palette)
+        QToolTip.setPalette(palette)
     _publish_effective_theme(mode)
 
 

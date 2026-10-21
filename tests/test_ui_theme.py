@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QSettings, QSize, Qt
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtGui import QColor, QPalette
+from PySide6.QtWidgets import QApplication, QPushButton, QToolTip
 
 from componentpress.app_assets import load_icon, set_themed_icon
 from componentpress.bootstrap import project_controller
@@ -21,6 +21,7 @@ def isolated_theme(tmp_path: Path, qapp, monkeypatch):
 
     original_language = language()
     original_palette = qapp.palette()
+    original_tooltip_palette = QToolTip.palette()
     original_stylesheet = qapp.styleSheet()
     original_dark = bool(qapp.property("componentpressDarkTheme"))
     QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path))
@@ -35,6 +36,7 @@ def isolated_theme(tmp_path: Path, qapp, monkeypatch):
     apply_theme("dark" if original_dark else "light")
     qapp.setStyleSheet(original_stylesheet)
     qapp.setPalette(original_palette)
+    QToolTip.setPalette(original_tooltip_palette)
     qapp.setProperty("componentpressDarkTheme", original_dark)
     set_language(original_language)
 
@@ -138,3 +140,22 @@ def test_command_icon_remains_visible_and_tracks_palette(isolated_theme, qapp, m
         expected = load_icon("save.png").pixmap(QSize(22, 22))
         assert not expected.isNull()
         assert expected.toImage() == pixmap.toImage()
+
+
+@pytest.mark.parametrize("mode", ("light", "dark"))
+def test_tooltip_palette_tracks_theme(isolated_theme, qapp, mode) -> None:
+    apply_theme(mode)
+
+    for role in (QPalette.ColorRole.ToolTipBase, QPalette.ColorRole.ToolTipText):
+        assert QToolTip.palette().color(QPalette.ColorGroup.Inactive, role) == qapp.palette().color(
+            QPalette.ColorGroup.Inactive, role
+        )
+
+
+def test_copy_mode_info_uses_the_info_asset(isolated_theme, qtbot) -> None:
+    from componentpress.bootstrap import project_controller
+
+    window = MainWindow(project_controller())
+    qtbot.addWidget(window)
+    assert window.mode_info_button.text() == ""
+    assert not window.mode_info_button.icon().isNull()
