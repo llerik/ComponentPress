@@ -10,12 +10,7 @@ variables:
 images:
 - assets/images/leaf.png
 - assets/images/leaf-small.png
-- assets/images/background_chain.png
-- assets/images/background_monsters.png
-- assets/images/base.png
 - assets/images/build.png
-- assets/images/chain.png
-- assets/images/character.png
 - assets/images/crown.png
 - assets/images/first_building.png
 - assets/images/happiness.png

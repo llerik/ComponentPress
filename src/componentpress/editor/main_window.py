@@ -114,6 +114,7 @@ from .copy_mode_switch import CopyModeSwitch
 from .theme import apply_theme
 from componentpress.user_preferences import load_preferences, save_preferences
 from .program_settings_dialog import ProgramSettingsDialog
+from .help_dialog import HelpDialog
 from componentpress.i18n import language, set_language, tr
 from componentpress.diagnostics import logging as technical_log
 import zipfile
@@ -235,6 +236,10 @@ class MainWindow(QMainWindow):
         self.program_settings_action = self._action(tr("action.program_settings"))
         self.image_manager_action = self._action(tr("ui.image_manager"))
         self.about_action = self._action(tr("menu.about"))
+        self.help_action = self._action(tr("help.open"), QKeySequence("F1"))
+        self.hotkeys_action = self._action(tr("help.hotkeys.open"))
+        self.error_report_action = self._action(tr("about.create_report"))
+        self.recent_projects_menu = QMenu(tr("menu.recent_projects"), self)
         self.undo_action = self._action(tr("action.undo"), QKeySequence.StandardKey.Undo)
         self.redo_action = self._action(tr("action.redo"), QKeySequence.StandardKey.Redo)
         self.delete_action = self._action(tr("action.delete"), QKeySequence.StandardKey.Delete)
@@ -255,6 +260,7 @@ class MainWindow(QMainWindow):
         self.validate_all_action = self._action(tr("action.validate_all"))
         self.file_menu = self.menuBar().addMenu(tr("menu.file"))
         self.file_menu.addActions([self.new_action, self.open_action])
+        self.file_menu.addMenu(self.recent_projects_menu)
         self.file_menu.addSeparator()
         self.import_menu = self.file_menu.addMenu(tr("menu.import"))
         self.import_menu.addAction(self.import_project_archive_action)
@@ -262,17 +268,24 @@ class MainWindow(QMainWindow):
         self.export_menu.addActions([self.export_png_zip_action, self.export_project_archive_action])
         self.file_menu.addSeparator()
         self.file_menu.addActions([self.image_manager_action, self.add_component_action])
-        self.windows_menu = self.file_menu.addMenu(tr("menu.windows"))
         self.file_menu.addSeparator()
         self.file_menu.addActions([self.save_action, self.save_all_action, self.close_tab_action])
         self.file_menu.addSeparator()
         self.file_menu.addAction(self.exit_action)
+        self.project_menu = self.menuBar().addMenu(tr("menu.project"))
+        self.project_menu.addAction(self.import_project_archive_action)
+        self.project_menu.addSeparator()
+        self.project_menu.addAction(self.project_settings_action)
         self.settings_menu = self.menuBar().addMenu(tr("menu.settings"))
         self.settings_menu.addActions([self.project_settings_action, self.program_settings_action])
         self.edit_menu = self.menuBar().addMenu(tr("menu.edit"))
         self.edit_menu.addActions([self.undo_action, self.redo_action])
         self.edit_menu.addSeparator()
         self.edit_menu.addActions([self.delete_action, self.delete_component_action, self.group_action, self.ungroup_action])
+        self.view_menu = self.menuBar().addMenu(tr("menu.view"))
+        self.view_menu.addActions([self.zoom_in_action, self.zoom_out_action, self.fit_action, self.actual_size_action])
+        self.view_menu.addSeparator()
+        self.windows_menu = self.view_menu.addMenu(tr("menu.windows"))
         self.build_menu = self.menuBar().addMenu(tr("menu.build"))
         self.build_menu.addActions([
             self.build_all_action,
@@ -281,6 +294,8 @@ class MainWindow(QMainWindow):
             self.open_build_action,
             self.open_pdf_action,
         ])
+        self.help_menu = self.menuBar().addMenu(tr("menu.help"))
+        self.help_menu.addActions([self.help_action, self.hotkeys_action, self.error_report_action])
         self.about_menu = self.menuBar().addMenu(tr("menu.about"))
         self.about_menu.addAction(self.about_action)
 
@@ -290,6 +305,7 @@ class MainWindow(QMainWindow):
             return
         try:
             preferences = dialog.preferences()
+            preferences = preferences.model_copy(update={"recent_projects": self._program_preferences.recent_projects})
         except (ValueError, TypeError) as exc:
             QMessageBox.warning(self, tr("ui.program_settings"), tr("error.program_settings_save"))
             technical_log.log_event("application.settings_save", operation="program_settings",
@@ -306,6 +322,7 @@ class MainWindow(QMainWindow):
             return
         self._program_preferences = preferences
         self._theme = preferences.theme
+        self._refresh_recent_projects_menu()
         apply_theme(preferences.theme)
         technical_log.log_event("application.settings_save", operation="program_settings",
                                 operation_id=operation_id, phase="finished", status="succeeded")
@@ -393,6 +410,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.status_project, 1)
         self.statusBar().addPermanentWidget(self.status_zoom)
         self._update_project_visibility()
+        self._refresh_recent_projects_menu()
         for panel in (self.right_panel,):
             panel.installEventFilter(self)
             for child in panel.findChildren(QWidget):
@@ -656,6 +674,7 @@ class MainWindow(QMainWindow):
                     dock.hide()
         self.import_menu.menuAction().setVisible(has_project)
         self.export_menu.menuAction().setVisible(has_project)
+        self.project_settings_action.setVisible(has_project)
 
     def _suppress_docks(self) -> None:
         for dock in self.docks:
@@ -762,30 +781,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(actions)
 
         def show_report() -> None:
-            filename, _filter = QFileDialog.getSaveFileName(
-                dialog, tr("about.report_title"), "componentpress-error.zip", tr("about.report_filter")
-            )
-            if not filename:
-                return
-            target = Path(filename)
-            if target.exists() and QMessageBox.question(dialog, tr("about.report_title"), str(target)) != QMessageBox.StandardButton.Yes:
-                return
-            try:
-                result = self._last_build_result
-                diagnostic = next(iter(result.diagnostics), None) if result is not None else None
-                technical_log.create_report(
-                    target,
-                    incident_id=getattr(diagnostic, "incident_id", None),
-                    code=getattr(diagnostic, "code", None),
-                    job_id=result.job_id if result is not None else None,
-                    phase=result.status if result is not None else None,
-                    status=result.status if result is not None else None,
-                    mode=result.mode if result is not None else None,
-                )
-            except (OSError, ValueError, zipfile.BadZipFile) as exc:
-                QMessageBox.warning(dialog, tr("about.report_title"), tr("about.report_failed", error=type(exc).__name__))
-                return
-            QMessageBox.information(dialog, tr("about.report_title"), tr("about.report_saved", path=target.name))
+            self._create_error_report(dialog)
 
         def show_log_folder() -> None:
             folder = technical_log.log_folder()
@@ -797,6 +793,56 @@ class MainWindow(QMainWindow):
         actions.rejected.connect(dialog.reject)
         dialog.resize(720, 340)
         dialog.exec()
+
+    def _show_help(self, section_key: str | None = None) -> None:
+        dialog = getattr(self, "_help_dialog", None)
+        if dialog is None:
+            dialog = self._help_dialog = HelpDialog(self)
+        if section_key:
+            title = tr(section_key)
+            matches = dialog.sections.findItems(title, Qt.MatchFlag.MatchExactly)
+            if matches:
+                dialog.sections.setCurrentItem(matches[0])
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _create_error_report(self, parent=None) -> None:
+        parent = parent or self
+        filename, _filter = QFileDialog.getSaveFileName(
+            parent, tr("about.report_title"), "componentpress-error.zip", tr("about.report_filter")
+        )
+        if not filename:
+            return
+        target = Path(filename)
+        try:
+            result = self._last_build_result
+            diagnostic = next(iter(result.diagnostics), None) if result is not None else None
+            technical_log.create_report(
+                target,
+                incident_id=getattr(diagnostic, "incident_id", None),
+                code=getattr(diagnostic, "code", None),
+                job_id=result.job_id if result is not None else None,
+                phase=result.status if result is not None else None,
+                status=result.status if result is not None else None,
+                mode=result.mode if result is not None else None,
+            )
+            summary = technical_log.report_summary(target)
+        except (OSError, ValueError, zipfile.BadZipFile) as exc:
+            QMessageBox.warning(parent, tr("about.report_title"), tr("about.report_failed", error=type(exc).__name__))
+            return
+        status = tr("about.report_current_status", status=tr(f"about.report.status.{summary.current_status}"),
+                    session_id=summary.current_session_id, started_at=summary.current_started_at or tr("about.report.time_unavailable"))
+        status += "\n" + tr("about.report_crash_status", status=tr(f"about.report.status.{summary.crash_status}"),
+                              session_id=summary.crash_session_id or tr("about.report.id_unavailable"),
+                              started_at=summary.crash_started_at or tr("about.report.time_unavailable"))
+        box = QMessageBox(QMessageBox.Icon.Information, tr("about.report_title"),
+                          tr("about.report_saved", path=target.name) + "\n" + status,
+                          QMessageBox.StandardButton.Close, parent)
+        open_button = box.addButton(tr("about.report_open_folder"), QMessageBox.ButtonRole.ActionRole)
+        box.exec()
+        if box.clickedButton() is open_button:
+            PlatformServices.open_path(target.parent)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -816,6 +862,9 @@ class MainWindow(QMainWindow):
         self.program_settings_action.triggered.connect(self._show_program_settings)
         self.image_manager_action.triggered.connect(self.open_image_manager)
         self.about_action.triggered.connect(self._show_about)
+        self.help_action.triggered.connect(lambda: self._show_help())
+        self.hotkeys_action.triggered.connect(lambda: self._show_help("help.hotkeys.title"))
+        self.error_report_action.triggered.connect(self._create_error_report)
         self.validate_active_action.triggered.connect(self._validate_active)
         self.validate_all_action.triggered.connect(lambda: self._validate_all(force_read=True))
         self.build_all_action.triggered.connect(lambda: self._start_build(False))
@@ -882,6 +931,7 @@ class MainWindow(QMainWindow):
         self._clear_tabs(discard=True, reservation=reservation)
         self._preview_session_identity = uuid4().hex
         self.controller.set_session(session)
+        self._remember_project(session.snapshot.root)
         self._clear_component_history()
         self._project_history_focus = False
         self._refresh_component_tree()
@@ -895,6 +945,40 @@ class MainWindow(QMainWindow):
             self.controller.preview.invalidate(session.snapshot.root)
             self._validate_all(force_read=True)
         self._update_actions()
+
+    def _remember_project(self, root: Path) -> None:
+        resolved = str(root.resolve())
+        recent = [item for item in self._program_preferences.recent_projects if item.casefold() != resolved.casefold()]
+        recent.insert(0, resolved)
+        updated = self._program_preferences.model_copy(update={"recent_projects": recent[:10]})
+        self._program_preferences = updated
+        save_preferences(updated)
+        self._refresh_recent_projects_menu()
+
+    def _refresh_recent_projects_menu(self) -> None:
+        if not hasattr(self, "recent_projects_menu"):
+            return
+        self.recent_projects_menu.clear()
+        for stored_path in self._program_preferences.recent_projects:
+            path = Path(stored_path)
+            action = self.recent_projects_menu.addAction(path.name or stored_path)
+            action.setToolTip(stored_path)
+            action.setData(stored_path)
+            action.triggered.connect(lambda _checked=False, value=stored_path: self._open_recent_project(value))
+        self.recent_projects_menu.setEnabled(bool(self._program_preferences.recent_projects))
+
+    def _open_recent_project(self, stored_path: str) -> None:
+        path = Path(stored_path)
+        if not path.exists():
+            updated = self._program_preferences.model_copy(update={
+                "recent_projects": [item for item in self._program_preferences.recent_projects if item != stored_path]
+            })
+            self._program_preferences = updated
+            save_preferences(updated)
+            self._refresh_recent_projects_menu()
+            QMessageBox.warning(self, tr("action.open"), tr("ui.recent_missing", path=path.name))
+            return
+        self.open_path(path)
 
     def open_path(self, root: Path) -> bool:
         if not self._operation_allowed("project_switch"):

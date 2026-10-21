@@ -239,37 +239,45 @@
       "stage": "8б",
       "owner": "coder:src/componentpress/data_sources"
     },
+    "src/componentpress/diagnostics/logging.py|_inspect_crash_candidate": {
+      "path": "src/componentpress/diagnostics/logging.py",
+      "name": "_inspect_crash_candidate",
+      "line": 132,
+      "length": 40,
+      "stage": "0.21.0",
+      "owner": "UX and diagnostics release"
+    },
     "src/componentpress/diagnostics/logging.py|_prune": {
       "path": "src/componentpress/diagnostics/logging.py",
       "name": "_prune",
-      "line": 57,
-      "length": 35,
-      "stage": "9в",
-      "owner": "coder:src/componentpress/diagnostics"
+      "line": 187,
+      "length": 43,
+      "stage": "0.21.0",
+      "owner": "UX and diagnostics release"
     },
     "src/componentpress/diagnostics/logging.py|initialize": {
       "path": "src/componentpress/diagnostics/logging.py",
       "name": "initialize",
-      "line": 94,
-      "length": 34,
-      "stage": "9в",
-      "owner": "coder:src/componentpress/diagnostics"
+      "line": 232,
+      "length": 47,
+      "stage": "0.21.0",
+      "owner": "UX and diagnostics release"
     },
     "src/componentpress/diagnostics/logging.py|log_event": {
       "path": "src/componentpress/diagnostics/logging.py",
       "name": "log_event",
-      "line": 130,
-      "length": 36,
-      "stage": "9в",
-      "owner": "coder:src/componentpress/diagnostics"
+      "line": 281,
+      "length": 37,
+      "stage": "0.21.0",
+      "owner": "UX and diagnostics release"
     },
     "src/componentpress/diagnostics/logging.py|create_report": {
       "path": "src/componentpress/diagnostics/logging.py",
       "name": "create_report",
-      "line": 219,
-      "length": 45,
-      "stage": "9в",
-      "owner": "coder:src/componentpress/diagnostics"
+      "line": 381,
+      "length": 87,
+      "stage": "0.21.0",
+      "owner": "UX and diagnostics release"
     },
     "src/componentpress/domain/tree.py|update_node": {
       "path": "src/componentpress/domain/tree.py",
@@ -503,10 +511,18 @@
       "stage": "9а",
       "owner": "coder:src/componentpress/editor"
     },
+    "src/componentpress/editor/help_dialog.py|HelpDialog.__init__": {
+      "path": "src/componentpress/editor/help_dialog.py",
+      "name": "HelpDialog.__init__",
+      "line": 13,
+      "length": 42,
+      "stage": "0.21.0",
+      "owner": "UX and diagnostics release"
+    },
     "src/componentpress/editor/main_window.py|MainWindow.__init__": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow.__init__",
-      "line": 146,
+      "line": 147,
       "length": 45,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -514,31 +530,31 @@
     "src/componentpress/editor/main_window.py|MainWindow._build_actions": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._build_actions",
-      "line": 223,
-      "length": 63,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
+      "line": 224,
+      "length": 77,
+      "stage": "0.21.0",
+      "owner": "UX and diagnostics release"
     },
     "src/componentpress/editor/main_window.py|MainWindow._show_program_settings": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._show_program_settings",
-      "line": 287,
-      "length": 25,
-      "stage": "21",
-      "owner": "coder:stage21"
+      "line": 302,
+      "length": 27,
+      "stage": "0.21.0",
+      "owner": "UX and diagnostics release"
     },
     "src/componentpress/editor/main_window.py|MainWindow._build_ui": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._build_ui",
-      "line": 329,
-      "length": 71,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
+      "line": 346,
+      "length": 72,
+      "stage": "0.21.0",
+      "owner": "UX and diagnostics release"
     },
     "src/componentpress/editor/main_window.py|MainWindow._left_panel": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._left_panel",
-      "line": 426,
+      "line": 444,
       "length": 93,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -546,7 +562,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._right_panel": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._right_panel",
-      "line": 561,
+      "line": 579,
       "length": 79,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -554,31 +570,39 @@
     "src/componentpress/editor/main_window.py|MainWindow._show_about": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._show_about",
-      "line": 710,
-      "length": 90,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
+      "line": 729,
+      "length": 67,
+      "stage": "0.21.0",
+      "owner": "UX and diagnostics release"
     },
-    "src/componentpress/editor/main_window.py|MainWindow._show_about.show_report": {
+    "src/componentpress/editor/main_window.py|MainWindow._create_error_report": {
       "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow._show_about.show_report",
-      "line": 764,
-      "length": 25,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
+      "name": "MainWindow._create_error_report",
+      "line": 810,
+      "length": 36,
+      "stage": "0.21.0",
+      "owner": "UX and diagnostics release"
     },
     "src/componentpress/editor/main_window.py|MainWindow._connect_signals": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._connect_signals",
-      "line": 804,
-      "length": 73,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
+      "line": 850,
+      "length": 76,
+      "stage": "0.21.0",
+      "owner": "UX and diagnostics release"
+    },
+    "src/componentpress/editor/main_window.py|MainWindow.load_session": {
+      "path": "src/componentpress/editor/main_window.py",
+      "name": "MainWindow.load_session",
+      "line": 927,
+      "length": 21,
+      "stage": "0.21.0",
+      "owner": "UX and diagnostics release"
     },
     "src/componentpress/editor/main_window.py|MainWindow._import_project_archive": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._import_project_archive",
-      "line": 942,
+      "line": 1026,
       "length": 26,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -586,7 +610,7 @@
     "src/componentpress/editor/main_window.py|MainWindow.project_settings_dialog": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow.project_settings_dialog",
-      "line": 1175,
+      "line": 1259,
       "length": 23,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -594,7 +618,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._active_tab_changed": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._active_tab_changed",
-      "line": 1612,
+      "line": 1696,
       "length": 28,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -602,7 +626,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._populate_data_panel": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._populate_data_panel",
-      "line": 1653,
+      "line": 1737,
       "length": 31,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -610,7 +634,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._validate_active": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._validate_active",
-      "line": 1741,
+      "line": 1825,
       "length": 36,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -618,7 +642,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._refresh_data": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._refresh_data",
-      "line": 1797,
+      "line": 1881,
       "length": 31,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -626,7 +650,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._refresh_preview": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._refresh_preview",
-      "line": 1829,
+      "line": 1913,
       "length": 45,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -634,7 +658,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._update_preview_navigation": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._update_preview_navigation",
-      "line": 1918,
+      "line": 2002,
       "length": 24,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -642,7 +666,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._preview_quality_diagnostics": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._preview_quality_diagnostics",
-      "line": 2125,
+      "line": 2209,
       "length": 34,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -650,7 +674,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._start_build": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._start_build",
-      "line": 2404,
+      "line": 2488,
       "length": 27,
       "stage": "21",
       "owner": "coder:stage21"
@@ -658,7 +682,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._on_build_finished": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._on_build_finished",
-      "line": 2526,
+      "line": 2610,
       "length": 23,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -666,7 +690,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._apply_draft": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._apply_draft",
-      "line": 2599,
+      "line": 2683,
       "length": 34,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -674,7 +698,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._set_selection": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._set_selection",
-      "line": 2672,
+      "line": 2756,
       "length": 32,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -682,7 +706,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._show_selection": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._show_selection",
-      "line": 2705,
+      "line": 2789,
       "length": 48,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -690,7 +714,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._document_changed": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._document_changed",
-      "line": 2846,
+      "line": 2930,
       "length": 28,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -698,7 +722,7 @@
     "src/componentpress/editor/main_window.py|MainWindow.duplicate_selected": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow.duplicate_selected",
-      "line": 2963,
+      "line": 3047,
       "length": 27,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -706,7 +730,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._layer_drop": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._layer_drop",
-      "line": 3089,
+      "line": 3173,
       "length": 27,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -714,7 +738,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._place_element": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._place_element",
-      "line": 3211,
+      "line": 3295,
       "length": 71,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -722,7 +746,7 @@
     "src/componentpress/editor/main_window.py|MainWindow._draw_element": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._draw_element",
-      "line": 3286,
+      "line": 3370,
       "length": 22,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -730,7 +754,7 @@
     "src/componentpress/editor/main_window.py|MainWindow.add_image": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow.add_image",
-      "line": 3309,
+      "line": 3393,
       "length": 28,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -738,7 +762,7 @@
     "src/componentpress/editor/main_window.py|MainWindow.add_html": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow.add_html",
-      "line": 3338,
+      "line": 3422,
       "length": 32,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -746,7 +770,7 @@
     "src/componentpress/editor/main_window.py|MainWindow.insert_html_image": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow.insert_html_image",
-      "line": 3371,
+      "line": 3455,
       "length": 21,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
@@ -1154,7 +1178,7 @@
     "src/componentpress/user_preferences.py|load_preferences": {
       "path": "src/componentpress/user_preferences.py",
       "name": "load_preferences",
-      "line": 26,
+      "line": 27,
       "length": 23,
       "stage": "21",
       "owner": "coder:stage21"
@@ -1162,7 +1186,7 @@
     "src/componentpress/user_preferences.py|save_preferences": {
       "path": "src/componentpress/user_preferences.py",
       "name": "save_preferences",
-      "line": 51,
+      "line": 52,
       "length": 32,
       "stage": "21",
       "owner": "coder:stage21"

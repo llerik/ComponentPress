@@ -17,6 +17,7 @@ class ProgramPreferences(StrictModel):
     theme: Literal["system", "light", "dark"] = "system"
     print_settings: PrintSettings = Field(default_factory=PrintSettings)
     png_workers: int = Field(default=2, ge=1, le=64)
+    recent_projects: list[str] = Field(default_factory=list, max_length=10)
 
 
 def user_settings() -> QSettings:

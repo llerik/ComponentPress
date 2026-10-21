@@ -165,6 +165,7 @@ def _capture_log_event(completed: threading.Event, errors: list[Exception]) -> N
 
 def test_prune_keeps_active_logs_and_unknown_files(monkeypatch, tmp_path: Path) -> None:
     directory = isolated_log_dir(monkeypatch, tmp_path)
+    diagnostics._CRASH_INDEX_STATUS = "available"
     directory.mkdir(parents=True)
     current = directory / "componentpress-current.log"
     active = directory / "componentpress-active.log"
@@ -186,6 +187,107 @@ def test_prune_keeps_active_logs_and_unknown_files(monkeypatch, tmp_path: Path) 
         assert unknown.read_text(encoding="utf-8") == "user file"
     finally:
         lock.unlock()
+
+
+def test_report_includes_latest_crashed_session_and_preserves_it(monkeypatch, tmp_path: Path) -> None:
+    directory = isolated_log_dir(monkeypatch, tmp_path)
+    directory.mkdir(parents=True)
+    crashed_id = "a" * 32
+    crashed = directory / f"componentpress-{crashed_id}.log"
+    started_at = "2026-10-20T12:00:00Z"
+    crashed.write_text(
+        f'2026-10-20T12:00:00+0000 INFO {{"event":"application.start","version":"0.20.0"}}\n'
+        '2026-10-20T12:00:01+0000 INFO {"event":"project.open","operation":"open"}\n',
+        encoding="utf-8",
+    )
+    diagnostics._save_json_atomic(diagnostics._session_start_path(directory, crashed_id), {"session_id": crashed_id, "started_at": started_at})
+    diagnostics.initialize()
+    assert diagnostics._LAST_CRASH_SESSION == {"session_id": crashed_id, "started_at": started_at}
+    report = diagnostics.create_report(tmp_path / "crash-report.zip")
+    with zipfile.ZipFile(report) as archive:
+        payload = json.loads(archive.read("report.json"))
+        assert payload["sessions"]["last_crash"]["session_id"] == crashed_id
+        assert "last-crash-componentpress-" + crashed_id + ".log" in archive.namelist()
+    diagnostics._prune(directory, directory / "current.log")
+    assert crashed.exists()
+    diagnostics.shutdown()
+
+
+def test_cleanly_stopped_session_is_not_reported_as_crashed(monkeypatch, tmp_path: Path) -> None:
+    directory = isolated_log_dir(monkeypatch, tmp_path)
+    directory.mkdir(parents=True)
+    session_id = "b" * 32
+    session = directory / f"componentpress-{session_id}.log"
+    session.write_text(
+        f'2026-10-20T12:00:00+0000 INFO {{"event":"application.start","version":"0.20.0"}}\n'
+        f'2026-10-20T12:00:01+0000 INFO {{"event":"application.stop","session_id":"{session_id}"}}\n',
+        encoding="utf-8",
+    )
+    diagnostics._save_json_atomic(diagnostics._session_start_path(directory, session_id), {"session_id": session_id, "started_at": "2026-10-20T12:00:00Z"})
+    diagnostics.initialize()
+    assert diagnostics._LAST_CRASH_SESSION is None
+    assert diagnostics._CRASH_INDEX_STATUS == "available"
+    diagnostics.shutdown()
+
+
+def test_live_second_instance_is_not_classified_as_crashed(tmp_path: Path) -> None:
+    session_id = "c" * 32
+    session = tmp_path / f"componentpress-{session_id}.log"
+    session.write_text(
+        f'2026-10-20T12:00:00+0000 INFO {{"event":"application.start","session_id":"{session_id}"}}\n',
+        encoding="utf-8",
+    )
+    lock = QLockFile(str(session.with_suffix(".active")))
+    lock.setStaleLockTime(0)
+    assert lock.tryLock(0)
+    try:
+        assert diagnostics._inspect_crash_candidate(session) is None
+    finally:
+        lock.unlock()
+
+
+def test_rotated_start_event_keeps_crash_classification_from_sidecar(tmp_path: Path) -> None:
+    session_id = "d" * 32
+    session = tmp_path / f"componentpress-{session_id}.log"
+    session.write_text('2026-10-20T12:10:00+0000 INFO {"event":"project.open","operation":"open"}\n', encoding="utf-8")
+    session.with_suffix(".log.3").write_text('older rotated content\n', encoding="utf-8")
+    diagnostics._save_json_atomic(
+        diagnostics._session_start_path(tmp_path, session_id),
+        {"session_id": session_id, "started_at": "2026-10-20T12:00:00Z"},
+    )
+    assert diagnostics._inspect_crash_candidate(session) == {
+        "session_id": session_id, "started_at": "2026-10-20T12:00:00Z"
+    }
+
+
+def test_report_marks_a_gap_in_rotated_parts_as_incomplete(monkeypatch, tmp_path: Path) -> None:
+    isolated_log_dir(monkeypatch, tmp_path)
+    active = diagnostics.initialize()
+    assert active is not None
+    active.with_suffix(".log.2").write_text("rotated\n", encoding="utf-8")
+    report = diagnostics.create_report(tmp_path / "incomplete.zip")
+    assert diagnostics.report_summary(report).current_status == "incomplete"
+    diagnostics.shutdown()
+
+
+def test_report_still_includes_recovered_crash_logs_when_index_write_failed(monkeypatch, tmp_path: Path) -> None:
+    directory = isolated_log_dir(monkeypatch, tmp_path)
+    directory.mkdir(parents=True)
+    session_id = "e" * 32
+    session = directory / f"componentpress-{session_id}.log"
+    session.write_text('2026-10-20T12:10:00+0000 INFO {"event":"project.open","operation":"open"}\n', encoding="utf-8")
+    diagnostics._save_json_atomic(
+        diagnostics._session_start_path(directory, session_id),
+        {"session_id": session_id, "started_at": "2026-10-20T12:00:00Z"},
+    )
+    assert diagnostics.initialize() is not None
+    diagnostics._CRASH_INDEX_STATUS = "unavailable"
+    report = diagnostics.create_report(tmp_path / "index-unavailable.zip")
+    with zipfile.ZipFile(report) as archive:
+        assert "last-crash-" + session.name in archive.namelist()
+        metadata = json.loads(archive.read("report.json"))
+        assert metadata["sessions"]["last_crash"]["status"] == "index_unavailable"
+    diagnostics.shutdown()
 
 
 def test_log_sink_failure_is_nonfatal(monkeypatch, tmp_path: Path) -> None:
