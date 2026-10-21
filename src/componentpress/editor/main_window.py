@@ -117,6 +117,7 @@ from .copy_mode_switch import CopyModeSwitch
 from .theme import apply_theme
 from componentpress.user_preferences import load_preferences, save_preferences
 from .program_settings_dialog import ProgramSettingsDialog
+from .build_dialog import BuildDialog
 from .help_dialog import HelpDialog
 from componentpress.i18n import language, set_language, tr
 from componentpress.diagnostics import logging as technical_log
@@ -154,8 +155,8 @@ class MainWindow(QMainWindow):
         self._selection_sync = False
         self._active_build_job: str | None = None; self._build_pending_active_only: bool | None = None
         self._build_operation_id: str | None = None; self._build_session: ProjectSession | None = None; self._build_tab: DocumentTab | None = None; self._build_mode: str | None = None
-        self._last_build_result: BuildResult | None = None
-        self._build_progress: QProgressDialog | None = None; self._last_build_progress: BuildProgress | None = None
+        self._last_build_result: BuildResult | None = None; self._build_progress: BuildDialog | None = None; self._last_build_progress: BuildProgress | None = None
+        self._build_starting = False; self._build_progress_revision = -1; self._build_cancel_requested = False; self._build_after_action = "none"
         self._close_after_build = False
         self._preview_session_identity, self._preview_coordinator = uuid4().hex, PreviewCoordinator()
         self._preview_pool = QThreadPool(self)
@@ -299,33 +300,33 @@ class MainWindow(QMainWindow):
         self.help_menu.addSeparator()
         self.help_menu.addAction(self.about_action)
 
-    def _show_program_settings(self) -> None:
-        dialog = ProgramSettingsDialog(self._program_preferences, self._register_file_type, self)
-        if dialog.exec() != dialog.DialogCode.Accepted:
-            return
+    def _show_program_settings(self, parent=None) -> bool:
+        dialog = ProgramSettingsDialog(self._program_preferences, lambda: self._register_file_type(parent), parent or self)
+        if dialog.exec() != dialog.DialogCode.Accepted: return False
         try:
             preferences = dialog.preferences()
             preferences = preferences.model_copy(update={"recent_projects": self._program_preferences.recent_projects})
         except (ValueError, TypeError) as exc:
-            QMessageBox.warning(self, tr("ui.program_settings"), tr("error.program_settings_save"))
+            QMessageBox.warning(parent or self, tr("ui.program_settings"), tr("error.program_settings_save"))
             technical_log.log_event("application.settings_save", operation="program_settings",
                                     phase="preparation", status="failed", code="PROGRAM_SETTINGS_INVALID")
-            return
+            return False
         operation_id = uuid4().hex
         technical_log.log_event("application.settings_save", operation="program_settings",
                                 operation_id=operation_id, phase="publishing", status="started")
         if not save_preferences(preferences):
-            QMessageBox.warning(self, tr("ui.program_settings"), tr("error.program_settings_save"))
+            QMessageBox.warning(parent or self, tr("ui.program_settings"), tr("error.program_settings_save"))
             technical_log.log_event("application.settings_save", operation="program_settings",
                                     operation_id=operation_id, phase="finished", status="failed",
                                     code="PROGRAM_SETTINGS_WRITE")
-            return
+            return False
         self._program_preferences = preferences
         self._theme = preferences.theme
         self._refresh_recent_projects_menu()
         apply_theme(preferences.theme)
         technical_log.log_event("application.settings_save", operation="program_settings",
                                 operation_id=operation_id, phase="finished", status="succeeded")
+        return True
 
     def _show_copy_mode_tooltip(self) -> None:
         project = self.session.snapshot.model if self.session is not None else None
@@ -335,7 +336,7 @@ class MainWindow(QMainWindow):
         point = self.mode_info_button.mapToGlobal(QPoint(0, self.mode_info_button.height()))
         QToolTip.showText(point, message, self.mode_info_button)
 
-    def _register_file_type(self) -> None:
+    def _register_file_type(self, parent=None) -> None:
         operation_id = uuid4().hex
         technical_log.log_event("application.file_association", operation="file_association",
                                 operation_id=operation_id, phase="preparation", status="started")
@@ -347,9 +348,9 @@ class MainWindow(QMainWindow):
                                 status="succeeded" if succeeded else "failed", code=code)
         message = tr(f"error.{code.lower()}")
         if succeeded:
-            QMessageBox.information(self, tr("ui.program_settings"), message)
+            QMessageBox.information(parent or self, tr("ui.program_settings"), message)
         else:
-            QMessageBox.warning(self, tr("ui.program_settings"), message)
+            QMessageBox.warning(parent or self, tr("ui.program_settings"), message)
 
     def _build_ui(self) -> None:
         self.data_mode = CopyModeSwitch()
@@ -969,7 +970,7 @@ class MainWindow(QMainWindow):
         """Install an already opened session; useful to bootstrap and to test the UI."""
         if not self._operation_allowed("project_switch") and reservation != self._version_busy_id:
             return
-        self._clear_tabs(discard=True, reservation=reservation)
+        self._clear_tabs(discard=True, reservation=reservation); self._last_build_result = None
         self._preview_session_identity = uuid4().hex
         self.controller.set_session(session)
         self._remember_project(session.snapshot.root)
@@ -2572,20 +2573,63 @@ class MainWindow(QMainWindow):
     def _start_build(self, active_only: bool) -> None:
         if self.session is None or self.controller.build is None or not self._operation_allowed("build"):
             return
+        if self._build_progress is not None:
+            self._build_progress.raise_()
+            self._build_progress.activateWindow()
+            return
+        tab = self.active_tab if active_only else None
+        if active_only and tab is None:
+            return
+        scope = (self.session.documents[tab.component_id].model.name if tab is not None
+                 else tr("ui.build_scope_project"))
+        dialog = BuildDialog(self._program_preferences.print_settings, self.data_mode.mode, scope, self)
+        dialog.startRequested.connect(lambda: self._confirm_build_start(dialog, active_only, tab))
+        dialog.cancelRequested.connect(self._cancel_build)
+        dialog.settingsRequested.connect(lambda: self._edit_build_settings(dialog))
+        dialog.finished.connect(lambda _result: self._build_dialog_closed(dialog))
+        self._build_progress = dialog
+        dialog.open()
+
+    def _edit_build_settings(self, dialog: BuildDialog) -> None:
+        if self._show_program_settings(dialog):
+            dialog.update_settings(self._program_preferences.print_settings)
+
+    def _build_dialog_closed(self, dialog: BuildDialog) -> None:
+        if self._build_progress is dialog and self._active_build_job is None and not self._build_starting:
+            self._build_progress = None
+
+    def _confirm_build_start(self, dialog: BuildDialog, active_only: bool, tab: DocumentTab | None) -> None:
+        if (self._build_progress is not dialog or self.session is None or self.controller.build is None
+                or not self._operation_allowed("build") or active_only and self.active_tab is not tab):
+            return
+        dialog.begin()
+        self._reserve_build(active_only, tab, dialog)
+
+    def _reserve_build(self, active_only: bool, tab: DocumentTab | None, dialog: BuildDialog) -> None:
         self._build_pending_active_only = active_only
         self._build_operation_id = uuid4().hex
         self._build_session = self.session
-        self._build_tab = self.active_tab
+        self._build_tab = tab
         self._build_mode = self.data_mode.mode
-        component_ids = (self._build_tab.component_id,) if active_only and self._build_tab is not None else None
-        self._reserved_build_request = BuildRequest(
+        self._build_after_action = dialog.after_action
+        self._build_cancel_requested = False
+        self._reserved_build_request = self._make_build_request(active_only, tab)
+        self._save_and_launch_build(active_only, dialog)
+
+    def _make_build_request(self, active_only: bool, tab: DocumentTab | None) -> BuildRequest:
+        component_ids = (tab.component_id,) if active_only and tab is not None else None
+        return BuildRequest(
             component_ids=component_ids,
             mode=self._build_mode,
             print_settings=self._program_preferences.print_settings,
             max_render_workers=self._program_preferences.png_workers,
         )
+
+    def _save_and_launch_build(self, active_only: bool, dialog: BuildDialog) -> None:
         if not self._save_all_for_reservation(self._build_operation_id):
             self._cancel_pending_build()
+            self._finish_build_dialog()
+            self.statusBar().showMessage(tr("ui.build_cancelled"), 7000)
             return
         for tab in self._tabs.values():
             tab.preview_timer.stop()
@@ -2593,7 +2637,7 @@ class MainWindow(QMainWindow):
         self._preview_coordinator.discard_pending()
         self._update_actions()
         if self._preview_coordinator.active is not None:
-            self.statusBar().showMessage("Предпросмотр завершает работу; сборка начнётся сразу после неё")
+            dialog.set_status(tr("ui.build_waiting_preview"))
             return
         self._launch_reserved_build(active_only)
 
@@ -2613,42 +2657,34 @@ class MainWindow(QMainWindow):
         self._start_build_request(self._reserved_build_request)
 
     def _start_build_request(self, request: BuildRequest) -> None:
+        self._build_starting = True
+        self._build_progress_revision = -1
         try:
             job_id = self._start_build_worker(request)
         except Exception as exc:
+            self._build_starting = False
             self._reject_build_start(exc)
             return
         self._active_build_job = job_id
+        self._build_starting = False
         self._release_build_reservation()
-        self.statusBar().showMessage(f"Сборка запущена: {job_id}")
         self._update_actions()
 
     def _start_build_worker(self, request: BuildRequest) -> str:
-        self._build_progress = self._build_progress_dialog()
         self._last_build_progress = None
         return self.controller.start_build(request, on_progress=self._on_build_progress,
                                            on_finished=self._queue_build_finished)
 
     def _reject_build_start(self, error: Exception) -> None:
-        if self._build_progress is not None:
-            self._build_progress.close()
-        self._build_progress = None
         self._cancel_pending_build()
-        self._show_error(error)
+        detail = format_error(error.diagnostic) if isinstance(error, ProjectError) else str(error)
+        self.statusBar().showMessage(f"{tr('ui.build_failed')} {detail}", 15000)
+        self._finish_build_dialog()
 
     def _release_build_reservation(self) -> None:
         self._build_pending_active_only = self._build_operation_id = None
         self._build_session = self._build_tab = self._build_mode = None
         self._reserved_build_request = None
-
-    def _build_progress_dialog(self) -> QProgressDialog:
-        progress = QProgressDialog(tr("ui.build_prepare"), tr("action.cancel_build"), 0, 0, self)
-        progress.setWindowTitle("Сборка ComponentPress")
-        progress.setAutoClose(False)
-        progress.setAutoReset(False)
-        progress.canceled.connect(self._cancel_build)
-        progress.show()
-        return progress
 
     def _cancel_pending_build(self, *, resume_preview: bool = True) -> None:
         if self._build_pending_active_only is None:
@@ -2672,48 +2708,72 @@ class MainWindow(QMainWindow):
             self._refresh_preview(self.active_tab)
 
     def _on_build_progress(self, progress: BuildProgress) -> None:
-        if progress.job_id != self._active_build_job or self._build_progress is None:
+        if ((progress.job_id != self._active_build_job and not self._build_starting)
+                or self._build_progress is None):
             return
-        if not self._accept_build_progress(progress):
+        if progress.revision:
+            if progress.revision <= self._build_progress_revision:
+                return
+        elif not self._accept_build_progress(progress):
             return
         self._last_build_progress = progress
-        self._build_progress.setRange(0, max(progress.total, 1))
-        self._build_progress.setValue(progress.completed)
-        self._build_progress.setLabelText(progress.message or progress.phase)
-        if progress.phase == "preparing" and progress.total and progress.completed >= progress.total:
-            self._update_actions()
+        self._build_progress_revision = progress.revision
+        message = self._format_build_progress(progress)
+        self._build_progress.update_progress(progress.__class__(
+            progress.job_id, progress.phase, progress.completed, progress.total, message,
+            progress.component_names, progress.revision,
+        ))
+
+    @staticmethod
+    def _format_build_progress(progress: BuildProgress) -> str:
+        message = progress.message or tr(f"ui.build_phase_{progress.phase}")
+        return tr("ui.build_progress_components", components=", ".join(progress.component_names), message=message) if progress.component_names else message
 
     def _accept_build_progress(self, progress: BuildProgress) -> bool:
         previous = self._last_build_progress
-        order = {"preparing": 0, "rendering": 1, "assembling_pdf": 2}
+        order = {"preparing": 0, "rendering": 1, "assembling_pdf": 2, "publishing": 3}
         return previous is None or (
             order.get(progress.phase, 0) >= order.get(previous.phase, 0)
             and (progress.phase != previous.phase or progress.completed >= previous.completed)
         )
 
     def _on_build_finished(self, result: BuildResult) -> None:
-        if self._build_progress is not None:
-            self._build_progress.close()
-            self._build_progress.deleteLater()
-            self._build_progress = None
+        if result.job_id != self._active_build_job:
+            return
         self._active_build_job = None
         self._last_build_result = result if result.status == "succeeded" else self._last_build_result
         self._update_actions()
         if result.status == "succeeded":
-            suffix = " (очистка будет повторена)" if result.cleanup_state == "cleanup_pending" else ""
-            warning = f"; предупреждения: {'; '.join(format_diagnostic(item) for item in result.diagnostics)}" if result.diagnostics else ""
-            self.statusBar().showMessage(f"Сборка готова: {result.output_directory}{suffix}{warning}", 12000)
+            self._complete_successful_build(result)
         else:
-            message = "\n".join(format_diagnostic(item) for item in result.diagnostics) or f"Сборка: {result.status}"
-            QMessageBox.warning(self, "Сборка не завершена", format_error(ValueError(message)))
+            self._complete_unsuccessful_build(result)
+        self._refresh_preview_after_build()
+        if self._close_after_build:
+            self._close_after_build = False
+            self.close()
+
+    def _complete_successful_build(self, result: BuildResult) -> None:
+        self.statusBar().showMessage(tr("ui.build_succeeded"), 12000)
+        if result.cleanup_state == "cleanup_pending" or result.diagnostics:
+            self._show_build_diagnostics(result)
+        action = self._build_after_action
+        target = result.pdf_path if action == "pdf" else result.output_directory if action == "folder" else None
+        self._finish_build_dialog()
+        if target is not None:
+            QTimer.singleShot(0, lambda: self._open_build_target(target, result.job_id, auto=True))
+
+    def _complete_unsuccessful_build(self, result: BuildResult) -> None:
+        message = tr("ui.build_cancelled") if result.status == "cancelled" else tr("ui.build_failed")
+        self.statusBar().showMessage(message, 12000)
+        self._show_build_diagnostics(result)
+        self._finish_build_dialog()
+
+    def _refresh_preview_after_build(self) -> None:
         if self.active_tab is not None and self.active_tab.canvas._pixmap_item is None:
             self._refresh_preview(self.active_tab)
         if self.active_tab is not None and self.active_tab.preview_deferred:
             self.active_tab.preview_deferred = False
             self._refresh_preview(self.active_tab)
-        if self._close_after_build:
-            self._close_after_build = False
-            self.close()
 
     def _queue_build_finished(self, result: BuildResult) -> None:
         QTimer.singleShot(0, lambda: self._deliver_build_finished(result))
@@ -2723,16 +2783,55 @@ class MainWindow(QMainWindow):
             self._on_build_finished(result)
 
     def _cancel_build(self) -> None:
-        if self._active_build_job and self.controller.cancel_build(self._active_build_job):
-            self.statusBar().showMessage("Запрошена отмена; выполняющиеся операции освобождают ресурсы…")
+        self._build_cancel_requested = True
+        if self._build_pending_active_only is not None:
+            self._cancel_pending_build()
+            self._finish_build_dialog()
+            self.statusBar().showMessage(tr("ui.build_cancelled"), 7000)
+        elif self._active_build_job:
+            self.controller.cancel_build(self._active_build_job)
+            if self._build_progress is not None:
+                self._build_progress.cancelling(tr("ui.build_cancelling"))
+
+    def _finish_build_dialog(self) -> None:
+        dialog = self._build_progress
+        if dialog is not None:
+            dialog.finish()
+            self._build_progress = None
+
+    def _show_build_diagnostics(self, result: BuildResult) -> None:
+        details = "; ".join(format_diagnostic(item) for item in result.diagnostics)
+        if details:
+            self.statusBar().showMessage(details, 15000)
+
+    def _open_build_target(self, target: Path, job_id: str, *, auto: bool = False) -> None:
+        kind = "PDF" if target.name == "print.pdf" else "FOLDER"
+        code = "BUILD_RESULT_MISSING" if not target.exists() else "BUILD_RESULT_TYPE"
+        try:
+            valid_target = target.is_file() if kind == "PDF" else target.is_dir()
+        except OSError:
+            valid_target = False
+        if auto and self._build_cancel_requested:
+            return
+        technical_log.log_event("build.open_result", operation="build", operation_id=job_id,
+                                phase="opening", status="started", code=kind)
+        try:
+            opened = valid_target and PlatformServices.open_path(target)
+        except OSError:
+            opened = False
+        technical_log.log_event("build.open_result", operation="build", operation_id=job_id,
+                                phase="finished", status="succeeded" if opened else "failed",
+                                code=kind if valid_target else code)
+        if not opened:
+            self.statusBar().showMessage(tr("ui.build_open_failed"), 7000)
 
     def _open_build_result(self, pdf: bool) -> None:
         result = self._last_build_result
         if result is None:
             return
         target = result.pdf_path if pdf else result.output_directory
-        if target is not None and not PlatformServices.open_path(target):
-            self.statusBar().showMessage(f"Не удалось открыть: {target}", 7000)
+        if target is not None:
+            self._open_build_target(target, result.job_id)
 
     def _request_mode(self, tab: DocumentTab, mode: str) -> None:
         if self.session is None or not self._user_editing_allowed():
@@ -3683,7 +3782,8 @@ class MainWindow(QMainWindow):
         return True
 
     def _ask_unsaved_choice(self, message: str) -> QMessageBox.StandardButton:
-        box = QMessageBox(self)
+        owner = self._build_progress if self._build_pending_active_only is not None else self
+        box = QMessageBox(owner)
         box.setWindowTitle(tr("ui.unsaved_title"))
         box.setText(message)
         box.setStandardButtons(
@@ -3892,7 +3992,8 @@ class MainWindow(QMainWindow):
         else:
             incident_id = technical_log.log_exception("gui.operation", error, operation="dialog", status="failed")
             message = tr("error.unexpected", incident_id=incident_id)
-        QMessageBox.critical(self, tr("error.title"), message)
+        owner = self._build_progress if self._build_pending_active_only is not None else self
+        QMessageBox.critical(owner, tr("error.title"), message)
         self.statusBar().showMessage(message, 7000)
 
     def closeEvent(self, event: QCloseEvent) -> None:

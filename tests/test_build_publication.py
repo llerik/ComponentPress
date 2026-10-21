@@ -70,7 +70,7 @@ class ManualTask:
 def _snapshot(tmp_path, count=4, workers=2):
     return SimpleNamespace(
         job_id="render-test", mode="prod", max_render_workers=workers,
-        instances=tuple(SimpleNamespace(index=index) for index in range(count)),
+        instances=tuple(SimpleNamespace(index=index, component_name=f"Component {index}") for index in range(count)),
         root=tmp_path, job_directory=tmp_path / ".componentpress" / "jobs" / "render-test",
     )
 
@@ -107,6 +107,31 @@ def test_renderer_keeps_only_worker_window_submitted_and_refills(monkeypatch):
         _drain_manual_thread(pool, finished)
     assert not finished.is_alive()
     assert pool.attempts == 4
+
+
+def test_renderer_reports_success_counts_active_components_and_revisions(monkeypatch):
+    pool = ManualPool()
+    monkeypatch.setattr(render_pool, "QThreadPool", lambda: pool)
+    monkeypatch.setattr(render_pool, "RenderInstanceTask", ManualTask)
+    snapshot = _snapshot(Path("."), count=2, workers=2)
+    snapshot = SimpleNamespace(**(snapshot.__dict__ | {"instances": (
+        SimpleNamespace(index=0, component_name="Forest card"),
+        SimpleNamespace(index=1, component_name="Event card"),
+    )}))
+    progress = []
+    thread = threading.Thread(
+        target=render_pool.render_instances,
+        args=(snapshot, CancellationToken(), progress.append), daemon=True,
+    )
+    thread.start()
+    assert pool.ready.wait(timeout=2)
+    pool.tasks.pop(0).run()
+    pool.tasks.pop(0).run()
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+    assert [(item.completed, item.component_names, item.revision) for item in progress] == [
+        (1, ("Event card",), 1), (2, (), 2),
+    ]
 
 
 def test_rejected_png_submit_preserves_failure_and_waits_for_accepted_task(monkeypatch):

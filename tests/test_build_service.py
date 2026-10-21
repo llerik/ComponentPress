@@ -178,12 +178,14 @@ def test_main_window_clears_busy_state_after_synchronous_submit_failure(tmp_path
 
     monkeypatch.setattr(main_window.QMessageBox, "warning", lambda *_args: None)
     window._start_build(False)
+    window._build_progress.start_button.click()
     assert window._active_build_job is not None
     qtbot.waitUntil(lambda: window._active_build_job is None)
     assert window._build_progress is None
     assert window.controller.build is not None and not window.controller.build.is_active()
 
     window._start_build(False)
+    window._build_progress.start_button.click()
     qtbot.waitUntil(lambda: window._active_build_job is None)
     window._active_build_job = "new-job"
     window._queue_build_finished(BuildResult("old-job", "succeeded"))

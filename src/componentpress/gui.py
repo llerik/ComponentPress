@@ -37,6 +37,47 @@ def _smoke_failure(root: Path, line: int) -> bool:
     return False
 
 
+def _run_dialog_build_smoke(window: MainWindow):
+    from componentpress.platforms.services import PlatformServices
+
+    opened = []
+    original = PlatformServices.__dict__["open_path"]
+    PlatformServices.open_path = staticmethod(lambda path: opened.append(path) or True)
+    try:
+        window._start_build(False)
+        dialog = window._build_progress
+        if dialog is None or dialog.after_action != "none":
+            return None, opened
+        next(action for action in dialog.action_button.menu().actions() if action.data() == "folder").trigger()
+        dialog.start_button.click()
+        return _wait_for_dialog_build(window), opened
+    finally:
+        PlatformServices.open_path = original
+
+
+def _wait_for_dialog_build(window: MainWindow):
+    loop = QEventLoop()
+    poll = QTimer()
+    poll.timeout.connect(lambda: loop.quit() if window._build_progress is None else None)
+    timeout = QTimer()
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(loop.quit)
+    poll.start(10)
+    timeout.start(120_000)
+    loop.exec()
+    poll.stop()
+    timeout.stop()
+    return window._last_build_result if window._build_progress is None else None
+
+
+def _dialog_build_succeeded(result, opened) -> bool:
+    return bool(
+        result is not None and result.status == "succeeded" and result.pdf_path is not None
+        and result.pdf_path.is_file() and result.report_path is not None
+        and result.report_path.is_file() and opened == [result.output_directory]
+    )
+
+
 def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     """Exercise stage-six Excel preview plus the preceding editing workflow."""
     from componentpress.editor.dialogs import format_error
@@ -313,14 +354,8 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     if window.controller.build is None:
         window.controller.build = build_service(window.controller.service)
-    build_result = run_build(window.controller.build, window.session, BuildRequest(max_render_workers=2))
-    if (
-        build_result.status != "succeeded"
-        or build_result.pdf_path is None
-        or not build_result.pdf_path.is_file()
-        or build_result.report_path is None
-        or not build_result.report_path.is_file()
-    ):
+    build_result, opened = _run_dialog_build_smoke(window)
+    if not _dialog_build_succeeded(build_result, opened):
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     window.data_mode.setChecked(True)
     if window.data_mode.mode != "test":

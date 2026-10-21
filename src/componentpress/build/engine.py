@@ -29,7 +29,7 @@ class BuildEngine:
         log_event("build.started", operation="build", job_id=snapshot.job_id, phase="preparing", mode=snapshot.mode)
         try:
             plan = self._prepare_artifacts(snapshot, cancellation, progress, started)
-            output = self._publish(snapshot, plan, cancellation)
+            output = self._publish(snapshot, plan, cancellation, progress)
         except Exception as error:
             return self._finish_failure(snapshot, error)
         return self._finish_success(snapshot, output, plan)
@@ -50,9 +50,9 @@ class BuildEngine:
 
     @staticmethod
     def _write_pdf(snapshot, plan, cancellation, progress):
-        page_progress = lambda done, total, _message: progress(BuildProgress(
+        page_progress = lambda done, total, message, names=(): progress(BuildProgress(
             snapshot.job_id, "assembling_pdf", done, total,
-            tr("ui.pdf_page_progress", page=done, total=total),
+            message, names,
         ))
         write_print_pdf(snapshot, plan, cancellation, page_progress)
 
@@ -62,8 +62,9 @@ class BuildEngine:
         hashes["print.pdf"] = sha256(snapshot.staging_directory / "print.pdf")
         return hashes
 
-    def _publish(self, snapshot, plan, cancellation):
+    def _publish(self, snapshot, plan, cancellation, progress):
         self.store.update(snapshot.job_id, phase="publishing")
+        progress(BuildProgress(snapshot.job_id, "publishing", 0, 0, tr("ui.build_phase_publishing")))
         output = self._output_path(snapshot)
         output.parent.mkdir(parents=True, exist_ok=True)
         if output.exists():

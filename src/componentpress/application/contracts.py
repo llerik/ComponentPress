@@ -154,6 +154,8 @@ class BuildProgress:
     completed: int
     total: int
     message: str = ""
+    component_names: tuple[str, ...] = ()
+    revision: int = 0
 
 
 @dataclass(frozen=True)

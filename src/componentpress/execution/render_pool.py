@@ -25,7 +25,8 @@ class _RenderQueue:
         self.pool, self.snapshot = pool, snapshot
         self.cancellation, self.progress = cancellation, progress
         self.lock, self.finished = Lock(), Event()
-        self.next_index = self.active = self.completed = 0
+        self.next_index = self.active = self.completed = self.settled = self.revision = 0
+        self.active_instances = {}
         self.error = None
 
     def run(self):
@@ -40,52 +41,72 @@ class _RenderQueue:
 
     def _reserve(self):
         with self.lock:
-            if self.cancellation.cancelled or self.next_index == len(self.snapshot.instances):
-                return None
-            instance = self.snapshot.instances[self.next_index]
-            self.next_index += 1
-            self.active += 1
-            return instance
+            return self._reserve_locked()
+
+    def _reserve_locked(self):
+        if self.cancellation.cancelled or self.next_index == len(self.snapshot.instances):
+            return None
+        instance = self.snapshot.instances[self.next_index]
+        self.next_index += 1
+        self.active += 1
+        self.active_instances[instance.index] = instance
+        return instance
 
     def _start(self, instance):
         if instance is None:
             return
         if self.cancellation.cancelled:
-            return self._skip_reserved()
+            return self._complete(instance, None)
         try:
-            task = RenderInstanceTask(self.snapshot, instance, self.cancellation, self._complete)
+            task = RenderInstanceTask(
+                self.snapshot, instance, self.cancellation,
+                lambda index, error: self._complete(instance, error),
+            )
             self.pool.start(task)
         except Exception as error:
-            self._complete(instance.index, error)
+            self._complete(instance, error)
 
-    def _skip_reserved(self):
+    def _complete(self, instance, error):
         with self.lock:
+            self.settled += 1
             self.active -= 1
-            if self.active == 0:
-                self.finished.set()
-
-    def _complete(self, _index, error):
-        with self.lock:
-            self.completed += 1
-            self.active -= 1
+            self.active_instances.pop(instance.index, None)
             self._remember_error(error)
-            done = self.completed
             should_start = error is None and not self.cancellation.cancelled
-            if not should_start and self.active == 0:
+            next_instance = self._reserve_locked() if should_start else None
+            self.completed += error is None and not self.cancellation.cancelled
+            if self.active == 0 and next_instance is None:
                 self.finished.set()
-        self._report_progress(done)
-        if should_start:
-            self._start_next()
+            self.revision += 1
+            state = self._progress_state_locked()
+        self._report_progress(state)
+        if next_instance is not None:
+            self._start(next_instance)
 
     def _remember_error(self, error):
         if error is not None and self.error is None:
             self.error = error
             self.cancellation.cancel()
 
-    def _report_progress(self, done):
+    def _progress_state_locked(self):
+        return (
+            self.completed, len(self.snapshot.instances),
+            tuple(sorted({getattr(item, "component_name", "") for item in self.active_instances.values()} - {""})),
+            self.revision,
+        )
+
+    def _report_progress(self, value=None):
         try:
-            value = BuildProgress(self.snapshot.job_id, "rendering", done, len(self.snapshot.instances),
-                                  tr("ui.png_build_progress", completed=done, total=len(self.snapshot.instances)))
+            if value is None:
+                with self.lock:
+                    self.revision += 1
+                    value = self._progress_state_locked()
+            completed, total, component_names, revision = value
+            value = BuildProgress(
+                self.snapshot.job_id, "rendering", completed, total,
+                tr("ui.png_build_progress", completed=completed, total=total),
+                component_names, revision,
+            )
             self.progress(value)
         except Exception as error:
             try:
@@ -93,15 +114,6 @@ class _RenderQueue:
                               phase="rendering", mode=self.snapshot.mode)
             except Exception:
                 pass
-
-    def _start_next(self):
-        instance = self._reserve()
-        if instance is None:
-            with self.lock:
-                if self.active == 0:
-                    self.finished.set()
-        else:
-            self._start(instance)
 
     def _raise_error(self):
         if isinstance(self.error, ProjectError):

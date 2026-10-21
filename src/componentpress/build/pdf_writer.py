@@ -25,15 +25,7 @@ def write_print_pdf(
     target = snapshot.staging_directory / "print.pdf"
     temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
     try:
-        writer = QPdfWriter(str(temporary))
-        writer.setResolution(snapshot.print_settings.dpi)
-        writer.setPageSize(QPageSize(
-            QSizeF(plan.paper_width_mm, plan.paper_height_mm),
-            QPageSize.Unit.Millimeter,
-            snapshot.print_settings.paper,
-            QPageSize.SizeMatchPolicy.ExactMatch,
-        ))
-        writer.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout.Unit.Millimeter)
+        writer = _create_writer(temporary, snapshot, plan)
         painter = QPainter(writer)
         if not painter.isActive():
             raise ProjectError(Diagnostic("PDF_WRITE", "Qt не смог начать запись PDF", target))
@@ -45,6 +37,8 @@ def write_print_pdf(
         try:
             for page_number, page in enumerate(plan.pages):
                 cancellation.check()
+                component_names = _page_component_names(snapshot, page)
+                _report_page_progress(progress, page_number, len(plan.pages), component_names)
                 if page_number and not writer.newPage():
                     raise ProjectError(Diagnostic("PDF_WRITE", "Qt не смог создать страницу PDF", target))
                 for placement in page.placements:
@@ -70,8 +64,7 @@ def write_print_pdf(
                     for y in horizontal:
                         painter.drawLine(QLineF(0, y * scale, plan.paper_width_mm * scale, y * scale))
                     painter.restore()
-                if progress is not None:
-                    progress(page_number + 1, len(plan.pages), tr("ui.pdf_page_progress", page=page_number + 1, total=len(plan.pages)))
+                _report_page_progress(progress, page_number + 1, len(plan.pages), component_names)
         finally:
             painter.end()
         cancellation.check()
@@ -83,3 +76,21 @@ def write_print_pdf(
         raise ProjectError(Diagnostic("FILE_WRITE", str(exc), target)) from exc
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _page_component_names(snapshot, page) -> tuple[str, ...]:
+    return tuple(sorted({snapshot.instances[item.instance_index].component_name for item in page.placements}))
+
+
+def _create_writer(temporary: Path, snapshot: BuildInputSnapshot, plan: ImpositionPlan) -> QPdfWriter:
+    writer = QPdfWriter(str(temporary))
+    writer.setResolution(snapshot.print_settings.dpi)
+    writer.setPageSize(QPageSize(QSizeF(plan.paper_width_mm, plan.paper_height_mm), QPageSize.Unit.Millimeter,
+                                 snapshot.print_settings.paper, QPageSize.SizeMatchPolicy.ExactMatch))
+    writer.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout.Unit.Millimeter)
+    return writer
+
+
+def _report_page_progress(progress, completed: int, total: int, component_names: tuple[str, ...]) -> None:
+    if progress is not None:
+        progress(completed, total, tr("ui.pdf_page_progress", page=max(1, completed), total=total), component_names)

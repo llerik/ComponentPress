@@ -376,6 +376,7 @@ def test_build_reservation_rejects_preview_from_dialog_event_loop(make_editor, m
 
     window._preview_coordinator.active = object()
     window._start_build(False)
+    window._build_progress.start_button.click()
     assert window._build_pending_active_only is False and not starts
     tab.previewRequested.emit()
     assert tab.preview_deferred
@@ -384,10 +385,8 @@ def test_build_reservation_rejects_preview_from_dialog_event_loop(make_editor, m
     assert len(starts) == 1
     assert window._preview_coordinator.active is None
     assert window._active_build_job == "test-job"
-    window._active_build_job = None
-    window._build_progress.close()
-    window._build_progress.deleteLater()
-    window._build_progress = None
+    from componentpress.application.contracts import BuildResult
+    window._on_build_finished(BuildResult("test-job", "cancelled"))
 
 
 def test_png_export_reserves_before_save_and_waits_for_active_preview(make_editor, monkeypatch, tmp_path):
@@ -518,6 +517,7 @@ def test_build_runs_after_preview_and_releases_reservation(make_editor, monkeypa
     monkeypatch.setattr(window.controller, "start_build", lambda request, **_kwargs: requests.append(request) or "test-job")
     window._preview_coordinator.active = object()
     window._start_build(False)
+    window._build_progress.start_button.click()
     assert window._reserved_build_request is not None
     assert not requests
     window._preview_coordinator.active = None
@@ -525,10 +525,8 @@ def test_build_runs_after_preview_and_releases_reservation(make_editor, monkeypa
     assert len(requests) == 1
     assert window._build_pending_active_only is None
     assert window._reserved_build_request is None
-    window._active_build_job = None
-    window._build_progress.close()
-    window._build_progress.deleteLater()
-    window._build_progress = None
+    from componentpress.application.contracts import BuildResult
+    window._on_build_finished(BuildResult("test-job", "cancelled"))
 
 
 def test_build_reservation_rejects_project_switch_methods(make_editor, monkeypatch, tmp_path):
@@ -617,9 +615,7 @@ def test_build_progress_ignores_late_values_from_older_phase(make_editor):
     accepted = []
     window._active_build_job = "progress-test"
     window._build_progress = SimpleNamespace(
-        setRange=lambda *_args: None,
-        setValue=accepted.append,
-        setLabelText=lambda *_args: None,
+        update_progress=lambda value: accepted.append(value.completed),
     )
     window._on_build_progress(BuildProgress("progress-test", "rendering", 2, 4))
     window._on_build_progress(BuildProgress("progress-test", "rendering", 1, 4))

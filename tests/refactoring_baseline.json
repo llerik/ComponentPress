@@ -687,22 +687,6 @@
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
     },
-    "src/componentpress/editor/main_window.py|MainWindow._start_build": {
-      "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow._start_build",
-      "line": 2488,
-      "length": 27,
-      "stage": "21",
-      "owner": "coder:stage21"
-    },
-    "src/componentpress/editor/main_window.py|MainWindow._on_build_finished": {
-      "path": "src/componentpress/editor/main_window.py",
-      "name": "MainWindow._on_build_finished",
-      "line": 2610,
-      "length": 23,
-      "stage": "6б",
-      "owner": "coder:src/componentpress/editor"
-    },
     "src/componentpress/editor/main_window.py|MainWindow._apply_draft": {
       "path": "src/componentpress/editor/main_window.py",
       "name": "MainWindow._apply_draft",
@@ -790,14 +774,6 @@
       "length": 21,
       "stage": "6б",
       "owner": "coder:src/componentpress/editor"
-    },
-    "src/componentpress/editor/program_settings_dialog.py|ProgramSettingsDialog.__init__": {
-      "path": "src/componentpress/editor/program_settings_dialog.py",
-      "name": "ProgramSettingsDialog.__init__",
-      "line": 14,
-      "length": 53,
-      "stage": "21",
-      "owner": "coder:stage21"
     },
     "src/componentpress/editor/project_settings_dialog.py|ProjectSettingsDialog.__init__": {
       "path": "src/componentpress/editor/project_settings_dialog.py",

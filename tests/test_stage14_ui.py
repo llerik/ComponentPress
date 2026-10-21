@@ -229,6 +229,7 @@ def test_build_request_uses_copy_switch_mode(tmp_path: Path, qtbot, monkeypatch,
     )
     monkeypatch.setattr(window.controller, "start_build", lambda request, **_kwargs: (requests.append(request), "job")[1])
     window._start_build(active_only=False)
+    window._build_progress.start_button.click()
 
     assert isinstance(requests[0], BuildRequest)
     assert requests[0].mode == mode
@@ -244,9 +245,8 @@ def test_build_request_uses_copy_switch_mode(tmp_path: Path, qtbot, monkeypatch,
         assert not window.cancel_build_widget_action.isVisible()
         return QMessageBox.StandardButton.Ok
 
-    monkeypatch.setattr(QMessageBox, "warning", staticmethod(show_build_error))
-    from types import SimpleNamespace
-    window._on_build_finished(SimpleNamespace(status="cancelled", diagnostics=()))
+    from componentpress.application.contracts import BuildResult
+    window._on_build_finished(BuildResult("job", "cancelled"))
     assert window.build_active_widget_action.isVisible()
     assert window.build_all_widget_action.isVisible()
     assert not window.cancel_build_widget_action.isVisible()
