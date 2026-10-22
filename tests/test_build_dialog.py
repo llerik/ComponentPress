@@ -89,6 +89,7 @@ def test_program_settings_language_tooltip_and_width(qtbot, locale, language_lab
     assert colors.count(theme_palette().color(theme_palette().ColorRole.ToolTipBase)) > colors.count(
         theme_palette().color(theme_palette().ColorRole.ToolTipText)
     )
+    qtbot.waitUntil(lambda: not dialog._language_tooltip.isVisible(), timeout=2500)
     assert tr("ui.zoom_actual") == zoom_label
     assert "96" in tr("ui.zoom_actual_tip")
 

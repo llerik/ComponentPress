@@ -59,26 +59,32 @@ class ProgramSettingsDialog(QDialog):
         form.addRow(tr("ui.theme"), self.theme)
         content_layout.addWidget(group)
 
-    def _show_language_tooltip(self, _index: int) -> None:
-        point = self.language.mapToGlobal(QPoint(0, self.language.height()))
+    def _new_language_tooltip(self) -> QLabel:
         palette = self.palette()
         tooltip = QLabel(tr("ui.language_restart"), self, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
         tooltip.setWordWrap(True)
         tooltip.setMargin(7)
         tooltip.setAutoFillBackground(True)
-        tooltip.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         tooltip.setPalette(palette)
-        tooltip.setStyleSheet(
-            "QLabel {"
-            f"background-color: {palette.color(QPalette.ColorRole.ToolTipBase).name()}; "
-            f"color: {palette.color(QPalette.ColorRole.ToolTipText).name()}; "
-            f"border: 1px solid {palette.color(QPalette.ColorRole.Mid).name()}; border-radius: 4px;}}"
-        )
+        tooltip.setStyleSheet(f"QLabel {{ background: {palette.color(QPalette.ColorRole.ToolTipBase).name()}; color: {palette.color(QPalette.ColorRole.ToolTipText).name()}; border: 1px solid {palette.color(QPalette.ColorRole.Mid).name()}; border-radius: 4px; }}")
+        timer = QTimer(tooltip)
+        timer.setSingleShot(True)
+        timer.timeout.connect(tooltip.hide)
+        tooltip._hide_timer = timer
+        return tooltip
+
+    def _show_language_tooltip(self, _index: int) -> None:
+        point = self.language.mapToGlobal(QPoint(0, self.language.height()))
+        tooltip = getattr(self, "_language_tooltip", None)
+        if tooltip is None:
+            tooltip = self._new_language_tooltip()
+            self._language_tooltip = tooltip
+        else:
+            tooltip.setText(tr("ui.language_restart"))
         tooltip.adjustSize()
         tooltip.move(point)
         tooltip.show()
-        self._language_tooltip = tooltip
-        QTimer.singleShot(8000, tooltip.close)
+        tooltip._hide_timer.start(1500)
 
     def _add_print_settings(self, content_layout, settings):
         self._create_print_widgets(settings)

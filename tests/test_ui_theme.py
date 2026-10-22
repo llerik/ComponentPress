@@ -156,7 +156,16 @@ def test_copy_mode_info_uses_the_info_asset(isolated_theme, qtbot) -> None:
         window.mode_info_button,
         QHelpEvent(QEvent.Type.ToolTip, QPoint(1, 1), point),
     )
-    assert window._mode_info_tooltip.text() == window.mode_info_button.accessibleName()
+    tooltip = window._mode_info_tooltip
+    assert tooltip.text() == window.mode_info_button.accessibleName()
+    qtbot.wait(700)
+    QApplication.sendEvent(
+        window.mode_info_button,
+        QHelpEvent(QEvent.Type.ToolTip, QPoint(1, 1), point),
+    )
+    assert window._mode_info_tooltip is tooltip
+    assert tooltip.isVisible()
+    qtbot.waitUntil(lambda: not tooltip.isVisible(), timeout=1100)
     window._show_copy_mode_tooltip()
     qtbot.wait(10)
     image = window._mode_info_tooltip.grab().toImage()
@@ -164,3 +173,10 @@ def test_copy_mode_info_uses_the_info_asset(isolated_theme, qtbot) -> None:
     background = theme_palette().color(QPalette.ColorRole.ToolTipBase)
     foreground = theme_palette().color(QPalette.ColorRole.ToolTipText)
     assert colors.count(background) > colors.count(foreground)
+    qtbot.waitUntil(lambda: not window._mode_info_tooltip.isVisible(), timeout=2500)
+    QApplication.sendEvent(
+        window.mode_info_button,
+        QHelpEvent(QEvent.Type.ToolTip, QPoint(1, 1), point),
+    )
+    QApplication.sendEvent(window.mode_info_button, QEvent(QEvent.Type.Leave))
+    qtbot.waitUntil(lambda: not tooltip.isVisible(), timeout=800)

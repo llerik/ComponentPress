@@ -335,28 +335,56 @@ class MainWindow(QMainWindow):
         test_column = project.copies_columns.test if project is not None else "Test"
         message = tr("ui.copy_mode_info", prod_column=prod_column, test_column=test_column)
         point = self.mode_info_button.mapToGlobal(QPoint(0, self.mode_info_button.height()))
-        self._show_themed_tooltip(message, point)
+        self._show_themed_tooltip(message, point, replace=True)
 
-    def _show_themed_tooltip(self, text: str, point: QPoint) -> None:
+    def _new_mode_info_tooltip(self, text: str) -> QLabel:
         palette = self.palette()
         tooltip = QLabel(text, self, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
         tooltip.setWordWrap(True)
         tooltip.setMaximumWidth(420)
         tooltip.setMargin(7)
         tooltip.setAutoFillBackground(True)
-        tooltip.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         tooltip.setPalette(palette)
-        tooltip.setStyleSheet(
-            "QLabel {"
-            f"background-color: {palette.color(QPalette.ColorRole.ToolTipBase).name()}; "
-            f"color: {palette.color(QPalette.ColorRole.ToolTipText).name()}; "
-            f"border: 1px solid {palette.color(QPalette.ColorRole.Mid).name()}; border-radius: 4px;}}"
-        )
+        tooltip.setStyleSheet(f"QLabel {{ background: {palette.color(QPalette.ColorRole.ToolTipBase).name()}; color: {palette.color(QPalette.ColorRole.ToolTipText).name()}; border: 1px solid {palette.color(QPalette.ColorRole.Mid).name()}; border-radius: 4px; }}")
+        for name, interval in (("_hide_timer", 1500), ("_leave_timer", 300)):
+            timer = QTimer(tooltip)
+            timer.setSingleShot(True)
+            timer.setInterval(interval)
+            timer.timeout.connect(tooltip.hide)
+            setattr(tooltip, name, timer)
+        return tooltip
+
+    def _show_themed_tooltip(self, text: str, point: QPoint, *, replace: bool = False) -> None:
+        tooltip = getattr(self, "_mode_info_tooltip", None)
+        if tooltip is not None and tooltip.isVisible() and not replace:
+            return
+        if tooltip is None:
+            tooltip = self._new_mode_info_tooltip(text)
+            self._mode_info_tooltip = tooltip
+        else:
+            tooltip.setText(text)
         tooltip.adjustSize()
         tooltip.move(point)
         tooltip.show()
-        self._mode_info_tooltip = tooltip
-        QTimer.singleShot(8000, tooltip.close)
+        tooltip._leave_timer.stop()
+        tooltip._hide_timer.start()
+
+    def _mode_info_tooltip_event(self, event) -> bool:
+        if event.type() == QEvent.Type.ToolTip:
+            self._show_themed_tooltip(tr("ui.copy_mode_info_tip"), event.globalPos())
+            return True
+        tooltip = getattr(self, "_mode_info_tooltip", None)
+        if tooltip is None or not tooltip.isVisible():
+            return False
+        if event.type() == QEvent.Type.Leave:
+            tooltip._leave_timer.start()
+        elif event.type() == QEvent.Type.Enter:
+            tooltip._leave_timer.stop()
+        elif event.type() == QEvent.Type.MouseButtonPress:
+            tooltip._hide_timer.stop()
+            tooltip._leave_timer.stop()
+            tooltip.hide()
+        return False
 
     def _register_file_type(self, parent=None) -> None:
         operation_id = uuid4().hex
@@ -458,8 +486,7 @@ class MainWindow(QMainWindow):
     def eventFilter(self, watched, event) -> bool:
         if self._route_text_history_shortcut(watched, event):
             return True
-        if watched is getattr(self, "mode_info_button", None) and event.type() == QEvent.Type.ToolTip:
-            self._show_themed_tooltip(tr("ui.copy_mode_info_tip"), event.globalPos())
+        if watched is getattr(self, "mode_info_button", None) and self._mode_info_tooltip_event(event):
             return True
         if event.type() == QEvent.Type.MouseButtonPress:
             tab = getattr(self, "active_tab", None)
