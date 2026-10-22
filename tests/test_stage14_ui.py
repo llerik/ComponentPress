@@ -158,6 +158,8 @@ def test_copy_mode_switch_changes_label_color_and_keyboard_state(qtbot) -> None:
 
 
 def test_copy_mode_info_uses_tooltip_without_changing_mode_or_preview(tmp_path: Path, qtbot) -> None:
+    from PySide6.QtWidgets import QToolTip
+
     _root, window, _service = make_window(tmp_path, qtbot)
     assert window.open_component("forest-card") is not None
     mode = window.data_mode.mode
@@ -167,12 +169,12 @@ def test_copy_mode_info_uses_tooltip_without_changing_mode_or_preview(tmp_path: 
         window.mode_info_button,
         QHelpEvent(QEvent.Type.ToolTip, QPoint(1, 1), point),
     )
-    assert window._mode_info_tooltip.text() == window.mode_info_button.accessibleName()
+    assert QToolTip.text() == window.mode_info_button.accessibleName()
 
     QTest.keyClick(window.mode_info_button, Qt.Key.Key_Space)
 
-    assert "Prod" in window._mode_info_tooltip.text()
-    assert "Debug" in window._mode_info_tooltip.text()
+    assert "Prod" in QToolTip.text()
+    assert "Debug" in QToolTip.text()
     assert window.data_mode.mode == mode
     assert window.active_tab.preview_generation == generation
 

@@ -5,7 +5,7 @@ from tempfile import gettempdir
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QToolTip
 
 THEMES = ("system", "light", "dark")
 _CURRENT_THEME = "system"
@@ -57,12 +57,27 @@ def _apply_library_theme(mode: str) -> None:
     if application is not None:
         # PaletteChange handlers must see the new effective mode immediately.
         application.setProperty("componentpressDarkTheme", mode == "dark")
-        application.setStyleSheet(
-            qdarktheme.load_stylesheet(mode, default_theme="light", custom_colors=custom_colors)
-        )
         palette = qdarktheme.load_palette(mode, default_theme="light", custom_colors=custom_colors)
-        application.setPalette(palette)
+        _apply_tooltip_theme(
+            application,
+            qdarktheme.load_stylesheet(mode, default_theme="light", custom_colors=custom_colors),
+            palette,
+        )
     _publish_effective_theme(mode)
+
+
+def _apply_tooltip_theme(application, stylesheet: str, palette) -> None:
+    QToolTip.hideText()
+    for widget in application.topLevelWidgets():
+        if widget.windowFlags() & Qt.WindowType.ToolTip:
+            widget.hide()
+    application.setPalette(palette)
+    QToolTip.setPalette(palette)
+    application.setStyleSheet(
+        stylesheet
+        + "\nQToolTip { background-color: palette(tooltipbase); color: palette(tooltiptext); "
+          "border: 1px solid palette(mid); padding: 5px; max-width: 420px; }"
+    )
 
 
 def _publish_effective_theme(mode: str) -> None:

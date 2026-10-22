@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QSettings, QSize, Qt
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QApplication, QPushButton, QToolTip
 
 from componentpress.app_assets import load_icon, set_themed_icon
 from componentpress.bootstrap import project_controller
@@ -106,6 +106,31 @@ def test_system_theme_follows_os_and_manual_theme_ignores_it(isolated_theme, qap
     hints.setColorScheme(original_scheme)
 
 
+@pytest.mark.parametrize("mode", ("light", "dark"))
+def test_tooltip_theme_has_explicit_border_and_inactive_palette(isolated_theme, mode) -> None:
+    apply_theme(mode)
+    palette = QToolTip.palette()
+    expected = theme_palette()
+    assert palette.color(QPalette.ColorGroup.Inactive, QPalette.ColorRole.ToolTipBase) == expected.color(
+        QPalette.ColorGroup.Active, QPalette.ColorRole.ToolTipBase
+    )
+    assert palette.color(QPalette.ColorGroup.Inactive, QPalette.ColorRole.ToolTipText) == expected.color(
+        QPalette.ColorGroup.Active, QPalette.ColorRole.ToolTipText
+    )
+    assert "QToolTip { background-color: palette(tooltipbase); color: palette(tooltiptext); " \
+        "border: 1px solid palette(mid); padding: 5px; max-width: 420px; }" in QApplication.instance().styleSheet()
+
+
+def test_theme_change_closes_visible_tooltip(isolated_theme) -> None:
+    from PySide6.QtCore import QPoint, QRect
+
+    apply_theme("dark")
+    QToolTip.showText(QPoint(20, 20), "Temporary tooltip", None, QRect(), 5000)
+    assert QToolTip.isVisible()
+    apply_theme("light")
+    assert not QToolTip.isVisible()
+
+
 def test_canvas_background_uses_the_new_palette_on_first_theme_change(isolated_theme, qapp) -> None:
     from componentpress.editor.canvas import ComponentCanvas
 
@@ -156,27 +181,31 @@ def test_copy_mode_info_uses_the_info_asset(isolated_theme, qtbot) -> None:
         window.mode_info_button,
         QHelpEvent(QEvent.Type.ToolTip, QPoint(1, 1), point),
     )
-    tooltip = window._mode_info_tooltip
-    assert tooltip.text() == window.mode_info_button.accessibleName()
+    tooltip_text = window.mode_info_button.accessibleName()
+    assert QToolTip.text() == tooltip_text
     qtbot.wait(700)
     QApplication.sendEvent(
         window.mode_info_button,
         QHelpEvent(QEvent.Type.ToolTip, QPoint(1, 1), point),
     )
-    assert window._mode_info_tooltip is tooltip
-    assert tooltip.isVisible()
-    qtbot.waitUntil(lambda: not tooltip.isVisible(), timeout=1100)
+    assert QToolTip.text() == tooltip_text
+    assert QToolTip.isVisible()
+    qtbot.waitUntil(lambda: not QToolTip.isVisible(), timeout=1100)
     window._show_copy_mode_tooltip()
     qtbot.wait(10)
-    image = window._mode_info_tooltip.grab().toImage()
+    tooltip_window = next(
+        widget for widget in QApplication.topLevelWidgets()
+        if widget.isVisible() and widget.windowFlags() & Qt.WindowType.ToolTip
+    )
+    image = tooltip_window.grab().toImage()
     colors = [image.pixelColor(x, y) for x in range(image.width()) for y in range(image.height())]
-    background = theme_palette().color(QPalette.ColorRole.ToolTipBase)
+    background = theme_palette().color(QPalette.ColorRole.Window)
     foreground = theme_palette().color(QPalette.ColorRole.ToolTipText)
     assert colors.count(background) > colors.count(foreground)
-    qtbot.waitUntil(lambda: not window._mode_info_tooltip.isVisible(), timeout=2500)
+    qtbot.waitUntil(lambda: not QToolTip.isVisible(), timeout=2500)
     QApplication.sendEvent(
         window.mode_info_button,
         QHelpEvent(QEvent.Type.ToolTip, QPoint(1, 1), point),
     )
     QApplication.sendEvent(window.mode_info_button, QEvent(QEvent.Type.Leave))
-    qtbot.waitUntil(lambda: not tooltip.isVisible(), timeout=800)
+    qtbot.waitUntil(lambda: not QToolTip.isVisible(), timeout=800)

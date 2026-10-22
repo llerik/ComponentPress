@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGroupBox, QLabel, QScrollArea
+from PySide6.QtWidgets import QApplication, QGroupBox, QLabel, QScrollArea, QToolTip
 from componentpress.application.contracts import BuildResult
 from componentpress.domain.project import PrintSettings
 from componentpress.editor.build_dialog import BuildDialog
@@ -83,13 +83,17 @@ def test_program_settings_language_tooltip_and_width(qtbot, locale, language_lab
     dialog.language.setCurrentIndex(1)
     dialog.language.activated.emit(1)
     qtbot.wait(10)
-    assert dialog._language_tooltip.text() == restart_tip
-    image = dialog._language_tooltip.grab().toImage()
+    assert QToolTip.text() == restart_tip
+    tooltip_window = next(
+        widget for widget in QApplication.topLevelWidgets()
+        if widget.isVisible() and widget.windowFlags() & Qt.WindowType.ToolTip
+    )
+    image = tooltip_window.grab().toImage()
     colors = [image.pixelColor(x, y) for x in range(image.width()) for y in range(image.height())]
-    assert colors.count(theme_palette().color(theme_palette().ColorRole.ToolTipBase)) > colors.count(
+    assert colors.count(theme_palette().color(theme_palette().ColorRole.Window)) > colors.count(
         theme_palette().color(theme_palette().ColorRole.ToolTipText)
     )
-    qtbot.waitUntil(lambda: not dialog._language_tooltip.isVisible(), timeout=2500)
+    qtbot.waitUntil(lambda: not QToolTip.isVisible(), timeout=2500)
     assert tr("ui.zoom_actual") == zoom_label
     assert "96" in tr("ui.zoom_actual_tip")
 
