@@ -38,12 +38,25 @@ class ComponentProperties(QWidget):
         self._available_sheets = sheets
         self.setObjectName("componentProperties")
         layout = QFormLayout(self)
+        self._create_component_identity_fields()
+        self._create_component_dimension_fields()
+        self._create_component_background_fields()
+        self._create_component_sheet_field(sheets)
+        self._add_component_rows(layout)
+        self._connect_component_fields()
+        self.setEnabled(False)
+
+    def _create_component_identity_fields(self) -> None:
         self.identity = QLabel()
         self.identity.setObjectName("componentIdentity")
         self.name_edit = QLineEdit()
         self.name_edit.setObjectName("componentName")
+
+    def _create_component_dimension_fields(self) -> None:
         self.width_spin = self._size_spin("componentWidth")
         self.height_spin = self._size_spin("componentHeight")
+
+    def _create_component_background_fields(self) -> None:
         self.background_edit = QLineEdit()
         self.background_edit.setObjectName("componentBackground")
         self.background_edit.setPlaceholderText("#FFFFFF")
@@ -54,10 +67,14 @@ class ComponentProperties(QWidget):
         self.background_button.setFixedSize(28, 28)
         self.background_button.setAccessibleName(tr("ui.select_background_color"))
         self.background_button.setToolTip(self.background_button.accessibleName())
+
+    def _create_component_sheet_field(self, sheets: tuple[str, ...]) -> None:
         self.sheet = QComboBox()
         self.sheet.setObjectName("componentPropertySheet")
         self.sheet.addItem(tr("ui.no_sheet"), None)
         self.sheet.addItems(list(sheets))
+
+    def _add_component_rows(self, layout: QFormLayout) -> None:
         background_row = QHBoxLayout()
         background_row.addWidget(self.background_edit, 1)
         background_row.addWidget(self.background_button)
@@ -67,13 +84,14 @@ class ComponentProperties(QWidget):
         layout.addRow(tr("ui.height_mm"), self.height_spin)
         layout.addRow(tr("ui.component_background"), background_row)
         layout.addRow(tr("ui.component_sheet"), self.sheet)
+
+    def _connect_component_fields(self) -> None:
         self.name_edit.editingFinished.connect(lambda: self.nameChanged.emit(self.name_edit.text()))
         self.background_edit.editingFinished.connect(self._commit_background)
         self.width_spin.editingFinished.connect(self._emit_size)
         self.height_spin.editingFinished.connect(self._emit_size)
         self.background_button.clicked.connect(self.backgroundColorRequested)
         self.sheet.currentIndexChanged.connect(lambda _index: self.sheetChanged.emit(self.sheet.currentData()))
-        self.setEnabled(False)
 
     def set_sheets(self, sheets: tuple[str, ...]) -> None:
         self._available_sheets = sheets
@@ -104,13 +122,7 @@ class ComponentProperties(QWidget):
         self.setEnabled(component is not None)
         if component is None:
             return
-        blockers = [
-            QSignalBlocker(self.name_edit),
-            QSignalBlocker(self.width_spin),
-            QSignalBlocker(self.height_spin),
-            QSignalBlocker(self.background_edit),
-            QSignalBlocker(self.sheet),
-        ]
+        blockers = self._block_component_signals()
         self.identity.setText(component.id)
         self.name_edit.setText(component.name)
         self.width_spin.setValue(component.size_mm.width)
@@ -118,6 +130,15 @@ class ComponentProperties(QWidget):
         self.background_edit.setText(component.background)
         self._background = self._background_model = component.background.upper()
         ElementProperties.update_color_swatch(self.background_button, self._background)
+        self._show_component_sheet(component)
+        del blockers
+
+    def _block_component_signals(self) -> list[QSignalBlocker]:
+        return [QSignalBlocker(widget) for widget in (
+            self.name_edit, self.width_spin, self.height_spin, self.background_edit, self.sheet,
+        )]
+
+    def _show_component_sheet(self, component: ComponentDefinition) -> None:
         current_sheet = component.data.sheet if component.data else None
         self.sheet.clear()
         self.sheet.addItem(tr("ui.no_sheet"), None)
@@ -126,7 +147,6 @@ class ComponentProperties(QWidget):
         if current_sheet and self.sheet.findData(current_sheet) < 0:
             self.sheet.addItem(tr("ui.sheet_missing", sheet=current_sheet), current_sheet)
         self.sheet.setCurrentIndex(max(0, self.sheet.findData(current_sheet)))
-        del blockers
 
 
 class ElementProperties(QWidget):
@@ -437,34 +457,53 @@ class ElementProperties(QWidget):
         self.setEnabled(node is not None)
         if node is None:
             return
-        widgets = (
+        blockers = [QSignalBlocker(widget) for widget in self._node_widgets()]
+        self.identity.setText(f"{node.id} ({node.type})")
+        self._node_type = node.type
+        self._show_node_lock(node, component)
+        self._show_node_geometry(node)
+        self._show_node_shape(node)
+        self._show_node_condition(node, columns, condition_matches, component)
+        self._show_node_content(node, columns)
+        self._show_node_html(node, font_families)
+        del blockers
+        self._sync_content_mode_visibility()
+
+    def _node_widgets(self) -> tuple[QWidget, ...]:
+        return (
             self.x_spin, self.y_spin, self.width_spin, self.height_spin, self.rotation_spin, self.name_edit,
-            self.source_edit, self.fit_combo, self.font_combo, self.font_spin, self.color_edit,
-            self.html_edit, self.content_mode, self.content_column, self.font_combo,
-            self.lock_button, self.condition_column, self.condition_operator, self.condition_value, self.optional_image, self.stroke_color,
+            self.source_edit, self.fit_combo, self.font_combo, self.font_spin, self.color_edit, self.html_edit,
+            self.content_mode, self.content_column, self.lock_button, self.condition_column,
+            self.condition_operator, self.condition_value, self.optional_image, self.stroke_color,
             self.fill_color, self.stroke_width, self.stroke_style, self.line_dx, self.line_dy,
             *self.alignment_buttons.values(),
         )
-        blockers = [QSignalBlocker(widget) for widget in widgets]
-        self.identity.setText(f"{node.id} ({node.type})")
-        self._node_type = node.type
-        inherited_lock = False
-        if component is not None:
-            from componentpress.domain.tree import locations
 
-            index = locations(component)
-            parent_id = index[node.id].parent_id
-            while parent_id is not None:
-                if index[parent_id].node.locked:
-                    inherited_lock = True
-                    break
-                parent_id = index[parent_id].parent_id
+    def _show_node_lock(self, node: Node, component: ComponentDefinition | None) -> None:
+        inherited_lock = self._has_locked_parent(node, component)
         effectively_locked = node.locked or inherited_lock
         self.lock_button.setChecked(effectively_locked)
         self._set_lock_icon(effectively_locked)
         self.lock_button.setEnabled(not inherited_lock)
-        self.lock_button.setToolTip(tr("ui.unlock_parent") if inherited_lock else (tr("ui.unlock_element") if effectively_locked else tr("ui.lock_element")))
+        label = "ui.unlock_parent" if inherited_lock else "ui.unlock_element" if effectively_locked else "ui.lock_element"
+        self.lock_button.setToolTip(tr(label))
         self.form.setRowVisible(self.lock_button, True)
+
+    @staticmethod
+    def _has_locked_parent(node: Node, component: ComponentDefinition | None) -> bool:
+        if component is None:
+            return False
+        from componentpress.domain.tree import locations
+
+        index = locations(component)
+        parent_id = index[node.id].parent_id
+        while parent_id is not None:
+            if index[parent_id].node.locked:
+                return True
+            parent_id = index[parent_id].parent_id
+        return False
+
+    def _show_node_geometry(self, node: Node) -> None:
         self.x_spin.setValue(node.x_mm)
         self.y_spin.setValue(node.y_mm)
         sized = isinstance(node, (ImageNode, HtmlNode, GroupNode))
@@ -474,14 +513,27 @@ class ElementProperties(QWidget):
         self._rotation_initial_value = self.rotation_spin.value()
         self._rotation_text_edited = False
         self.form.setRowVisible(self.rotation_spin, True)
-        line = isinstance(node, LineNode)
-        shape = isinstance(node, ShapeNode)
+        if sized:
+            scale_x = math.hypot(node.transform.m11, node.transform.m21)
+            scale_y = math.hypot(node.transform.m12, node.transform.m22)
+            width, height = (node.frame.width_mm, node.frame.height_mm) if isinstance(node, GroupNode) else (node.width_mm, node.height_mm)
+            self.width_spin.setValue(width * scale_x)
+            self.height_spin.setValue(height * scale_y)
+
+    def _show_node_shape(self, node: Node) -> None:
+        line, shape = isinstance(node, LineNode), isinstance(node, ShapeNode)
+        self._show_shape_visibility(line, shape)
+        self._show_shape_values(node, line, shape)
+
+    def _show_shape_visibility(self, line: bool, shape: bool) -> None:
         self.form.setRowVisible(self.line_dx, line)
         self.form.setRowVisible(self.line_dy, line)
         self.form.setRowVisible(self.fill_widget, shape)
         self.form.setRowVisible(self.stroke_widget, shape or line)
         self.form.setRowVisible(self.stroke_width, shape or line)
         self.form.setRowVisible(self.stroke_style, shape or line)
+
+    def _show_shape_values(self, node: Node, line: bool, shape: bool) -> None:
         if line:
             self.line_dx.setValue(node.dx_mm)
             self.line_dy.setValue(node.dy_mm)
@@ -495,9 +547,15 @@ class ElementProperties(QWidget):
             self.fill_color.setText(node.fill or "")
             self._fill_color = self._fill_node_color = (node.fill or "").upper()
             self.update_color_swatch(self.fill_button, node.fill)
+
+    def _show_node_condition(self, node: Node, columns: tuple[str, ...], condition_matches: bool | None, component: ComponentDefinition | None) -> None:
         is_group = isinstance(node, GroupNode)
         self.form.setRowVisible(self.group_bounds, is_group)
         conditional = isinstance(node, ConditionalGroupNode)
+        self._show_condition_fields(node, columns, condition_matches, conditional)
+        self._show_group_bounds(node, component, is_group)
+
+    def _show_condition_fields(self, node: Node, columns: tuple[str, ...], condition_matches: bool | None, conditional: bool) -> None:
         self.form.setRowVisible(self.condition_column, conditional)
         self.form.setRowVisible(self.condition_operator, conditional)
         self.form.setRowVisible(self.condition_value, conditional)
@@ -513,49 +571,62 @@ class ElementProperties(QWidget):
             self.condition_value.setEnabled(node.condition_operator in {"equals", "not_equals"})
             self.form.setRowVisible(self.condition_value, node.condition_operator in {"equals", "not_equals"})
             self.condition_state.setText(tr("ui.condition_visible") if condition_matches is True else tr("ui.condition_hidden") if condition_matches is False else tr("ui.condition_no_row"))
+
+    def _show_group_bounds(self, node: Node, component: ComponentDefinition | None, is_group: bool) -> None:
         if is_group and component is not None:
             from componentpress.domain.tree import node_bounds
 
             _, _, bounds_width, bounds_height = node_bounds(component, node.id)
             self.group_bounds.setText(f"{bounds_width:.3f} × {bounds_height:.3f}")
-        if sized:
-            scale_x = math.hypot(node.transform.m11, node.transform.m21)
-            scale_y = math.hypot(node.transform.m12, node.transform.m22)
-            if isinstance(node, GroupNode):
-                self.width_spin.setValue(node.frame.width_mm * scale_x)
-                self.height_spin.setValue(node.frame.height_mm * scale_y)
-            else:
-                self.width_spin.setValue(node.width_mm * scale_x)
-                self.height_spin.setValue(node.height_mm * scale_y)
+
+    def _show_node_content(self, node: Node, columns: tuple[str, ...]) -> None:
         image = isinstance(node, ImageNode)
         self.optional_image.setChecked(image and node.optional)
         self.form.setRowVisible(self.optional_image, image)
         html = isinstance(node, HtmlNode)
+        self._show_content_source(node, columns, image, html)
+
+    def _show_content_source(self, node: Node, columns: tuple[str, ...], image: bool, html: bool) -> None:
         self.form.setRowVisible(self.name_edit, True)
         self.name_edit.setText(node.name)
         self.form.setRowVisible(self.fit_combo, image)
         self.form.setRowVisible(self.content_mode, image or html)
+        mode, column = self._content_source(node, image, html)
+        self.form.setRowVisible(self.content_column, (image or html) and mode == "column")
+        self.content_mode.setCurrentIndex(max(0, self.content_mode.findData(mode)))
+        self._populate_content_columns(columns, column)
+        self.content_column.setEnabled(mode == "column")
+        self._content_mode = mode
+        if getattr(self, "_node_type", "") == "html":
+            self.html_edit.setReadOnly(mode != "manual")
+            self.apply_html.setEnabled(mode == "manual")
+            self.insert_image.setEnabled(mode == "manual")
+
+    def _content_source(self, node: Node, image: bool, html: bool) -> tuple[str, str | None]:
         if image:
             self.source_edit.setText(node.source)
             self.fit_combo.setCurrentText(node.fit)
-            mode, column = node.source_mode, node.source_column
-        elif html:
-            mode, column = node.content_mode, node.content_column
-        else:
-            mode, column = "manual", None
-        self.form.setRowVisible(self.content_column, (image or html) and mode == "column")
-        self.content_mode.setCurrentIndex(max(0, self.content_mode.findData(mode)))
+            return node.source_mode, node.source_column
+        return (node.content_mode, node.content_column) if html else ("manual", None)
+
+    def _populate_content_columns(self, columns: tuple[str, ...], column: str | None) -> None:
         self.content_column.clear()
         self.content_column.addItems(list(columns))
         if column and self.content_column.findText(column) < 0:
             self.content_column.addItem(column)
         if column:
             self.content_column.setCurrentText(column)
-        self.content_column.setEnabled(mode == "column")
-        if getattr(self, "_node_type", "") == "html":
-            self.html_edit.setReadOnly(mode != "manual")
-            self.apply_html.setEnabled(mode == "manual")
-            self.insert_image.setEnabled(mode == "manual")
+
+    def _show_node_html(self, node: Node, font_families: tuple[str, ...]) -> None:
+        html = isinstance(node, HtmlNode)
+        mode = getattr(self, "_content_mode", "manual")
+        self._show_html_visibility(html, mode)
+        if html:
+            self._show_html_values(node, font_families)
+        else:
+            self.form.setRowVisible(self.group_bounds, False)
+
+    def _show_html_visibility(self, html: bool, mode: str) -> None:
         for widget in (self.font_combo, self.font_spin, self.color_widget):
             self.form.setRowVisible(widget, html)
         for button in self.alignment_buttons.values():
@@ -563,30 +634,24 @@ class ElementProperties(QWidget):
         self.form.setRowVisible(self.alignment_widget, html)
         for widget in (self.html_edit, self.insert_image, self.apply_html):
             widget.setVisible(html and mode == "manual")
-        if html:
-            self.font_combo.clear()
-            self.html_edit.setReadOnly(mode != "manual")
-            self.apply_html.setEnabled(mode == "manual")
-            self.insert_image.setEnabled(mode == "manual")
-            families = list(font_families or sorted(QFontDatabase.families(), key=str.casefold))
-            for family in families:
-                self.font_combo.addItem(family, family)
-            if node.font_family not in families:
-                self.font_combo.insertItem(0, tr("ui.font_unavailable", font=node.font_family), node.font_family)
-            self.font_combo.setCurrentIndex(max(0, self.font_combo.findData(node.font_family)))
-            self.font_combo.setToolTip(tr("ui.font_preserved") if node.font_family not in families else "")
-            self.font_spin.setValue(node.font_size_pt)
-            self._node_color = node.color.upper()
-            self._html_color = self._node_color
-            self.color_edit.setText(self._node_color)
-            self._update_html_color_swatch(self._node_color)
-            self.html_edit.setPlainText(node.html)
-            for value, button in self.alignment_buttons.items():
-                button.setChecked(node.text_align == value)
-        else:
-            self.form.setRowVisible(self.group_bounds, False)
-        del blockers
-        self._sync_content_mode_visibility()
+
+    def _show_html_values(self, node: HtmlNode, font_families: tuple[str, ...]) -> None:
+        self.font_combo.clear()
+        families = list(font_families or sorted(QFontDatabase.families(), key=str.casefold))
+        for family in families:
+            self.font_combo.addItem(family, family)
+        if node.font_family not in families:
+            self.font_combo.insertItem(0, tr("ui.font_unavailable", font=node.font_family), node.font_family)
+        self.font_combo.setCurrentIndex(max(0, self.font_combo.findData(node.font_family)))
+        self.font_combo.setToolTip(tr("ui.font_preserved") if node.font_family not in families else "")
+        self.font_spin.setValue(node.font_size_pt)
+        self._node_color = node.color.upper()
+        self._html_color = self._node_color
+        self.color_edit.setText(self._node_color)
+        self._update_html_color_swatch(self._node_color)
+        self.html_edit.setPlainText(node.html)
+        for value, button in self.alignment_buttons.items():
+            button.setChecked(node.text_align == value)
 
     def set_edit_locked(self, locked: bool) -> None:
         for widget in (

@@ -783,35 +783,11 @@
       "stage": "9а",
       "owner": "coder:src/componentpress/editor"
     },
-    "src/componentpress/editor/properties.py|ComponentProperties.__init__": {
-      "path": "src/componentpress/editor/properties.py",
-      "name": "ComponentProperties.__init__",
-      "line": 36,
-      "length": 41,
-      "stage": "6а",
-      "owner": "coder:src/componentpress/editor"
-    },
-    "src/componentpress/editor/properties.py|ComponentProperties.show_component": {
-      "path": "src/componentpress/editor/properties.py",
-      "name": "ComponentProperties.show_component",
-      "line": 103,
-      "length": 27,
-      "stage": "6а",
-      "owner": "coder:src/componentpress/editor"
-    },
     "src/componentpress/editor/properties.py|ElementProperties.__init__": {
       "path": "src/componentpress/editor/properties.py",
       "name": "ElementProperties.__init__",
       "line": 141,
       "length": 194,
-      "stage": "6а",
-      "owner": "coder:src/componentpress/editor"
-    },
-    "src/componentpress/editor/properties.py|ElementProperties.show_node": {
-      "path": "src/componentpress/editor/properties.py",
-      "name": "ElementProperties.show_node",
-      "line": 436,
-      "length": 154,
       "stage": "6а",
       "owner": "coder:src/componentpress/editor"
     },

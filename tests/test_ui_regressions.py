@@ -1021,10 +1021,11 @@ def test_text_alignment_uses_existing_icons_with_accessible_names(qtbot):
         assert matches_icon(button.icon(), filename)
 
 
-def test_html_swatch_palette_updates_alpha_color_and_undo(make_editor, qtbot, monkeypatch):
+def test_html_color_and_alignment_update_plain_text_and_undo(make_editor, qtbot, monkeypatch):
     window, _root, errors = make_editor()
-    assert window.add_html("<p>Text</p>", 2, 2, node_id="text")
+    assert window.add_html("Text", 2, 2, node_id="text")
     properties = window.element_properties
+    properties.alignment_buttons["right"].click()
     swatch = properties.findChild(QPushButton, "htmlColorPicker")
     assert swatch is not None and not swatch.text()
     original_swatch = swatch.icon().pixmap(24, 24).toImage()
@@ -1032,7 +1033,24 @@ def test_html_swatch_palette_updates_alpha_color_and_undo(make_editor, qtbot, mo
     monkeypatch.setattr(QColorDialog, "getColor", staticmethod(lambda *a, **kw: chosen))
     swatch.click()
     assert selected_node(window).color == "#802468AC"
+    assert selected_node(window).text_align == "right"
     assert properties.color_edit.text() == "#802468AC"
+    generation = window.active_tab.preview_generation
+    qtbot.waitUntil(lambda: window.active_tab.displayed_generation == generation, timeout=15000)
+    rendered = render_component_image(
+        window.session.snapshot, window.active_tab.component_id,
+        component=window.session.documents[window.active_tab.component_id].model, dpi=96,
+    )
+    start_x = round(selected_node(window).x_mm * 96 / 25.4)
+    end_x = round((selected_node(window).x_mm + selected_node(window).width_mm) * 96 / 25.4)
+    start_y = round(selected_node(window).y_mm * 96 / 25.4)
+    end_y = round((selected_node(window).y_mm + selected_node(window).height_mm) * 96 / 25.4)
+    blue_pixels = [
+        x for y in range(start_y, end_y) for x in range(start_x, end_x)
+        if (color := rendered.pixelColor(x, y)).blue() > color.green() + 10
+        and color.green() > color.red() + 20
+    ]
+    assert blue_pixels and min(blue_pixels) > (start_x + end_x) // 2
     changed_swatch = swatch.icon().pixmap(24, 24).toImage()
     assert changed_swatch != original_swatch
     window.active_tab.undo_stack.undo()
@@ -1040,6 +1058,7 @@ def test_html_swatch_palette_updates_alpha_color_and_undo(make_editor, qtbot, mo
     assert swatch.icon().pixmap(24, 24).toImage() == original_swatch
     window.active_tab.undo_stack.redo()
     assert properties.color_edit.text() == "#802468AC"
+    assert selected_node(window).text_align == "right"
     assert swatch.icon().pixmap(24, 24).toImage() == changed_swatch
     assert not errors
 

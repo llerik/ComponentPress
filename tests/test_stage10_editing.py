@@ -6,7 +6,7 @@ import shutil
 import pytest
 from pydantic import ValidationError
 from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QFocusEvent, QKeyEvent
+from PySide6.QtGui import QColor, QFocusEvent, QImage, QKeyEvent, QPainter, QTextCursor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -37,6 +37,22 @@ from componentpress.rendering.exporter import ensure_gui_application
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _assert_red_text_is_right_aligned(image: QImage, node: HtmlNode, component: ComponentDefinition) -> None:
+    scale_x = image.width() / component.size_mm.width
+    scale_y = image.height() / component.size_mm.height
+    left = round(node.x_mm * scale_x)
+    top = round(node.y_mm * scale_y)
+    right = round((node.x_mm + node.width_mm) * scale_x)
+    bottom = round((node.y_mm + node.height_mm) * scale_y)
+    red = [
+        (x, y) for y in range(top, bottom) for x in range(left, right)
+        if (color := image.pixelColor(x, y)).red() > color.green() + 30
+        and color.red() > color.blue() + 30
+    ]
+    assert red
+    assert min(x for x, _y in red) > left + 20
 
 
 def _editor(tmp_path: Path, qtbot, monkeypatch):
@@ -418,3 +434,73 @@ def test_text_alignment_is_default_and_explicit_html_alignment_is_preserved(tmp_
     alignment = prepared.document.firstBlock().blockFormat().alignment()
     assert alignment & Qt.AlignmentFlag.AlignHCenter
     assert not alignment & Qt.AlignmentFlag.AlignRight
+
+
+@pytest.mark.ui
+def test_text_defaults_reach_png_and_pdf_exports(tmp_path: Path) -> None:
+    ensure_gui_application()
+    from PySide6.QtCore import QSize
+    from PySide6.QtPdf import QPdfDocument
+    from componentpress.rendering import render_component
+
+    root = tmp_path / "game"
+    shutil.copytree(ROOT / "examples" / "demo-game", root)
+    snapshot = FileProjectRepository().open(root)
+    component = snapshot.documents["forest-card"].model
+    node = HtmlNode(
+        id="alignment-regression", name="Text", type="html", x_mm=2, y_mm=70,
+        width_mm=55, height_mm=12, font_family="Arial", font_size_pt=14,
+        color="#FF0000", text_align="right", html="Plain text",
+    )
+    component = component.model_copy(update={"elements": (*component.elements, node)})
+    png, pdf = tmp_path / "text.png", tmp_path / "text.pdf"
+    render_component(snapshot, component.id, png, component=component, dpi=144, pdf=pdf)
+    _assert_red_text_is_right_aligned(QImage(str(png)), node, component)
+
+    reader = QPdfDocument()
+    assert reader.load(str(pdf)) == QPdfDocument.Error.None_
+    points = reader.pagePointSize(0)
+    page = reader.render(0, QSize(round(points.width() * 2), round(points.height() * 2)))
+    _assert_red_text_is_right_aligned(page, node, component)
+    reader.close()
+
+
+@pytest.mark.ui
+@pytest.mark.parametrize("html", (
+    "Plain text",
+    "<b>Plain text</b>",
+    "<span>Plain text</span>",
+    "<p>Plain text</p>",
+    "<ul><li>Plain text</li></ul>",
+    "<table><tr><td>Plain text</td></tr></table>",
+))
+@pytest.mark.parametrize("color", ("#FF0000", "#80FF0000"))
+def test_text_defaults_color_and_alignment_apply_to_rendered_html(tmp_path: Path, html: str, color: str) -> None:
+    ensure_gui_application()
+    from componentpress.rendering.html_document import prepare_html
+    from componentpress.rendering.resources import ProjectResourceLoader
+
+    root = tmp_path / "game"
+    node = HtmlNode(
+        id="text", name="Text", type="html", x_mm=0, y_mm=0, width_mm=60, height_mm=12,
+        font_family="Arial", font_size_pt=14, color=color, text_align="right", html=html,
+    )
+    prepared = prepare_html(node, html, ProjectResourceLoader(root), root / "components/card.yaml")
+    cursor = prepared.document.find("Plain text")
+    assert not cursor.isNull()
+    assert cursor.charFormat().foreground().color() == QColor(color)
+    assert cursor.block().blockFormat().alignment() & Qt.AlignmentFlag.AlignRight
+
+    image = QImage(int(prepared.width_px) + 1, int(prepared.height_px) + 1, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.white)
+    painter = QPainter(image)
+    prepared.draw(painter)
+    painter.end()
+    red_pixels = [
+        (x, y) for y in range(image.height()) for x in range(image.width())
+        if (pixel := image.pixelColor(x, y)).red() > pixel.green() + 30
+        and pixel.red() > pixel.blue() + 30
+    ]
+    assert red_pixels
+    if not html.startswith("<table"):
+        assert min(x for x, _y in red_pixels) > 80

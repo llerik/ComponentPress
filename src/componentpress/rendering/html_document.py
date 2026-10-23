@@ -4,7 +4,10 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from PySide6.QtCore import QRectF, QSizeF, QUrl
-from PySide6.QtGui import QAbstractTextDocumentLayout, QColor, QFont, QImage, QPainter, QTextDocument, QTextOption
+from PySide6.QtGui import (
+    QAbstractTextDocumentLayout, QColor, QFont, QImage, QPainter, QTextCharFormat,
+    QTextCursor, QTextDocument, QTextFormat, QTextOption,
+)
 from PySide6.QtCore import Qt
 
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
@@ -39,6 +42,42 @@ def _resource_path(source: str, owner: Path, field: str) -> str:
     return value
 
 
+def _apply_default_alignment(block, node: HtmlNode, cursor: QTextCursor) -> None:
+    alignment = {
+        "left": Qt.AlignmentFlag.AlignLeft,
+        "center": Qt.AlignmentFlag.AlignHCenter,
+        "right": Qt.AlignmentFlag.AlignRight,
+    }[node.text_align]
+    block_format = block.blockFormat()
+    if not block_format.hasProperty(QTextFormat.Property.BlockAlignment):
+        block_format.setAlignment(alignment)
+        cursor.setPosition(block.position())
+        cursor.setBlockFormat(block_format)
+
+
+def _apply_default_color(block, color: QColor, cursor: QTextCursor) -> None:
+    iterator = block.begin()
+    while not iterator.atEnd():
+        fragment = iterator.fragment()
+        if fragment.isValid() and not fragment.charFormat().hasProperty(QTextFormat.Property.ForegroundBrush):
+            text_format = QTextCharFormat()
+            text_format.setForeground(color)
+            cursor.setPosition(fragment.position())
+            cursor.setPosition(fragment.position() + fragment.length(), QTextCursor.MoveMode.KeepAnchor)
+            cursor.mergeCharFormat(text_format)
+        iterator += 1
+
+
+def _apply_default_text_format(document: QTextDocument, node: HtmlNode) -> None:
+    cursor = QTextCursor(document)
+    color = QColor(node.color)
+    block = document.begin()
+    while block.isValid():
+        _apply_default_alignment(block, node, cursor)
+        _apply_default_color(block, color, cursor)
+        block = block.next()
+
+
 def prepare_html(node: HtmlNode, html: str, loader: ProjectResourceLoader, owner: Path) -> PreparedHtml:
     field = f"elements.{node.id}.html"
     validate_html(html, owner, field)
@@ -61,25 +100,15 @@ def prepare_html(node: HtmlNode, html: str, loader: ProjectResourceLoader, owner
     color = QColor(node.color)
     if not color.isValid():
         raise ProjectError(Diagnostic("COLOR_INVALID", "ожидается цвет #RRGGBB или #AARRGGBB", owner, f"elements.{node.id}.color"))
-    css_color = (
-        color.name(QColor.NameFormat.HexRgb)
-        if color.alpha() == 255
-        else f"rgba({color.red()}, {color.green()}, {color.blue()}, {color.alphaF():.4f})"
-    )
-    alignment = {
-        "left": Qt.AlignmentFlag.AlignLeft,
-        "center": Qt.AlignmentFlag.AlignHCenter,
-        "right": Qt.AlignmentFlag.AlignRight,
-    }[node.text_align]
-    alignment_css = {"left": "left", "center": "center", "right": "right"}[node.text_align]
     document.setDefaultStyleSheet(
-        f"body, p {{ margin: 0; color: {css_color}; text-align: {alignment_css}; }}"
+        f"body, p {{ margin: 0; }} td, th {{ text-align: {node.text_align}; }}"
     )
     for source in html_image_sources(html):
         relative = _resource_path(source, owner, f"{field}.img.src")
         loaded = loader.image(relative, owner=owner, field=f"{field}.img.src")
         document.addResource(QTextDocument.ResourceType.ImageResource, QUrl(source), loaded.image)
     document.setHtml(html)
+    _apply_default_text_format(document, node)
     document.setDocumentMargin(0)
     document.setPageSize(QSizeF(width_px, -1))
     return PreparedHtml(document, metrics, width_px, height_px)
