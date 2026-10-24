@@ -6,7 +6,7 @@ from pathlib import Path
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 
 
-def cleanup_job_directory(store, job_id: str) -> tuple[Diagnostic, ...]:
+def cleanup_job_directory(store, job_id: str, *, keep_metadata: bool = False) -> tuple[Diagnostic, ...]:
     directory: Path = store.job_directory(job_id)
     jobs_root = store.jobs_root.resolve()
     try:
@@ -38,17 +38,24 @@ def cleanup_job_directory(store, job_id: str) -> tuple[Diagnostic, ...]:
                 if path.exists():
                     errors.append(Diagnostic("CLEANUP_PENDING", str(exc), path, severity="warning"))
     if errors:
-        try:
-            store.update(job_id, cleanup_state="cleanup_pending", cleanup_errors=[_diagnostic_text(item) for item in errors])
-        except ProjectError:
-            pass
+        if not keep_metadata:
+            _record_cleanup_errors(store, job_id, errors)
         return tuple(errors)
+    if keep_metadata:
+        return ()
     try:
         metadata.unlink(missing_ok=True)
         directory.rmdir()
     except OSError as exc:
         return (Diagnostic("CLEANUP_PENDING", str(exc), directory, severity="warning"),)
     return ()
+
+
+def _record_cleanup_errors(store, job_id: str, errors: list[Diagnostic]) -> None:
+    try:
+        store.update(job_id, cleanup_state="cleanup_pending", cleanup_errors=[_diagnostic_text(item) for item in errors])
+    except ProjectError:
+        pass
 
 
 def _diagnostic_text(diagnostic: Diagnostic) -> str:

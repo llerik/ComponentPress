@@ -109,13 +109,17 @@ class BuildEngine:
     def _cleanup_published(self, snapshot, history_written):
         if history_written:
             return self._cleanup(snapshot)
-        pending = Diagnostic("CLEANUP_PENDING", "каталог задания сохранён для повторной записи истории и очистки",
-                             snapshot.job_directory, severity="warning")
+        log_event("build.cleanup", operation="build", job_id=snapshot.job_id, phase="cleanup", status="started")
+        warnings = []
         try:
             self.store.update(snapshot.job_id, cleanup_state="cleanup_pending")
         except Exception as error:
-            return (pending, self._bookkeeping_warning("не удалось записать состояние очистки", error, snapshot.job_directory))
-        return (pending,)
+            warnings.append(self._bookkeeping_warning("не удалось записать состояние очистки", error, snapshot.job_directory))
+        cleanup = self._cleanup(snapshot, keep_metadata=True)
+        pending = Diagnostic("CLEANUP_PENDING", "", snapshot.job_directory, severity="warning",
+                             message_key="error.build_history_pending")
+        log_event("build.cleanup", operation="build", job_id=snapshot.job_id, phase="cleanup", status="cleanup_pending")
+        return (*warnings, pending, *cleanup)
 
     def _finish_failure(self, snapshot, error):
         diagnostic = self._failure_diagnostic(snapshot, error)
@@ -140,9 +144,9 @@ class BuildEngine:
             warnings.append(self._bookkeeping_warning("не удалось записать историю", error, snapshot.job_directory))
         return tuple(warnings)
 
-    def _cleanup(self, snapshot):
+    def _cleanup(self, snapshot, *, keep_metadata=False):
         try:
-            return cleanup_job_directory(self.store, snapshot.job_id)
+            return cleanup_job_directory(self.store, snapshot.job_id, keep_metadata=keep_metadata)
         except Exception as error:
             return (self._bookkeeping_warning("не удалось выполнить очистку", error, snapshot.job_directory, code="CLEANUP_PENDING"),)
 

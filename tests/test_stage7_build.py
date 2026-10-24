@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import threading
 
 import pytest
 from PySide6.QtCore import QEventLoop, QSize
@@ -27,6 +28,7 @@ from componentpress.execution.render_pool import render_instances
 from componentpress.execution.tasks import RenderInstanceTask
 from componentpress.editor.controllers import ProjectController
 from componentpress.domain.diagnostics import Diagnostic
+from componentpress.i18n.diagnostics import format_diagnostic
 from componentpress.rendering.exporter import ensure_gui_application
 
 
@@ -383,6 +385,13 @@ def test_recovery_preserves_published_result_and_unknown_metadata(tmp_path: Path
     assert any(item.code == "JOB_METADATA_INVALID" for item in diagnostics)
     assert unknown.exists()
 
+    non_object = root / ".componentpress" / "jobs" / "non-object"
+    non_object.mkdir()
+    (non_object / "job.json").write_text("[]", encoding="utf-8")
+    diagnostics = JobStore(root).recover()
+    assert any(item.code == "JOB_METADATA_INVALID" for item in diagnostics)
+    assert non_object.exists()
+
 
 def test_recovery_does_not_delete_live_owned_job(tmp_path: Path) -> None:
     root = tmp_path / "project"
@@ -445,25 +454,176 @@ def test_post_publish_history_failure_is_successful_and_recoverable(
         source,
         job_id=job_id,
         job_directory=directory,
-        component_ids=("event-card",),
+        component_ids=("forest-card",),
+        memory_budget_bytes=0,
         max_render_workers=1,
     )
+    spilled_resources = tuple((directory / "resources").rglob("*"))
+    assert spilled_resources
+    assert all(path.is_file() for path in spilled_resources)
     monkeypatch.setattr(store, "save_history", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("history busy")))
+    render_started, render_release = threading.Event(), threading.Event()
+
+    def render_after_barrier(active_snapshot, cancellation, progress):
+        assert all(path.is_file() for path in spilled_resources)
+        render_started.set()
+        if not render_release.wait(10):
+            raise TimeoutError("render barrier was not released")
+        render_instances(active_snapshot, cancellation, progress)
+
+    results = []
+    worker = threading.Thread(target=lambda: results.append(
+        BuildEngine(store, render_after_barrier).execute(snapshot, CancellationToken(), lambda _progress: None)
+    ))
     try:
-        result = BuildEngine(store, render_instances).execute(snapshot, CancellationToken(), lambda _progress: None)
+        worker.start()
+        assert render_started.wait(10)
+        assert all(path.is_file() for path in spilled_resources)
     finally:
+        render_release.set()
+        worker.join(30)
         for font_id in reversed(snapshot.registered_font_ids):
             QFontDatabase.removeApplicationFont(font_id)
         store.release(job_id)
+    assert not worker.is_alive()
+    result = results[0]
     assert result.status == "succeeded"
     assert result.cleanup_state == "cleanup_pending"
     assert result.output_directory is not None and JobStore.verify_published(result.output_directory, job_id)
     assert any(item.code == "BUILD_BOOKKEEPING_FAILED" for item in result.diagnostics)
     assert any(item.code == "CLEANUP_PENDING" for item in result.diagnostics)
     assert directory.exists()
+    assert not any((directory / "resources").rglob("*"))
+    metadata = store.read(job_id)
+    assert metadata["output_directory"] == result.output_directory.relative_to(root).as_posix()
+    assert metadata["cleanup_state"] == "cleanup_pending"
     recovered = JobStore(root).recover()
     assert any(item.code == "BUILD_RECOVERED" for item in recovered)
     assert not directory.exists()
+
+
+def test_recovery_releases_spill_on_history_failure_and_retries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    owner = JobStore(root)
+    job_id = "recovery-history"
+    directory = owner.initialize(job_id, "project")
+    spill = directory / "resources" / "image.bin"
+    spill.parent.mkdir()
+    spill.write_bytes(b"x" * 1024 * 1024)
+    output = root / "output" / "build-recovery-history"
+    output.mkdir(parents=True)
+    pdf = output / "print.pdf"
+    pdf.write_bytes(b"published pdf")
+    (output / "build-report.json").write_text(json.dumps({
+        "job_id": job_id, "complete": True, "output_hashes": {"print.pdf": _hash(pdf)},
+    }), encoding="utf-8")
+    owner.update(job_id, phase="publishing", output_directory=output.relative_to(root).as_posix())
+    owner.release(job_id)
+
+    original_unlink = Path.unlink
+    fail_once = True
+
+    def unlink_once(path: Path, *args, **kwargs):
+        nonlocal fail_once
+        if path == spill and fail_once:
+            fail_once = False
+            raise PermissionError("file is in use")
+        return original_unlink(path, *args, **kwargs)
+
+    def fail_history(_self, _job_id, _payload):
+        raise OSError("history busy")
+
+    original_save_history = JobStore.save_history
+    monkeypatch.setattr(Path, "unlink", unlink_once)
+    monkeypatch.setattr(JobStore, "save_history", fail_history)
+    first = JobStore(root).recover()
+    assert any(item.code == "JOB_HISTORY_FAILED" for item in first)
+    assert any(item.code == "CLEANUP_PENDING" for item in first)
+    history_warning = next(item for item in first if item.code == "JOB_HISTORY_FAILED")
+    assert "История сборки" in format_diagnostic(history_warning, locale="ru")
+    assert "Build history" in format_diagnostic(history_warning, locale="en")
+    assert spill.is_file() and directory.exists()
+    assert JobStore.verify_published(output, job_id)
+
+    monkeypatch.setattr(Path, "unlink", original_unlink)
+    second = JobStore(root).recover()
+    assert any(item.code == "JOB_HISTORY_FAILED" for item in second)
+    assert not spill.exists() and directory.exists()
+    assert JobStore.verify_published(output, job_id)
+
+    monkeypatch.setattr(JobStore, "save_history", original_save_history)
+    third = JobStore(root).recover()
+    assert any(item.code == "BUILD_RECOVERED" for item in third)
+    assert not directory.exists()
+    history = json.loads((root / ".componentpress" / "build-history" / f"{job_id}.json").read_text(encoding="utf-8"))
+    assert history["status"] == "succeeded"
+    assert history["output_directory"] == output.relative_to(root).as_posix()
+    assert JobStore.verify_published(output, job_id)
+
+
+def test_recovery_rereads_metadata_after_acquiring_job_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    owner = JobStore(root)
+    job_id = "recovery-race"
+    directory = owner.initialize(job_id, "project")
+    stale_metadata = owner.read(job_id)
+    output = root / "output" / "build-recovery-race"
+    output.mkdir(parents=True)
+    pdf = output / "print.pdf"
+    pdf.write_bytes(b"published pdf")
+    (output / "build-report.json").write_text(json.dumps({
+        "job_id": job_id, "complete": True, "output_hashes": {"print.pdf": _hash(pdf)},
+    }), encoding="utf-8")
+    recovery = JobStore(root)
+    original_read = JobStore.read
+    returned_stale_metadata = False
+
+    def complete_owner_after_read(store: JobStore, target_job_id: str):
+        nonlocal returned_stale_metadata
+        metadata = original_read(store, target_job_id)
+        if store is recovery and not returned_stale_metadata:
+            returned_stale_metadata = True
+            owner.update(job_id, phase="publishing", output_directory=output.relative_to(root).as_posix())
+            owner.release(job_id)
+            return stale_metadata
+        return metadata
+
+    monkeypatch.setattr(JobStore, "read", complete_owner_after_read)
+    diagnostics = recovery.recover()
+    assert returned_stale_metadata
+    assert any(item.code == "BUILD_RECOVERED" for item in diagnostics)
+    assert output.is_dir() and not directory.exists()
+    history = json.loads((root / ".componentpress" / "build-history" / f"{job_id}.json").read_text(encoding="utf-8"))
+    assert history["status"] == "succeeded"
+
+
+def test_recovery_preserves_metadata_that_becomes_invalid_before_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    owner = JobStore(root)
+    job_id = "recovery-invalid"
+    directory = owner.initialize(job_id, "project")
+    recovery = JobStore(root)
+    original_read = JobStore.read
+    returned_stale_metadata = False
+
+    def corrupt_after_read(store: JobStore, target_job_id: str):
+        nonlocal returned_stale_metadata
+        metadata = original_read(store, target_job_id)
+        if store is recovery and not returned_stale_metadata:
+            returned_stale_metadata = True
+            (directory / "job.json").write_text("broken", encoding="utf-8")
+            owner.release(job_id)
+        return metadata
+
+    monkeypatch.setattr(JobStore, "read", corrupt_after_read)
+    diagnostics = recovery.recover()
+    assert returned_stale_metadata
+    assert any(item.code == "JOB_METADATA_INVALID" for item in diagnostics)
+    assert directory.exists()
+    assert (directory / "job.json").read_text(encoding="utf-8") == "broken"
 
 
 def test_unused_broken_project_font_does_not_block_build(tmp_path: Path) -> None:

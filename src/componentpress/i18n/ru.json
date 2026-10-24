@@ -138,6 +138,7 @@
   "error.project_settings_invalid": "Проверьте настройки проекта: некоторые значения недопустимы.",
   "error.archive_cleanup_pending": "Архив сохранён, но служебный журнал не удалось удалить.",
   "error.archive_export_pending": "Архив опубликован, но завершение экспорта требует внимания.",
+  "error.build_history_pending": "История сборки недоступна; временные данные очищены, восстановление повторится.",
   "error.png_export_failed": "Не удалось создать ZIP-архив",
   "about.restart": "Новый язык интерфейса будет применён после перезапуска ComponentPress.",
   "about.dependencies": "Зависимости: {dependencies}",

@@ -138,6 +138,7 @@
   "error.project_settings_invalid": "Check the project settings: some values are invalid.",
   "error.archive_cleanup_pending": "The archive was saved, but its operation journal could not be removed.",
   "error.archive_export_pending": "The archive was published, but export completion needs attention.",
+  "error.build_history_pending": "Build history is unavailable; temporary data was cleared and recovery will retry.",
   "error.png_export_failed": "Could not create the ZIP archive",
   "about.restart": "Restart ComponentPress to apply the new interface language.",
   "about.dependencies": "Dependencies: {dependencies}",

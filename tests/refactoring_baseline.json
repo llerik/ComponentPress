@@ -367,14 +367,6 @@
       "stage": "9а",
       "owner": "coder:src/componentpress/execution"
     },
-    "src/componentpress/execution/job_store.py|JobStore.recover": {
-      "path": "src/componentpress/execution/job_store.py",
-      "name": "JobStore.recover",
-      "line": 149,
-      "length": 66,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/execution"
-    },
     "src/componentpress/execution/tasks.py|RenderInstanceTask.run": {
       "path": "src/componentpress/execution/tasks.py",
       "name": "RenderInstanceTask.run",

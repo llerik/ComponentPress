@@ -76,7 +76,7 @@ class JobStore:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ProjectError(Diagnostic("JOB_METADATA_INVALID", "повреждены метаданные задания", path)) from exc
-        if value.get("metadata_version") != self.METADATA_VERSION or value.get("job_id") != job_id:
+        if not isinstance(value, dict) or value.get("metadata_version") != self.METADATA_VERSION or value.get("job_id") != job_id:
             raise ProjectError(Diagnostic("JOB_METADATA_INVALID", "неподдерживаемые метаданные задания", path))
         return value
 
@@ -148,8 +148,6 @@ class JobStore:
 
     def recover(self) -> tuple[Diagnostic, ...]:
         """Clean only valid, exclusively owned old jobs; unknown data is preserved."""
-        from .cleanup import cleanup_job_directory
-
         diagnostics: list[Diagnostic] = []
         if not self.jobs_root.exists():
             return ()
@@ -158,57 +156,86 @@ class JobStore:
                 continue
             job_id = directory.name
             try:
-                metadata = self.read(job_id)
+                self.read(job_id)
             except ProjectError as exc:
                 diagnostics.append(exc.diagnostic)
                 continue
-            lock = QLockFile(str(self.locks_root / f"{job_id}.lock"))
-            lock.setStaleLockTime(0)
-            if not lock.tryLock(0):
-                diagnostics.append(Diagnostic("JOB_OWNER_UNKNOWN", "каталог задания занят или владелец неоднозначен", directory, severity="warning"))
-                continue
-            try:
-                output_value = metadata.get("output_directory")
-                output = (self.root / Path(output_value)).resolve() if isinstance(output_value, str) else None
-                published = bool(output and output.is_relative_to((self.root / "output").resolve()) and self.verify_published(output, job_id))
-                status = "succeeded" if published else "interrupted"
-                try:
-                    self.save_history(job_id, {
-                        "job_id": job_id,
-                        "status": status,
-                        "output_directory": output_value if published else None,
-                        "diagnostics": [] if published else ["BUILD_INTERRUPTED"],
-                    })
-                except Exception as exc:
-                    message = exc.diagnostic.message if isinstance(exc, ProjectError) else str(exc)
-                    diagnostics.append(Diagnostic(
-                        "JOB_HISTORY_FAILED",
-                        f"не удалось сохранить историю восстановления; каталог задания оставлен для повтора: {message}",
-                        directory,
-                        severity="warning",
-                    ))
-                    try:
-                        self.update(job_id, cleanup_state="cleanup_pending")
-                    except ProjectError:
-                        pass
-                    continue
-                cleanup = cleanup_job_directory(self, job_id)
-                diagnostics.extend(cleanup)
-                cleanup_pending = bool(cleanup)
-                diagnostics.append(Diagnostic(
-                    "BUILD_RECOVERED" if published else "BUILD_INTERRUPTED",
-                    (
-                        "опубликованный результат сохранён; очистка временных остатков ожидает повтора"
-                        if published and cleanup_pending else
-                        "опубликованный результат сохранён, временные остатки очищены"
-                        if published else
-                        "прерванное задание сохранено для повторной очистки без автоматического запуска"
-                        if cleanup_pending else
-                        "прерванное задание очищено без автоматического повтора"
-                    ),
-                    directory,
-                    severity="warning",
-                ))
-            finally:
-                lock.unlock()
+            diagnostics.extend(self._recover_owned_job(job_id, directory))
         return tuple(diagnostics)
+
+    def _recover_owned_job(self, job_id: str, directory: Path) -> tuple[Diagnostic, ...]:
+        lock = QLockFile(str(self.locks_root / f"{job_id}.lock"))
+        lock.setStaleLockTime(0)
+        if not lock.tryLock(0):
+            return (Diagnostic("JOB_OWNER_UNKNOWN", "каталог задания занят или владелец неоднозначен", directory, severity="warning"),)
+        try:
+            return self._recover_locked_job(job_id, directory)
+        finally:
+            lock.unlock()
+
+    def _recover_locked_job(self, job_id: str, directory: Path) -> tuple[Diagnostic, ...]:
+        try:
+            metadata = self.read(job_id)
+        except ProjectError as exc:
+            return (exc.diagnostic,)
+        output_value = metadata.get("output_directory")
+        output = self._published_output(output_value, job_id)
+        return self._record_recovery(job_id, directory, output_value, output is not None)
+
+    def _record_recovery(self, job_id: str, directory: Path, output_value: Any,
+                         published: bool) -> tuple[Diagnostic, ...]:
+        from .cleanup import cleanup_job_directory
+        from componentpress.diagnostics.logging import log_event
+
+        log_event("build.recovery", operation="build", job_id=job_id, phase="cleanup", status="started")
+        status = "succeeded" if published else "interrupted"
+        try:
+            self.save_history(job_id, {
+                "job_id": job_id, "status": status,
+                "output_directory": output_value if published else None,
+                "diagnostics": [] if published else ["BUILD_INTERRUPTED"],
+            })
+        except Exception:
+            return self._recovery_history_unavailable(job_id, directory, published)
+        cleanup = cleanup_job_directory(self, job_id)
+        return self._recovery_finished(job_id, directory, published, bool(cleanup), cleanup)
+
+    def _published_output(self, output_value: Any, job_id: str) -> Path | None:
+        if not isinstance(output_value, str):
+            return None
+        try:
+            output = (self.root / Path(output_value)).resolve()
+            output_root = (self.root / "output").resolve()
+            return output if output.is_relative_to(output_root) and self.verify_published(output, job_id) else None
+        except (OSError, RuntimeError, ValueError):
+            return None
+
+    def _recovery_history_unavailable(self, job_id: str, directory: Path, published: bool) -> tuple[Diagnostic, ...]:
+        from .cleanup import cleanup_job_directory
+        from componentpress.diagnostics.logging import log_event
+
+        cleanup = cleanup_job_directory(self, job_id, keep_metadata=True) if published else ()
+        pending = Diagnostic("JOB_HISTORY_FAILED", "", directory, severity="warning",
+                             message_key="error.build_history_pending")
+        log_event("build.recovery", operation="build", job_id=job_id, phase="cleanup", status="cleanup_pending")
+        return (pending, *cleanup)
+
+    @staticmethod
+    def _recovery_finished(job_id: str, directory: Path, published: bool,
+                           cleanup_pending: bool, cleanup: tuple[Diagnostic, ...]) -> tuple[Diagnostic, ...]:
+        from componentpress.diagnostics.logging import log_event
+
+        log_event("build.recovery", operation="build", job_id=job_id, phase="cleanup",
+                  status="cleanup_pending" if cleanup_pending else "succeeded")
+        message = (
+            "опубликованный результат сохранён; очистка временных остатков ожидает повтора"
+            if published and cleanup_pending else
+            "опубликованный результат сохранён, временные остатки очищены"
+            if published else
+            "прерванное задание сохранено для повторной очистки без автоматического запуска"
+            if cleanup_pending else
+            "прерванное задание очищено без автоматического повтора"
+        )
+        result = Diagnostic("BUILD_RECOVERED" if published else "BUILD_INTERRUPTED", message,
+                            directory, severity="warning")
+        return (*cleanup, result)
