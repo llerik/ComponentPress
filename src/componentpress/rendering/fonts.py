@@ -18,31 +18,51 @@ class ProjectFonts:
         folder = self.root / "assets" / "fonts"
         if not folder.exists():
             return
-        candidates = captured
-        if candidates is None:
-            files = []
-            for path in sorted(folder.rglob("*")):
-                if path.is_symlink():
-                    raise ProjectError(Diagnostic("PATH_SYMLINK", "символические ссылки шрифтов не поддерживаются", path))
-                if path.is_file() and path.suffix.lower() in (".ttf", ".otf"):
-                    try:
-                        files.append((path, path.read_bytes()))
-                    except OSError as exc:
-                        raise ProjectError(Diagnostic("FILE_READ", str(exc), path)) from exc
-            candidates = tuple(files)
-        for path, data in candidates:
-            if not path.is_relative_to(folder):
-                raise ProjectError(Diagnostic("PATH_ESCAPE", "шрифт находится вне каталога проекта", path))
-            if self.families is not None:
-                from PySide6.QtGui import QRawFont
+        try:
+            for path, data in self._candidates(folder, captured):
+                self._register_candidate(path, data, folder)
+        except Exception:
+            try:
+                self.close()
+            except Exception:
+                pass
+            raise
 
-                candidate = QRawFont(QByteArray(data), 16.0)
-                if not candidate.isValid() or candidate.familyName().casefold() not in self.families:
-                    continue
-            font_id = QFontDatabase.addApplicationFontFromData(QByteArray(data))
-            if font_id < 0:
-                raise ProjectError(Diagnostic("FONT_INVALID", "не удалось зарегистрировать шрифт", path))
-            self._ids.append(font_id)
+    def _candidates(self, folder: Path, captured: tuple[tuple[Path, bytes], ...] | None) -> tuple[tuple[Path, bytes], ...]:
+        if captured is not None:
+            return captured
+        candidates = []
+        for path in sorted(folder.rglob("*")):
+            if path.is_symlink():
+                raise ProjectError(Diagnostic("PATH_SYMLINK", "символические ссылки шрифтов не поддерживаются", path))
+            if path.is_file() and path.suffix.lower() in (".ttf", ".otf"):
+                candidates.append(self._read_font(path))
+        return tuple(candidates)
+
+    @staticmethod
+    def _read_font(path: Path) -> tuple[Path, bytes]:
+        try:
+            return path, path.read_bytes()
+        except OSError as exc:
+            raise ProjectError(Diagnostic("FILE_READ", str(exc), path)) from exc
+
+    def _register_candidate(self, path: Path, data: bytes, folder: Path) -> None:
+        if not path.is_relative_to(folder):
+            raise ProjectError(Diagnostic("PATH_ESCAPE", "шрифт находится вне каталога проекта", path))
+        if self.families is None or self._matches_family(data):
+            self._register_font(path, data)
+
+    def _matches_family(self, data: bytes) -> bool:
+        from PySide6.QtGui import QRawFont
+
+        candidate = QRawFont(QByteArray(data), 16.0)
+        return candidate.isValid() and candidate.familyName().casefold() in self.families
+
+    def _register_font(self, path: Path, data: bytes) -> None:
+        font_id = QFontDatabase.addApplicationFontFromData(QByteArray(data))
+        if font_id < 0:
+            raise ProjectError(Diagnostic("FONT_INVALID", "не удалось зарегистрировать шрифт", path))
+        self._ids.append(font_id)
 
     def register_captured(self, captured: tuple[tuple[Path, bytes], ...]) -> None:
         self.register(captured)

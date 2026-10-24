@@ -78,16 +78,15 @@ def _apply_default_text_format(document: QTextDocument, node: HtmlNode) -> None:
         block = block.next()
 
 
-def prepare_html(node: HtmlNode, html: str, loader: ProjectResourceLoader, owner: Path) -> PreparedHtml:
-    field = f"elements.{node.id}.html"
-    validate_html(html, owner, field)
-
-    width_px = mm_to_html_pixels(node.width_mm)
-    height_px = mm_to_html_pixels(node.height_mm)
+def _metrics_device() -> QImage:
     metrics = QImage(1, 1, QImage.Format.Format_ARGB32_Premultiplied)
     dpm = round(HTML_DPI / 0.0254)
     metrics.setDotsPerMeterX(dpm)
     metrics.setDotsPerMeterY(dpm)
+    return metrics
+
+
+def _text_document(node: HtmlNode, metrics: QImage) -> QTextDocument:
     document = QTextDocument()
     document.documentLayout().setPaintDevice(metrics)
     document.setUseDesignMetrics(True)
@@ -97,18 +96,41 @@ def prepare_html(node: HtmlNode, html: str, loader: ProjectResourceLoader, owner
     option = document.defaultTextOption()
     option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
     document.setDefaultTextOption(option)
+    return document
+
+
+def _validate_default_color(node: HtmlNode, owner: Path) -> None:
     color = QColor(node.color)
     if not color.isValid():
         raise ProjectError(Diagnostic("COLOR_INVALID", "ожидается цвет #RRGGBB или #AARRGGBB", owner, f"elements.{node.id}.color"))
-    document.setDefaultStyleSheet(
-        f"body, p {{ margin: 0; }} td, th {{ text-align: {node.text_align}; }}"
-    )
+
+
+def _load_inline_images(document: QTextDocument, html: str, node: HtmlNode,
+                        loader: ProjectResourceLoader, owner: Path) -> None:
+    field = f"elements.{node.id}.html"
     for source in html_image_sources(html):
         relative = _resource_path(source, owner, f"{field}.img.src")
         loaded = loader.image(relative, owner=owner, field=f"{field}.img.src")
         document.addResource(QTextDocument.ResourceType.ImageResource, QUrl(source), loaded.image)
+
+
+def _finish_document(document: QTextDocument, node: HtmlNode, html: str,
+                     loader: ProjectResourceLoader, owner: Path) -> None:
+    document.setDefaultStyleSheet(
+        f"body, p {{ margin: 0; }} td, th {{ text-align: {node.text_align}; }}"
+    )
+    _load_inline_images(document, html, node, loader, owner)
     document.setHtml(html)
     _apply_default_text_format(document, node)
     document.setDocumentMargin(0)
+
+
+def prepare_html(node: HtmlNode, html: str, loader: ProjectResourceLoader, owner: Path) -> PreparedHtml:
+    validate_html(html, owner, f"elements.{node.id}.html")
+    width_px, height_px = mm_to_html_pixels(node.width_mm), mm_to_html_pixels(node.height_mm)
+    metrics = _metrics_device()
+    document = _text_document(node, metrics)
+    _validate_default_color(node, owner)
+    _finish_document(document, node, html, loader, owner)
     document.setPageSize(QSizeF(width_px, -1))
     return PreparedHtml(document, metrics, width_px, height_px)

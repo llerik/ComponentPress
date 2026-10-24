@@ -8,7 +8,7 @@ from PySide6.QtCore import QMarginsF, QRectF, QSizeF
 from PySide6.QtGui import QGuiApplication, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter
 from PySide6.QtWidgets import QApplication
 
-from componentpress.application.contracts import ProjectSnapshot, RenderResult
+from componentpress.application.contracts import DocumentSnapshot, ProjectSnapshot, RenderResult
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.domain.nodes import GroupNode, HtmlNode, Node
@@ -55,25 +55,7 @@ def _save_pdf(image: QImage, target: Path, width_mm: float, height_mm: float, dp
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = _temporary_path(target)
     try:
-        writer = QPdfWriter(str(temporary))
-        writer.setResolution(dpi)
-        page = QPageSize(
-            QSizeF(width_mm, height_mm),
-            QPageSize.Unit.Millimeter,
-            "Component",
-            QPageSize.SizeMatchPolicy.ExactMatch,
-        )
-        writer.setPageSize(page)
-        writer.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout.Unit.Millimeter)
-        painter = QPainter(writer)
-        if not painter.isActive():
-            raise ProjectError(Diagnostic("PDF_WRITE", "Qt не смог начать запись PDF", target))
-        try:
-            painter.setRenderHint(QPainter.RenderHint.LosslessImageRendering, True)
-            target_rect = QRectF(0, 0, writer.width(), writer.height())
-            painter.drawImage(target_rect, image)
-        finally:
-            painter.end()
+        _write_pdf(image, temporary, target, width_mm, height_mm, dpi)
         os.replace(temporary, target)
     except ProjectError:
         raise
@@ -81,6 +63,86 @@ def _save_pdf(image: QImage, target: Path, width_mm: float, height_mm: float, dp
         raise ProjectError(Diagnostic("FILE_WRITE", str(exc), target)) from exc
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _write_pdf(image: QImage, temporary: Path, target: Path,
+               width_mm: float, height_mm: float, dpi: int) -> None:
+    writer = QPdfWriter(str(temporary))
+    writer.setResolution(dpi)
+    page = QPageSize(QSizeF(width_mm, height_mm), QPageSize.Unit.Millimeter,
+                     "Component", QPageSize.SizeMatchPolicy.ExactMatch)
+    writer.setPageSize(page)
+    writer.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout.Unit.Millimeter)
+    painter = QPainter(writer)
+    if not painter.isActive():
+        raise ProjectError(Diagnostic("PDF_WRITE", "Qt не смог начать запись PDF", target))
+    try:
+        painter.setRenderHint(QPainter.RenderHint.LosslessImageRendering, True)
+        painter.drawImage(QRectF(0, 0, writer.width(), writer.height()), image)
+    finally:
+        painter.end()
+
+
+def _render_document(snapshot: ProjectSnapshot, component_id: str) -> DocumentSnapshot:
+    document = snapshot.documents.get(component_id)
+    if document is None:
+        raise ProjectError(Diagnostic("COMPONENT_UNKNOWN", "компонент не найден", snapshot.root))
+    return document
+
+
+def _render_inputs(snapshot: ProjectSnapshot, component_id: str,
+                   component: ComponentDefinition | None, dpi: int,
+                   resolved: bool | None) -> tuple[DocumentSnapshot, ComponentDefinition, bool]:
+    document = _render_document(snapshot, component_id)
+    if dpi <= 0:
+        raise ProjectError(Diagnostic("DPI_INVALID", "DPI должен быть положительным", document.path))
+    rendered = component if component is not None else document.model
+    return document, rendered, component is not None if resolved is None else resolved
+
+
+def _new_raster(component: ComponentDefinition, dpi: int) -> QImage:
+    image = QImage(pixel_size(component.size_mm.width, component.size_mm.height, dpi), QImage.Format.Format_ARGB32_Premultiplied)
+    image.setDotsPerMeterX(round(dpi / 0.0254))
+    image.setDotsPerMeterY(round(dpi / 0.0254))
+    image.fill(0)
+    return image
+
+
+def _check_node_fonts(nodes: tuple[Node, ...], fonts: ProjectFonts, owner: Path) -> None:
+    for node in nodes:
+        if isinstance(node, HtmlNode):
+            fonts.require(node.font_family, owner=owner, field=f"elements.{node.id}.font_family")
+        elif isinstance(node, GroupNode):
+            _check_node_fonts(node.children, fonts, owner)
+
+
+def _paint_image(image: QImage, rendered: ComponentDefinition, loader: ProjectResourceLoader,
+                 owner: Path, variables: dict[str, str], dpi: int, resolved: bool,
+                 preserve_logical_size: bool) -> None:
+    painter = QPainter(image)
+    if not painter.isActive():
+        raise ProjectError(Diagnostic("RENDER_INIT", "не удалось создать растровый холст", owner))
+    try:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.scale(dpi / MM_PER_INCH, dpi / MM_PER_INCH)
+        paint_component(painter, rendered, loader, owner, variables, bindings_resolved=resolved)
+    finally:
+        painter.end()
+    if preserve_logical_size:
+        image.setDevicePixelRatio(dpi / 96.0)
+
+
+def _render_with_fonts(image: QImage, rendered: ComponentDefinition, loader: ProjectResourceLoader,
+                       project_root: Path,
+                       owner: Path, variables: dict[str, str], dpi: int,
+                       resolved: bool, register_fonts: bool, preserve_logical_size: bool) -> None:
+    if register_fonts:
+        with ProjectFonts(project_root) as fonts:
+            _check_node_fonts(rendered.elements, fonts, owner)
+            _paint_image(image, rendered, loader, owner, variables, dpi, resolved, preserve_logical_size)
+    else:
+        _paint_image(image, rendered, loader, owner, variables, dpi, resolved, preserve_logical_size)
 
 
 def render_component_image(
@@ -96,54 +158,11 @@ def render_component_image(
 ) -> QImage:
     """Render an unpublished image for the editor or other in-memory previews."""
     ensure_gui_application()
-    document = snapshot.documents.get(component_id)
-    if document is None:
-        raise ProjectError(Diagnostic("COMPONENT_UNKNOWN", "компонент не найден", snapshot.root))
-    if dpi <= 0:
-        raise ProjectError(Diagnostic("DPI_INVALID", "DPI должен быть положительным", document.path))
-    rendered = component if component is not None else document.model
-    if bindings_resolved is None:
-        # An explicitly supplied component is a ready-to-render value (normally
-        # produced by PreviewService). The document model remains a template.
-        bindings_resolved = component is not None
-    size = pixel_size(rendered.size_mm.width, rendered.size_mm.height, dpi)
-    image = QImage(size, QImage.Format.Format_ARGB32_Premultiplied)
-    dpm = round(dpi / 0.0254)
-    image.setDotsPerMeterX(dpm)
-    image.setDotsPerMeterY(dpm)
-    # Apply the editor's logical pixel ratio after painting so the backing
-    # resolution improves the image without scaling its scene geometry.
-    image.fill(0)
+    document, rendered, resolved = _render_inputs(snapshot, component_id, component, dpi, bindings_resolved)
+    image = _new_raster(rendered, dpi)
     loader = resource_loader or ProjectResourceLoader(snapshot.root)
-    def draw(fonts: ProjectFonts | None) -> None:
-        def check_fonts(nodes: tuple[Node, ...]) -> None:
-            for node in nodes:
-                if isinstance(node, HtmlNode):
-                    fonts.require(node.font_family, owner=document.path, field=f"elements.{node.id}.font_family")
-                elif isinstance(node, GroupNode):
-                    check_fonts(node.children)
-        if fonts is not None:
-            check_fonts(rendered.elements)
-        painter = QPainter(image)
-        if not painter.isActive():
-            raise ProjectError(Diagnostic("RENDER_INIT", "не удалось создать растровый холст", document.path))
-        try:
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-            painter.scale(dpi / MM_PER_INCH, dpi / MM_PER_INCH)
-            paint_component(
-                painter, rendered, loader, document.path, snapshot.model.variables,
-                bindings_resolved=bindings_resolved,
-            )
-        finally:
-            painter.end()
-        if preserve_logical_size:
-            image.setDevicePixelRatio(dpi / 96.0)
-    if register_fonts:
-        with ProjectFonts(snapshot.root) as fonts:
-            draw(fonts)
-    else:
-        draw(None)
+    _render_with_fonts(image, rendered, loader, snapshot.root, document.path,
+                       snapshot.model.variables, dpi, resolved, register_fonts, preserve_logical_size)
     return image
 
 

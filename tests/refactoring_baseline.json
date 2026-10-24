@@ -519,110 +519,6 @@
       "stage": "9б",
       "owner": "coder:src/componentpress/project_io"
     },
-    "src/componentpress/rendering/exporter.py|_save_pdf": {
-      "path": "src/componentpress/rendering/exporter.py",
-      "name": "_save_pdf",
-      "line": 54,
-      "length": 30,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "src/componentpress/rendering/exporter.py|render_component_image": {
-      "path": "src/componentpress/rendering/exporter.py",
-      "name": "render_component_image",
-      "line": 86,
-      "length": 62,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "src/componentpress/rendering/exporter.py|render_component_image.draw": {
-      "path": "src/componentpress/rendering/exporter.py",
-      "name": "render_component_image.draw",
-      "line": 118,
-      "length": 24,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "src/componentpress/rendering/fonts.py|ProjectFonts.register": {
-      "path": "src/componentpress/rendering/fonts.py",
-      "name": "ProjectFonts.register",
-      "line": 17,
-      "length": 29,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "src/componentpress/rendering/geometry.py|image_fit_geometry": {
-      "path": "src/componentpress/rendering/geometry.py",
-      "name": "image_fit_geometry",
-      "line": 18,
-      "length": 40,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "src/componentpress/rendering/html_document.py|prepare_html": {
-      "path": "src/componentpress/rendering/html_document.py",
-      "name": "prepare_html",
-      "line": 42,
-      "length": 44,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "src/componentpress/rendering/image_quality.py|measure_component_images": {
-      "path": "src/componentpress/rendering/image_quality.py",
-      "name": "measure_component_images",
-      "line": 98,
-      "length": 61,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "src/componentpress/rendering/image_quality.py|measure_component_images.visit": {
-      "path": "src/componentpress/rendering/image_quality.py",
-      "name": "measure_component_images.visit",
-      "line": 108,
-      "length": 48,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "src/componentpress/rendering/painter.py|paint_component": {
-      "path": "src/componentpress/rendering/painter.py",
-      "name": "paint_component",
-      "line": 34,
-      "length": 71,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "src/componentpress/rendering/painter.py|paint_component.visit": {
-      "path": "src/componentpress/rendering/painter.py",
-      "name": "paint_component.visit",
-      "line": 54,
-      "length": 46,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "src/componentpress/rendering/resources.py|ProjectResourceLoader.image": {
-      "path": "src/componentpress/rendering/resources.py",
-      "name": "ProjectResourceLoader.image",
-      "line": 31,
-      "length": 40,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "src/componentpress/resources/repository.py|ResourceRepository.import_image": {
-      "path": "src/componentpress/resources/repository.py",
-      "name": "ResourceRepository.import_image",
-      "line": 38,
-      "length": 24,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/resources"
-    },
-    "src/componentpress/resources/repository.py|ResourceRepository.import_image_folder": {
-      "path": "src/componentpress/resources/repository.py",
-      "name": "ResourceRepository.import_image_folder",
-      "line": 74,
-      "length": 69,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/resources"
-    },
     "src/componentpress/user_preferences.py|load_preferences": {
       "path": "src/componentpress/user_preferences.py",
       "name": "load_preferences",
@@ -751,30 +647,6 @@
       "stage": "9а",
       "owner": "coder:src/componentpress/app_assets"
     },
-    "componentpress.bindings -> componentpress.bindings.resolver": {
-      "stage": "9а",
-      "owner": "coder:src/componentpress/bindings"
-    },
-    "componentpress.bindings.icons -> componentpress.rendering": {
-      "stage": "9а",
-      "owner": "coder:src/componentpress/bindings"
-    },
-    "componentpress.bindings.resolver -> componentpress.bindings": {
-      "stage": "8в",
-      "owner": "coder:src/componentpress/bindings"
-    },
-    "componentpress.bindings.resolver -> componentpress.bindings.icons": {
-      "stage": "8в",
-      "owner": "coder:src/componentpress/bindings"
-    },
-    "componentpress.bindings.resolver -> componentpress.rendering": {
-      "stage": "8в",
-      "owner": "coder:src/componentpress/bindings"
-    },
-    "componentpress.bindings.static -> componentpress.bindings": {
-      "stage": "9а",
-      "owner": "coder:src/componentpress/bindings"
-    },
     "componentpress.domain.geometry -> componentpress.domain.nodes": {
       "stage": "9а",
       "owner": "coder:src/componentpress/domain"
@@ -794,42 +666,6 @@
     "componentpress.editor.theme -> componentpress.app_assets": {
       "stage": "9а",
       "owner": "coder:src/componentpress/editor"
-    },
-    "componentpress.rendering -> componentpress.rendering.exporter": {
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "componentpress.rendering.exporter -> componentpress.rendering": {
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "componentpress.rendering.exporter -> componentpress.rendering.painter": {
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "componentpress.rendering.html_document -> componentpress.bindings": {
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "componentpress.rendering.html_document -> componentpress.rendering": {
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "componentpress.rendering.painter -> componentpress.bindings": {
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "componentpress.rendering.painter -> componentpress.bindings.static": {
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "componentpress.rendering.painter -> componentpress.rendering": {
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
-    },
-    "componentpress.rendering.painter -> componentpress.rendering.html_document": {
-      "stage": "9а",
-      "owner": "coder:src/componentpress/rendering"
     }
   },
   "runtime": {

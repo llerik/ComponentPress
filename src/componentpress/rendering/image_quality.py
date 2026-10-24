@@ -95,64 +95,97 @@ def _inline_path(source: str, owner: Path, node_id: str) -> str:
     return validate_relative_path(unquote(parts.path))
 
 
-def measure_component_images(
-    component: ComponentDefinition,
-    project: ProjectDefinition,
-    loader: ProjectResourceLoader,
-    owner: Path,
-    *,
-    bindings_resolved: bool = True,
-) -> tuple[ImageQuality, ...]:
+def _axis_scale(world: Affine) -> tuple[float, float]:
+    return (world.a * world.a + world.c * world.c) ** 0.5, (world.b * world.b + world.d * world.d) ** 0.5
+
+
+def _image_quality(node: ImageNode, world: Affine, loader: ProjectResourceLoader,
+                   owner: Path) -> ImageQuality | None:
+    if node.optional and not node.source:
+        return None
+    loaded = loader.image(node.source, owner=owner, field=f"elements.{node.id}.source")
+    image = loaded.image
+    geometry = image_fit_geometry(image.width(), image.height(), 0, 0, node.width_mm, node.height_mm, node.fit)
+    _x, _y, width, height, _sx, _sy, source_width, source_height = geometry
+    scale_x, scale_y = _axis_scale(world)
+    return ImageQuality(node.id, node.source, image.width(), image.height(), width, height,
+                        source_width * MM_PER_INCH / (width * scale_x),
+                        source_height * MM_PER_INCH / (height * scale_y))
+
+
+def _inline_quality(node: HtmlNode, html: str, world: Affine, loader: ProjectResourceLoader,
+                    owner: Path) -> list[ImageQuality]:
+    sources = html_image_sources(html)
+    parser = _InlineImages()
+    parser.feed(html)
+    parser.close()
+    results = []
+    for index, (source, width, height) in enumerate(parser.items):
+        results.append(_inline_item(node, source, sources, index, width, height, world, loader, owner))
+    return results
+
+
+def _inline_item(node: HtmlNode, source: str, sources: tuple[str, ...], index: int,
+                 width: str | None, height: str | None, world: Affine,
+                 loader: ProjectResourceLoader, owner: Path) -> ImageQuality:
+    relative = _inline_path(source, owner, node.id)
+    field = f"elements.{node.id}.html.img.src"
+    image = loader.image(relative, owner=owner, field=field).image
+    width_mm, height_mm = _inline_size(node, width, height, image.width(), image.height())
+    if index < len(sources) and source != sources[index]:
+        relative = _inline_path(sources[index], owner, node.id)
+        image = loader.image(relative, owner=owner, field=field).image
+    return _inline_image_quality(node, relative, width_mm, height_mm, image.width(), image.height(), world)
+
+
+def _inline_size(node: HtmlNode, width: str | None, height: str | None,
+                 pixel_width: int, pixel_height: int) -> tuple[float, float]:
+    width_mm, height_mm = _inline_mm(width, node.width_mm, pixel_width), _inline_mm(height, node.height_mm, pixel_height)
+    if width is not None and height is None:
+        height_mm = width_mm * pixel_height / pixel_width
+    elif height is not None and width is None:
+        width_mm = height_mm * pixel_width / pixel_height
+    return width_mm, height_mm
+
+
+def _inline_image_quality(node: HtmlNode, source: str, width_mm: float, height_mm: float,
+                          pixel_width: int, pixel_height: int, world: Affine) -> ImageQuality:
+    scale_x, scale_y = _axis_scale(world)
+    return ImageQuality(node.id, source, pixel_width, pixel_height, width_mm, height_mm,
+                        pixel_width * MM_PER_INCH / (width_mm * scale_x),
+                        pixel_height * MM_PER_INCH / (height_mm * scale_y))
+
+
+def _resolved_html(node: HtmlNode, project: ProjectDefinition, owner: Path, resolved: bool) -> str:
+    if resolved:
+        return node.html
+    from componentpress.bindings.static import resolve_static
+
+    return resolve_static(node.html, project.variables, html=True, owner=owner, field=f"elements.{node.id}.html")
+
+
+def _node_quality(node: Node, world: Affine, project: ProjectDefinition,
+                  loader: ProjectResourceLoader, owner: Path, resolved: bool) -> list[ImageQuality]:
+    if isinstance(node, ImageNode):
+        result = _image_quality(node, world, loader, owner)
+        return [] if result is None else [result]
+    if isinstance(node, HtmlNode):
+        return _inline_quality(node, _resolved_html(node, project, owner, resolved), world, loader, owner)
+    return []
+
+
+def _visit(nodes: tuple[Node, ...], parent: Affine, project: ProjectDefinition,
+           loader: ProjectResourceLoader, owner: Path, resolved: bool, results: list[ImageQuality]) -> None:
+    for node in nodes:
+        world = parent.then(Affine.node(node))
+        results.extend(_node_quality(node, world, project, loader, owner, resolved))
+        if isinstance(node, GroupNode):
+            _visit(node.children, world, project, loader, owner, resolved, results)
+
+
+def measure_component_images(component: ComponentDefinition, project: ProjectDefinition,
+                             loader: ProjectResourceLoader, owner: Path, *,
+                             bindings_resolved: bool = True) -> tuple[ImageQuality, ...]:
     results: list[ImageQuality] = []
-
-    def visit(nodes: tuple[Node, ...], parent: Affine) -> None:
-        for node in nodes:
-            world = parent.then(Affine.node(node))
-            if isinstance(node, ImageNode):
-                if node.optional and not node.source:
-                    continue
-                loaded = loader.image(node.source, owner=owner, field=f"elements.{node.id}.source")
-                tx, ty, tw, th, sx, sy, sw, sh = image_fit_geometry(
-                    loaded.image.width(), loaded.image.height(), 0, 0,
-                    node.width_mm, node.height_mm, node.fit,
-                )
-                del tx, ty, sx, sy
-                results.append(ImageQuality(
-                    node.id, node.source, loaded.image.width(), loaded.image.height(), tw, th,
-                    sw * MM_PER_INCH / (tw * (world.a * world.a + world.c * world.c) ** 0.5),
-                    sh * MM_PER_INCH / (th * (world.b * world.b + world.d * world.d) ** 0.5),
-                ))
-            elif isinstance(node, HtmlNode):
-                html = node.html
-                if not bindings_resolved:
-                    from componentpress.bindings.static import resolve_static
-
-                    html = resolve_static(html, project.variables, html=True, owner=owner, field=f"elements.{node.id}.html")
-                sources = html_image_sources(html)
-                parser = _InlineImages()
-                parser.feed(html)
-                parser.close()
-                for index, (source, width, height) in enumerate(parser.items):
-                    relative = _inline_path(source, owner, node.id)
-                    loaded = loader.image(relative, owner=owner, field=f"elements.{node.id}.html.img.src")
-                    pixel_width, pixel_height = loaded.image.width(), loaded.image.height()
-                    width_mm = _inline_mm(width, node.width_mm, pixel_width)
-                    height_mm = _inline_mm(height, node.height_mm, pixel_height)
-                    if width is not None and height is None:
-                        height_mm = width_mm * pixel_height / pixel_width
-                    elif height is not None and width is None:
-                        width_mm = height_mm * pixel_width / pixel_height
-                    if index < len(sources) and source != sources[index]:
-                        relative = _inline_path(sources[index], owner, node.id)
-                        loaded = loader.image(relative, owner=owner, field=f"elements.{node.id}.html.img.src")
-                        pixel_width, pixel_height = loaded.image.width(), loaded.image.height()
-                    results.append(ImageQuality(
-                        node.id, relative, pixel_width, pixel_height, width_mm, height_mm,
-                        pixel_width * MM_PER_INCH / (width_mm * (world.a * world.a + world.c * world.c) ** 0.5),
-                        pixel_height * MM_PER_INCH / (height_mm * (world.b * world.b + world.d * world.d) ** 0.5),
-                    ))
-            elif isinstance(node, GroupNode):
-                visit(node.children, world)
-
-    visit(component.elements, Affine())
+    _visit(component.elements, Affine(), project, loader, owner, bindings_resolved, results)
     return tuple(results)

@@ -17,6 +17,8 @@ from componentpress.bindings.static import resolve_static
 from componentpress.project_io.repository import FileProjectRepository
 from componentpress.rendering import render_component
 from componentpress.rendering.exporter import ensure_gui_application
+from componentpress.rendering.geometry import image_fit_geometry
+from componentpress.rendering.resources import ProjectResourceLoader
 
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "demo-game"
@@ -145,6 +147,58 @@ def test_image_fit_modes(fit: str, top: str, middle: str, tmp_path: Path) -> Non
     image = QImage(str(output))
     assert image.pixelColor(50, 5) == QColor(top)
     assert image.pixelColor(50, 50) == QColor(middle)
+
+
+def test_image_fit_geometry_centres_contain_and_crops_cover() -> None:
+    assert image_fit_geometry(200, 100, 0, 0, 20, 20, "contain") == pytest.approx(
+        (0, 5, 20, 10, 0, 0, 200, 100))
+    assert image_fit_geometry(200, 100, 0, 0, 20, 20, "cover") == pytest.approx(
+        (0, 0, 20, 20, 50, 0, 100, 100))
+    assert image_fit_geometry(200, 100, 0, 0, 20, 20, "stretch") == pytest.approx(
+        (0, 0, 20, 20, 0, 0, 200, 100))
+    with pytest.raises(ValueError, match="unsupported image fit mode"):
+        image_fit_geometry(200, 100, 0, 0, 20, 20, "unknown")
+
+
+@pytest.mark.parametrize("dimensions", [(0, 10, 10, 10), (10, 0, 10, 10), (10, 10, 0, 10)])
+def test_image_fit_rejects_non_positive_dimensions(dimensions: tuple[int, int, int, int]) -> None:
+    with pytest.raises(ValueError, match="dimensions must be positive"):
+        image_fit_geometry(dimensions[0], dimensions[1], 0, 0, dimensions[2], dimensions[3], "contain")
+
+
+def test_project_resource_cache_shares_hashes_and_evicts_lru(tmp_path: Path) -> None:
+    folder = tmp_path / "assets/images"
+    folder.mkdir(parents=True)
+    for name, color in (("first.png", "red"), ("second.png", "red"),
+                        ("green.png", "green"), ("yellow.png", "yellow")):
+        _save_color(folder / name, 8, 8, color)
+    (folder / "second.png").write_bytes((folder / "first.png").read_bytes())
+    loader = ProjectResourceLoader(tmp_path, max_cache_bytes=512)
+    first = loader.image("assets/images/first.png")
+    assert loader.image("assets/images/second.png") is first
+    green = loader.image("assets/images/green.png")
+    assert loader.image("assets/images/first.png") is first
+    loader.image("assets/images/yellow.png")
+    assert loader.image("assets/images/green.png") is not green
+
+
+def test_project_resource_cache_does_not_keep_oversized_images(tmp_path: Path) -> None:
+    folder = tmp_path / "assets/images"
+    _save_color(folder / "large.png", 8, 8, "red")
+    loader = ProjectResourceLoader(tmp_path, max_cache_bytes=1)
+    assert loader.image("assets/images/large.png") is not loader.image("assets/images/large.png")
+
+
+def test_project_resource_decode_error_keeps_owner_and_field(tmp_path: Path) -> None:
+    path = tmp_path / "assets/images/broken.png"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"not an image")
+    owner = tmp_path / "components/card.yaml"
+    with pytest.raises(ProjectError) as caught:
+        ProjectResourceLoader(tmp_path).image("assets/images/broken.png", owner=owner, field="elements.art.source")
+    assert caught.value.diagnostic.code == "RESOURCE_INVALID"
+    assert caught.value.diagnostic.path == owner
+    assert caught.value.diagnostic.field == "elements.art.source"
 
 
 def test_html_table_rowspan_colspan_and_inline_images_render_at_two_dpi(tmp_path: Path) -> None:

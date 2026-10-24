@@ -1,5 +1,6 @@
 """Tree-order painting in millimetres."""
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QRectF, Qt
@@ -18,87 +19,114 @@ from .resources import ProjectResourceLoader
 _GRADIENT_PRESET = QGradient.Preset
 
 
-def _draw_image(painter: QPainter, node: ImageNode, loader: ProjectResourceLoader, owner: Path, x: float, y: float, source: str) -> None:
-    loaded = loader.image(source, owner=owner, field=f"elements.{node.id}.source")
-    image = loaded.image
-    target = QRectF(x, y, node.width_mm, node.height_mm)
-    painter.save()
-    painter.setClipRect(target, Qt.ClipOperation.IntersectClip)
-    tx, ty, tw, th, sx, sy, sw, sh = image_fit_geometry(
-        image.width(), image.height(), x, y, node.width_mm, node.height_mm, node.fit
-    )
-    painter.drawImage(QRectF(tx, ty, tw, th), image, QRectF(sx, sy, sw, sh))
-    painter.restore()
+@dataclass
+class _ComponentPainter:
+    painter: QPainter
+    component: ComponentDefinition
+    loader: ProjectResourceLoader
+    owner: Path
+    variables: dict[str, str]
+    bindings_resolved: bool
 
+    def paint(self) -> None:
+        bounds = QRectF(0, 0, self.component.size_mm.width, self.component.size_mm.height)
+        self.painter.save()
+        try:
+            self.painter.setClipRect(bounds, Qt.ClipOperation.ReplaceClip)
+            self.painter.fillRect(bounds, QColor(self.component.background))
+            self.nodes(self.component.elements, 0, 0)
+        finally:
+            self.painter.restore()
 
-def paint_component(
-    painter: QPainter,
-    component: ComponentDefinition,
-    loader: ProjectResourceLoader,
-    owner: Path,
-    variables: dict[str, str],
-    *,
-    bindings_resolved: bool = False,
-) -> None:
-    bounds = QRectF(0, 0, component.size_mm.width, component.size_mm.height)
-    painter.save()
-    painter.setClipRect(bounds, Qt.ClipOperation.ReplaceClip)
-    painter.fillRect(bounds, QColor(component.background))
+    def nodes(self, nodes: tuple[Node, ...], offset_x: float, offset_y: float) -> None:
+        for node in nodes:
+            self.node(node, offset_x, offset_y)
 
-    def resolve(value: str, *, html: bool, field: str) -> str:
-        if bindings_resolved:
+    def node(self, node: Node, offset_x: float, offset_y: float) -> None:
+        self.painter.save()
+        try:
+            self._transform(node, offset_x, offset_y)
+            self._draw(node)
+        finally:
+            self.painter.restore()
+
+    def _transform(self, node: Node, offset_x: float, offset_y: float) -> None:
+        self.painter.translate(offset_x + node.x_mm, offset_y + node.y_mm)
+        transform = node.transform
+        matrix = QTransform(transform.m11, transform.m21, transform.m12, transform.m22, 0, 0)
+        self.painter.setTransform(matrix, True)
+
+    def _draw(self, node: Node) -> None:
+        if isinstance(node, ImageNode):
+            self._image(node)
+        elif isinstance(node, HtmlNode):
+            self._html(node)
+        elif isinstance(node, ShapeNode):
+            self._shape(node)
+        elif isinstance(node, LineNode):
+            self._line(node)
+        elif isinstance(node, ConditionalGroupNode):
+            if node.condition_matches is True:
+                self.nodes(node.children, 0, 0)
+        elif isinstance(node, GroupNode):
+            self.nodes(node.children, 0, 0)
+        else:
+            raise ProjectError(Diagnostic("NODE_UNSUPPORTED", f"тип узла {type(node).__name__} не поддерживается", self.owner))
+
+    def _resolve(self, value: str, *, html: bool, field: str) -> str:
+        if self.bindings_resolved:
             return value
         from componentpress.bindings.static import resolve_static
-        return resolve_static(value, variables, html=html, owner=owner, field=field)
 
-    def visit(nodes: tuple[Node, ...], offset_x: float, offset_y: float) -> None:
-        for node in nodes:
-            x, y = offset_x + node.x_mm, offset_y + node.y_mm
-            painter.save()
-            painter.translate(x, y)
-            transform = node.transform
-            painter.setTransform(QTransform(transform.m11, transform.m21, transform.m12, transform.m22, 0, 0), True)
-            if isinstance(node, ImageNode):
-                source = resolve(node.source, html=False, field=f"elements.{node.id}.source")
-                if source:
-                    _draw_image(painter, node, loader, owner, 0, 0, source)
-            elif isinstance(node, HtmlNode):
-                html = resolve(node.html, html=True, field=f"elements.{node.id}.html")
-                prepared = prepare_html(node, html, loader, owner)
-                painter.save()
-                painter.setClipRect(QRectF(0, 0, node.width_mm, node.height_mm), Qt.ClipOperation.IntersectClip)
-                painter.scale(MM_PER_INCH / HTML_DPI, MM_PER_INCH / HTML_DPI)
-                prepared.draw(painter)
-                painter.restore()
-            elif isinstance(node, ShapeNode):
-                painter.save()
-                style = {"solid": Qt.PenStyle.SolidLine, "dash": Qt.PenStyle.DashLine, "dot": Qt.PenStyle.DotLine}[node.stroke_style]
-                pen = QPen(QColor(node.stroke), 0, style)
-                pen.setWidthF(node.stroke_width_mm)
-                painter.setPen(pen)
-                painter.setBrush(QBrush(QColor(node.fill)) if node.fill is not None else Qt.BrushStyle.NoBrush)
-                rect = QRectF(0, 0, node.width_mm, node.height_mm)
-                if node.type == "rectangle":
-                    painter.drawRect(rect)
-                else:
-                    painter.drawEllipse(rect)
-                painter.restore()
-            elif isinstance(node, LineNode):
-                style = {"solid": Qt.PenStyle.SolidLine, "dash": Qt.PenStyle.DashLine, "dot": Qt.PenStyle.DotLine}[node.stroke_style]
-                pen = QPen(QColor(node.stroke), 0, style)
-                pen.setWidthF(node.stroke_width_mm)
-                painter.setPen(pen)
-                painter.drawLine(0, 0, node.dx_mm, node.dy_mm)
-            elif isinstance(node, ConditionalGroupNode):
-                if node.condition_matches is True:
-                    visit(node.children, 0, 0)
-            elif isinstance(node, GroupNode):
-                visit(node.children, 0, 0)
-            else:
-                raise ProjectError(Diagnostic("NODE_UNSUPPORTED", f"тип узла {type(node).__name__} не поддерживается", owner))
-            painter.restore()
+        return resolve_static(value, self.variables, html=html, owner=self.owner, field=field)
 
+    def _image(self, node: ImageNode) -> None:
+        source = self._resolve(node.source, html=False, field=f"elements.{node.id}.source")
+        if source:
+            _draw_image(self.painter, node, self.loader, self.owner, 0, 0, source)
+
+    def _html(self, node: HtmlNode) -> None:
+        html = self._resolve(node.html, html=True, field=f"elements.{node.id}.html")
+        prepared = prepare_html(node, html, self.loader, self.owner)
+        self.painter.save()
+        try:
+            self.painter.setClipRect(QRectF(0, 0, node.width_mm, node.height_mm), Qt.ClipOperation.IntersectClip)
+            self.painter.scale(MM_PER_INCH / HTML_DPI, MM_PER_INCH / HTML_DPI)
+            prepared.draw(self.painter)
+        finally:
+            self.painter.restore()
+
+    def _shape(self, node: ShapeNode) -> None:
+        self._set_pen(node.stroke, node.stroke_width_mm, node.stroke_style)
+        self.painter.setBrush(QBrush(QColor(node.fill)) if node.fill is not None else Qt.BrushStyle.NoBrush)
+        rect = QRectF(0, 0, node.width_mm, node.height_mm)
+        (self.painter.drawRect if node.type == "rectangle" else self.painter.drawEllipse)(rect)
+
+    def _line(self, node: LineNode) -> None:
+        self._set_pen(node.stroke, node.stroke_width_mm, node.stroke_style)
+        self.painter.drawLine(0, 0, node.dx_mm, node.dy_mm)
+
+    def _set_pen(self, color: str, width_mm: float, style_name: str) -> None:
+        style = {"solid": Qt.PenStyle.SolidLine, "dash": Qt.PenStyle.DashLine, "dot": Qt.PenStyle.DotLine}[style_name]
+        pen = QPen(QColor(color), 0, style)
+        pen.setWidthF(width_mm)
+        self.painter.setPen(pen)
+
+
+def _draw_image(painter: QPainter, node: ImageNode, loader: ProjectResourceLoader, owner: Path,
+                x: float, y: float, source: str) -> None:
+    image = loader.image(source, owner=owner, field=f"elements.{node.id}.source").image
+    target = QRectF(x, y, node.width_mm, node.height_mm)
+    painter.save()
     try:
-        visit(component.elements, 0, 0)
+        painter.setClipRect(target, Qt.ClipOperation.IntersectClip)
+        geometry = image_fit_geometry(image.width(), image.height(), x, y, node.width_mm, node.height_mm, node.fit)
+        tx, ty, tw, th, sx, sy, sw, sh = geometry
+        painter.drawImage(QRectF(tx, ty, tw, th), image, QRectF(sx, sy, sw, sh))
     finally:
         painter.restore()
+
+
+def paint_component(painter: QPainter, component: ComponentDefinition, loader: ProjectResourceLoader,
+                    owner: Path, variables: dict[str, str], *, bindings_resolved: bool = False) -> None:
+    _ComponentPainter(painter, component, loader, owner, variables, bindings_resolved).paint()

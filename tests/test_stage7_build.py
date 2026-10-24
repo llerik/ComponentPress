@@ -505,6 +505,25 @@ def test_broken_used_project_font_is_diagnosed(tmp_path: Path) -> None:
     assert not (root / "output").exists()
 
 
+def test_project_fonts_release_partial_registration_after_later_failure(tmp_path: Path, monkeypatch) -> None:
+    from componentpress.rendering.fonts import ProjectFonts
+
+    folder = tmp_path / "assets/fonts"
+    folder.mkdir(parents=True)
+    first, second = folder / "first.ttf", folder / "second.ttf"
+    added, removed = [], []
+    monkeypatch.setattr(QFontDatabase, "addApplicationFontFromData",
+                        lambda data: added.append(bytes(data)) or (17 if len(added) == 1 else -1))
+    monkeypatch.setattr(QFontDatabase, "removeApplicationFont", lambda font_id: removed.append(font_id) or True)
+    manager = ProjectFonts(tmp_path)
+    with pytest.raises(ProjectError) as caught:
+        manager.register(((first, b"first"), (second, b"second")))
+    assert caught.value.diagnostic.code == "FONT_INVALID"
+    assert added == [b"first", b"second"]
+    assert removed == [17]
+    assert manager._ids == []
+
+
 def test_recovery_reports_cleanup_pending_without_false_cleaned_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

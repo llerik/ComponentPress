@@ -49,10 +49,61 @@ def test_nested_methods_and_async_are_all_inventoried():
     assert [(f["name"], f["length"]) for f in functions] == [("Rules.outer", 4), ("Rules.outer.inner", 2)]
 
 
-def test_editor_lazy_public_export_is_not_a_package_load_cycle():
-    source = 'def __getattr__(name):\n    if name == "MainWindow":\n        from .main_window import MainWindow\n        return MainWindow\n'
+def test_package_lazy_public_export_remains_in_dependency_inventory():
+    source = ('def __getattr__(name):\n    if name == "MainWindow":\n'
+              '        from .main_window import MainWindow\n        return MainWindow\n'
+              '    raise AttributeError(name)\n')
     inventory = Inventory("src/componentpress/editor/__init__.py", ast.parse(source))
-    assert inventory.imports == []
+    assert len(inventory.imports) == 1
+    assert inventory.imports[0].deferred
+    assert forbidden(inventory.imports[0]) is False
+    assert import_graph(inventory.imports, {"componentpress.editor", "componentpress.editor.main_window"})[
+        "componentpress.editor"] == set()
+
+
+def test_lazy_facade_does_not_hide_forbidden_dependencies_or_eager_calls():
+    forbidden_source = ('def __getattr__(name):\n    if name == "Value":\n'
+                        '        from componentpress.application.private import Value\n        return Value\n'
+                        '    raise AttributeError(name)\n')
+    edge = Inventory("src/componentpress/bindings/__init__.py", ast.parse(forbidden_source)).imports[0]
+    assert not edge.deferred and forbidden(edge)
+    eager_source = ('def __getattr__(name):\n    if name == "Value":\n'
+                    '        from .leaf import Value\n        return Value\n'
+                    '    raise AttributeError(name)\n__getattr__("Value")\n')
+    eager = Inventory("src/componentpress/rendering/__init__.py", ast.parse(eager_source))
+    assert not eager.imports[0].deferred
+    graph = import_graph(eager.imports, {"componentpress.rendering", "componentpress.rendering.leaf"})
+    assert graph["componentpress.rendering"] == {"componentpress.rendering.leaf"}
+
+
+def test_arbitrary_function_imports_remain_cycle_edges():
+    source = "def load():\n    from componentpress.rendering import painter\n    return painter\n"
+    edge = Inventory("src/componentpress/bindings/icons.py", ast.parse(source)).imports[0]
+    assert not edge.deferred
+    graph = import_graph([edge], {"componentpress.bindings.icons", "componentpress.rendering"})
+    assert graph["componentpress.bindings.icons"] == {"componentpress.rendering"}
+
+
+def test_dynamic_import_inside_package_getattr_is_never_deferred():
+    source = ('from importlib import import_module\n'
+              'def __getattr__(name):\n    if name == "Value":\n'
+              '        value = import_module("componentpress.application.private")\n'
+              '        return value\n    raise AttributeError(name)\n')
+    inventory = Inventory("src/componentpress/bindings/__init__.py", ast.parse(source))
+    dynamic = next(edge for edge in inventory.imports if edge.form == "dynamic")
+    assert not dynamic.deferred
+    assert forbidden(dynamic)
+
+
+def test_eager_package_reexport_still_reports_a_cycle():
+    facade = Inventory("src/componentpress/rendering/__init__.py",
+                       ast.parse("from .leaf import Value\n" )).imports[0]
+    caller = Import("src/componentpress/rendering/leaf.py", "", 1, "componentpress.rendering", "from")
+    graph = import_graph([facade, caller], {"componentpress.rendering", "componentpress.rendering.leaf"})
+    assert cycle_edges(graph) == [
+        "componentpress.rendering -> componentpress.rendering.leaf",
+        "componentpress.rendering.leaf -> componentpress.rendering",
+    ]
 
 
 def test_only_explicit_production_roots_are_scanned(tmp_path):

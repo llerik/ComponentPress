@@ -76,6 +76,7 @@ class Import:
     line: int
     target: str
     form: str
+    deferred: bool = False
 
     @property
     def key(self) -> str:
@@ -92,6 +93,7 @@ class Inventory(ast.NodeVisitor):
         self.imports: list[Import] = []
         self.calls: list[dict] = []
         self.aliases = _import_aliases(tree)
+        self.lazy_facade = _safe_lazy_facade(path, tree)
         self.visit(tree)
 
     def visit_ClassDef(self, node):
@@ -109,7 +111,12 @@ class Inventory(ast.NodeVisitor):
     visit_AsyncFunctionDef = visit_FunctionDef
 
     def add_import(self, node, target: str, form: str):
-        self.imports.append(Import(self.path, ".".join(self.scope), node.lineno, target, form))
+        deferred = self._deferred_import(target, form)
+        self.imports.append(Import(self.path, ".".join(self.scope), node.lineno, target, form, deferred))
+
+    def _deferred_import(self, target: str, form: str) -> bool:
+        return (self.lazy_facade and self.scope == ["__getattr__"] and form != "dynamic"
+                and target.startswith(self.module + "."))
 
     def visit_Import(self, node):
         for alias in node.names:
@@ -119,9 +126,6 @@ class Inventory(ast.NodeVisitor):
         target = "." * node.level + (node.module or "")
         if node.level:
             target = importlib.util.resolve_name(target, self.package)
-        if self.path.endswith("/editor/__init__.py") and self.scope == ["__getattr__"]:
-            self.generic_visit(node)
-            return
         # Keep imported names: `from componentpress import rendering` is an edge too.
         for alias in node.names:
             self.add_import(node, target + "." + alias.name, "from")
@@ -157,6 +161,39 @@ def _expression_name(node) -> str:
     if isinstance(node, ast.Attribute):
         return _expression_name(node.value) + "." + node.attr
     return ast.unparse(node)
+
+
+def _safe_lazy_facade(path: str, tree: ast.AST) -> bool:
+    if not path.endswith("/__init__.py"):
+        return False
+    hooks = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "__getattr__"]
+    if len(hooks) != 1 or not hooks[0].args.args:
+        return False
+    hook = hooks[0]
+    parameter = hook.args.args[0].arg
+    branches = hook.body[:-1] if hook.body and isinstance(hook.body[-1], ast.Raise) else ()
+    if not branches or any(not _lazy_branch(node, parameter) for node in branches):
+        return False
+    return not any(_calls_lazy_hook(node) for node in tree.body if node is not hook)
+
+
+def _lazy_branch(node: ast.stmt, parameter: str) -> bool:
+    if not isinstance(node, ast.If) or node.orelse or not _name_equals_string(node.test, parameter):
+        return False
+    imports = [item for item in node.body if isinstance(item, (ast.Import, ast.ImportFrom))]
+    return bool(imports and isinstance(node.body[-1], ast.Return)
+                and all(isinstance(item, (ast.Import, ast.ImportFrom, ast.Return)) for item in node.body))
+
+
+def _name_equals_string(node: ast.expr, name: str) -> bool:
+    return (isinstance(node, ast.Compare) and isinstance(node.left, ast.Name) and node.left.id == name
+            and len(node.ops) == len(node.comparators) == 1 and isinstance(node.ops[0], ast.Eq)
+            and isinstance(node.comparators[0], ast.Constant) and isinstance(node.comparators[0].value, str))
+
+
+def _calls_lazy_hook(node: ast.AST) -> bool:
+    return any(isinstance(item, ast.Call) and isinstance(item.func, ast.Name)
+               and item.func.id == "__getattr__" for item in ast.walk(node))
 
 
 def _import_aliases(tree) -> dict[str, str]:
@@ -223,7 +260,7 @@ def import_graph(imports: list[Import], modules: set[str]) -> dict[str, set[str]
     graph = {module: set() for module in modules}
     for edge in imports:
         source, target = module_name(edge.path), edge.target
-        if source not in graph:
+        if source not in graph or edge.deferred:
             continue
         # Importing a leaf executes every parent __init__ too.
         parts = target.split(".")
