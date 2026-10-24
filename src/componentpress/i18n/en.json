@@ -403,6 +403,7 @@
   "ui.component_size": "Size",
   "ui.width_mm": "Width, mm",
   "ui.height_mm": "Height, mm",
+  "ui.swap_dimensions": "Swap width and height",
   "ui.card_square": "Square — {size} × {size} mm",
   "ui.token_preset": "Token — {size} × {size} mm",
   "ui.resource_picker": "Project image",

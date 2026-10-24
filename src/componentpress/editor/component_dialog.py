@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
-    QLineEdit, QVBoxLayout,
+    QHBoxLayout, QLineEdit, QToolButton, QVBoxLayout,
 )
 
 from componentpress.i18n import tr
 from componentpress.domain.component import ComponentDefinition, DataBinding
+from componentpress.app_assets import set_themed_icon
 
 
 PRESETS: tuple[tuple[str, float, float], ...] = (
@@ -59,7 +60,7 @@ class ComponentDialog(QDialog):
         form.addRow(tr("ui.name"), self.name)
         form.addRow(tr("ui.component_sheet"), self.sheet)
         form.addRow(tr("ui.component_size"), self.size)
-        form.addRow(tr("ui.width_mm"), self.width)
+        form.addRow(tr("ui.width_mm"), self._dimension_row())
         form.addRow(tr("ui.height_mm"), self.height)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -71,6 +72,18 @@ class ComponentDialog(QDialog):
         self.name.setFocus()
         if selected_index:
             self.size.setCurrentIndex(selected_index)
+
+    def _dimension_row(self) -> QHBoxLayout:
+        self.swap_dimensions = QToolButton()
+        self.swap_dimensions.setObjectName("swapComponentDimensions")
+        set_themed_icon(self.swap_dimensions, "rotation.png")
+        self.swap_dimensions.setToolTip(tr("ui.swap_dimensions"))
+        self.swap_dimensions.setAccessibleName(tr("ui.swap_dimensions"))
+        self.swap_dimensions.clicked.connect(self._swap_dimensions)
+        row = QHBoxLayout()
+        row.addWidget(self.width, 1)
+        row.addWidget(self.swap_dimensions)
+        return row
 
     @staticmethod
     def _millimetres(name: str, value: float) -> QDoubleSpinBox:
@@ -91,6 +104,12 @@ class ComponentDialog(QDialog):
         if size is not None:
             self.width.setValue(size[0])
             self.height.setValue(size[1])
+
+    def _swap_dimensions(self) -> None:
+        width, height = self.width.value(), self.height.value()
+        self.size.setCurrentIndex(0)
+        self.width.setValue(height)
+        self.height.setValue(width)
 
     def definition(self, component: ComponentDefinition | None = None) -> dict:
         result = {"name": self.name.text().strip(), "width": self.width.value(), "height": self.height.value()}

@@ -22,7 +22,7 @@ from componentpress.domain.project import DataSource, ProjectDefinition
 from componentpress.domain.tree import locations
 from componentpress.domain.values import CellValue, DataRow, DataSheetSnapshot
 from componentpress.i18n import set_language
-from componentpress.editor.dialogs import HtmlAddDialog
+from componentpress.editor.dialogs import HtmlAddDialog, ImageAddDialog
 from componentpress.editor.main_window import MainWindow, PngArchiveOperation
 from componentpress.editor import main_window as main_window_module
 from componentpress.editor.version_worker import ExportArchiveRequest
@@ -282,6 +282,66 @@ def test_active_static_validation_ignores_missing_project_excel_and_checks_resou
     messages = [window.event_list.item(i).text() for i in range(window.event_list.count())]
     assert any("RESOURCE_MISSING" in item and "missing-image" in item for item in messages)
     assert not any("DATA_SOURCE_MISSING" in item for item in messages)
+
+
+def test_component_creation_validates_excel_and_enables_image_column(make_editor, qtbot):
+    window, root, errors = make_editor(excel=True)
+    values = {"name": "Excel image", "width": 63, "height": 88,
+              "data": DataBinding(sheet="Карты")}
+
+    assert window._create_component(values, "excel-image")
+    columns = window._cached_columns()
+    assert "Изображение" in columns
+
+    dialog = ImageAddDialog(root, window._import_image, window, columns=columns)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    assert dialog.content_mode.isEnabled()
+    assert dialog.content_column.isVisible()
+    dialog.content_mode.setCurrentIndex(dialog.content_mode.findData("column"))
+    dialog.content_column.setCurrentText("Изображение")
+    dialog.name.setText("Excel image node")
+    assert dialog.content_column.isEnabled()
+    assert window._add_image_dialog(dialog, 5, 5)
+
+    image = window.session.documents["excel-image"].model.elements[-1]
+    assert isinstance(image, ImageNode)
+    assert image.source_mode == "column" and image.source_column == "Изображение"
+    assert not errors
+
+
+def test_component_validation_failure_preserves_creation_history(make_editor):
+    from componentpress.application.contracts import ComponentOperation
+
+    window, _root, errors = make_editor(excel=True)
+    values = {"name": "Missing sheet", "width": 63, "height": 88,
+              "data": DataBinding(sheet="Missing")}
+
+    assert window._create_component(values, "missing-sheet")
+    assert "missing-sheet" in window.session.documents
+    assert window._component_history.entries[window._component_history.index - 1].operation is ComponentOperation.CREATE
+    messages = [window.event_list.item(i).text() for i in range(window.event_list.count())]
+    assert any("SHEET_UNKNOWN" in message for message in messages)
+    assert not errors
+    window._undo_component_history()
+    assert "missing-sheet" not in window.session.documents
+    window._redo_component_history()
+    assert "missing-sheet" in window.session.documents
+
+
+def test_last_event_stays_in_status_bar_between_path_and_zoom(make_editor):
+    window, root, _errors = make_editor()
+    diagnostic = Diagnostic("STATUS_TEST", "Latest event " + "detail " * 80, root / "component.yaml")
+    window._add_events((diagnostic,))
+
+    assert window.status_event.text()
+    assert window.status_event.toolTip()
+    assert window.status_project.geometry().left() < window.status_event.geometry().left()
+    assert window.status_event.geometry().left() < window.status_zoom.geometry().left()
+    window.statusBar().showMessage("Temporary operation message", 5000)
+    assert window.status_event.isVisible()
+    window._clear_events()
+    assert not window.status_event.text() and not window.status_event.toolTip()
 
 
 @pytest.mark.parametrize(("locale", "expected"), (

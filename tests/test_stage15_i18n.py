@@ -1,6 +1,7 @@
 """Localization catalog and startup-language contracts for stage 15."""
 
 from pathlib import Path
+import pytest
 
 from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtWidgets import QApplication, QComboBox, QDialogButtonBox, QLabel, QMessageBox
@@ -22,6 +23,19 @@ def test_catalogs_have_matching_keys_and_placeholders() -> None:
     validate_catalogs()
     assert catalogs()["ru"].keys() == catalogs()["en"].keys()
     set_language("ru")
+
+
+@pytest.mark.parametrize(("locale", "label"), (("ru", "Поменять ширину и высоту местами"), ("en", "Swap width and height")))
+def test_component_dimension_swap_label_is_localized(qtbot, locale, label) -> None:
+    previous = language()
+    set_language(locale)
+    try:
+        dialog = ComponentDialog()
+        qtbot.addWidget(dialog)
+        assert dialog.swap_dimensions.toolTip() == label
+        assert dialog.swap_dimensions.accessibleName() == label
+    finally:
+        set_language(previous)
 
 
 def test_archive_task_messages_are_translated_in_both_catalogs() -> None:

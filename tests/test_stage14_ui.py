@@ -1098,3 +1098,18 @@ def test_component_dialog_keeps_fractional_existing_size_and_lists_presets(qtbot
     assert dialog.height.value() == 88.5
     assert dialog.definition(component)["width"] == 63.25
     assert dialog.size.count() >= 15
+
+
+def test_component_dialog_swaps_dimensions_and_icon(qtbot) -> None:
+    from componentpress.app_assets import load_icon
+
+    dialog = ComponentDialog()
+    qtbot.addWidget(dialog)
+    assert dialog.swap_dimensions.icon().pixmap(22, 22).toImage() == load_icon("rotation.png").pixmap(22, 22).toImage()
+    dialog.size.setCurrentIndex(1)
+    assert not dialog.width.isEnabled()
+    dialog.swap_dimensions.click()
+    assert (dialog.width.value(), dialog.height.value()) == (88, 63)
+    assert dialog.width.isEnabled() and dialog.height.isEnabled()
+    dialog.swap_dimensions.click()
+    assert (dialog.width.value(), dialog.height.value()) == (63, 88)

@@ -37,6 +37,36 @@ def _smoke_failure(root: Path, line: int) -> bool:
     return False
 
 
+def _smoke_new_component_controls(window: MainWindow) -> bool:
+    from componentpress.editor.component_dialog import ComponentDialog
+
+    if "VALIDATION_OK" not in window.status_event.text():
+        return False
+    component = ComponentDialog(window)
+    if component.swap_dimensions.icon().isNull():
+        return False
+    component.swap_dimensions.click()
+    if (component.width.value(), component.height.value()) != (88, 63):
+        return False
+    return _smoke_image_columns(window)
+
+
+def _smoke_image_columns(window: MainWindow) -> bool:
+    from componentpress.editor.dialogs import ImageAddDialog
+
+    document = next((item for item in window.session.documents.values() if item.model.data is not None), None)
+    if document is None:
+        image = ImageAddDialog(window.session.snapshot.root, window._import_image, window)
+        return not image.content_mode.isEnabled() and image.content_column.count() == 0
+    if window.controller.preview is None:
+        return False
+    data = window.controller.preview.cached_data(window.session.snapshot, document.model.id)
+    image = ImageAddDialog(window.session.snapshot.root, window._import_image, window,
+                           columns=data.headers if data is not None else ())
+    image.content_mode.setCurrentIndex(image.content_mode.findData("column"))
+    return image.content_mode.isEnabled() and image.content_column.isEnabled() and image.content_column.count() > 0
+
+
 def _run_dialog_build_smoke(window: MainWindow):
     from componentpress.platforms.services import PlatformServices
 
@@ -276,7 +306,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
     if smoke_id in window.session.documents or not window.add_component(smoke_id, "Проверка выпуска"):
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     smoke_tab = window.open_component(smoke_id)
-    if smoke_tab is None:
+    if smoke_tab is None or not _smoke_new_component_controls(window):
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     if window.open_component(first_id) is not first_tab or window.tabs.count() != 2:
         return _smoke_failure(root, inspect.currentframe().f_lineno)

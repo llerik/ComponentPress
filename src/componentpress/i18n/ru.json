@@ -403,6 +403,7 @@
   "ui.component_size": "Размер",
   "ui.width_mm": "Ширина, мм",
   "ui.height_mm": "Высота, мм",
+  "ui.swap_dimensions": "Поменять ширину и высоту местами",
   "ui.card_square": "Квадрат — {size} × {size} мм",
   "ui.token_preset": "Жетон — {size} × {size} мм",
   "ui.resource_picker": "Изображение проекта",

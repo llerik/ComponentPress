@@ -993,9 +993,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         self._refresh_component_tree()
         self._update_project_visibility()
         self.open_component(component_id)
-        document = self.session.documents[component_id]
-        self._push_component_history(ComponentOperation.CREATE, component_id, document)
-        self._project_history_focus = True
+        self._finish_component_creation(component_id)
         self._update_actions()
         return True
 
@@ -1015,10 +1013,15 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         self._refresh_component_tree()
         self._update_project_visibility()
         self.open_component(component_id)
-        self._push_component_history(ComponentOperation.CREATE, component_id, self.session.documents[component_id])
-        self._project_history_focus = True
+        self._finish_component_creation(component_id)
         self.statusBar().showMessage("Компонент добавлен", 3000)
         return True
+
+    def _finish_component_creation(self, component_id: str) -> None:
+        document = self.session.documents[component_id]
+        self._push_component_history(ComponentOperation.CREATE, component_id, document)
+        self._project_history_focus = True
+        self._validate_active()
 
     def edit_component_dialog(self, component_id: str) -> None:
         if self.session is None or component_id not in self.session.documents:
@@ -1425,7 +1428,16 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
                 hide_project_path=self.hide_event_project_path.isChecked(),
             ))
             item.setToolTip(format_diagnostic(diagnostic))
+        self._update_latest_event_status()
         self._filter_events(self.event_search.text())
+
+    def _update_latest_event_status(self) -> None:
+        latest = self.event_list.item(self.event_list.count() - 1)
+        text = latest.text() if latest is not None else ""
+        self.status_event.setText(self.status_event.fontMetrics().elidedText(
+            text, Qt.TextElideMode.ElideMiddle, self.status_event.maximumWidth(),
+        ))
+        self.status_event.setToolTip(latest.toolTip() if latest is not None else "")
 
     def _copy_selected_event(self) -> None:
         item = self.event_list.currentItem()
@@ -1438,6 +1450,8 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
 
     def _clear_events(self) -> None:
         self.event_list.clear()
+        self.status_event.clear()
+        self.status_event.setToolTip("")
         self._update_copy_event_enabled()
 
     def _update_copy_event_enabled(self) -> None:
