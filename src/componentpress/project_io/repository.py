@@ -283,7 +283,7 @@ class FileProjectRepository:
         from ruamel.yaml import YAML
         from io import StringIO
         stream = StringIO()
-        YAML().dump(component.model_dump(mode="json", exclude_none=True), stream)
+        YAML().dump(component.model_dump(mode="json", exclude_none=True, exclude={"data": {"source"}}), stream)
         candidate = self._prepare_added_component(snapshot, component_id, path, stream.getvalue())
         with _registration_write_lock(snapshot.root):
             _assert_snapshot_current(snapshot)

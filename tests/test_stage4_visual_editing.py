@@ -174,8 +174,10 @@ elements:
     saved = dump_yaml(tree)
     reparsed, _ = parse_component(saved, path)
     assert isinstance(reparsed.elements[0], GroupNode)
-    assert "# comment for back" in saved
-    assert "# comment for front" in saved
+    grouped_text = saved.split("children:", 1)[1]
+    assert grouped_text.index("# comment for back") < grouped_text.index("- id: back")
+    assert grouped_text.index("# comment for front") < grouped_text.index("- id: front")
+    assert [node.id for node in reparsed.elements[0].children] == ["back", "front"]
 
 
 def test_added_nodes_get_yaml_blank_lines_without_losing_comments_or_html() -> None:

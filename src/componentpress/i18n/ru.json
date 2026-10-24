@@ -110,6 +110,7 @@
   "error.unexpected": "Неожиданная ошибка. Идентификатор: {incident_id}",
   "error.incident": "Не удалось выполнить операцию. Отчёт об ошибке можно создать в разделе «О программе».",
   "error.diagnostic": "Операция требует внимания ({code}).",
+  "error.yaml_unknown_field": "Неизвестное поле YAML: {field}.",
   "error.project_manifest_ambiguous": "В папке найдены project.cpress и project.yaml. Оставьте только project.cpress.",
   "error.project_manifest_legacy": "Вручную переименуйте project.yaml в project.cpress и снова откройте проект.",
   "error.project_manifest_missing": "В папке нет файла project.cpress.",

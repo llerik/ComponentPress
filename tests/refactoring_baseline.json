@@ -575,62 +575,6 @@
       "stage": "9б",
       "owner": "coder:src/componentpress/project_io"
     },
-    "src/componentpress/project_io/yaml_codec.py|_load": {
-      "path": "src/componentpress/project_io/yaml_codec.py",
-      "name": "_load",
-      "line": 52,
-      "length": 26,
-      "stage": "9б",
-      "owner": "coder:src/componentpress/project_io"
-    },
-    "src/componentpress/project_io/yaml_codec.py|_validate": {
-      "path": "src/componentpress/project_io/yaml_codec.py",
-      "name": "_validate",
-      "line": 80,
-      "length": 41,
-      "stage": "9б",
-      "owner": "coder:src/componentpress/project_io"
-    },
-    "src/componentpress/project_io/yaml_codec.py|_validate_html_binding": {
-      "path": "src/componentpress/project_io/yaml_codec.py",
-      "name": "_validate_html_binding",
-      "line": 213,
-      "length": 21,
-      "stage": "20",
-      "owner": "coder:stage20"
-    },
-    "src/componentpress/project_io/yaml_codec.py|parse_project": {
-      "path": "src/componentpress/project_io/yaml_codec.py",
-      "name": "parse_project",
-      "line": 265,
-      "length": 27,
-      "stage": "9б",
-      "owner": "coder:src/componentpress/project_io"
-    },
-    "src/componentpress/project_io/yaml_codec.py|update_tree": {
-      "path": "src/componentpress/project_io/yaml_codec.py",
-      "name": "update_tree",
-      "line": 312,
-      "length": 167,
-      "stage": "9б",
-      "owner": "coder:src/componentpress/project_io"
-    },
-    "src/componentpress/project_io/yaml_codec.py|update_tree.collect": {
-      "path": "src/componentpress/project_io/yaml_codec.py",
-      "name": "update_tree.collect",
-      "line": 335,
-      "length": 30,
-      "stage": "9б",
-      "owner": "coder:src/componentpress/project_io"
-    },
-    "src/componentpress/project_io/yaml_codec.py|update_tree.schema_data": {
-      "path": "src/componentpress/project_io/yaml_codec.py",
-      "name": "update_tree.schema_data",
-      "line": 367,
-      "length": 24,
-      "stage": "9б",
-      "owner": "coder:src/componentpress/project_io"
-    },
     "src/componentpress/rendering/exporter.py|_save_pdf": {
       "path": "src/componentpress/rendering/exporter.py",
       "name": "_save_pdf",

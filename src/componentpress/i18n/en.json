@@ -110,6 +110,7 @@
   "error.unexpected": "Unexpected error. Incident ID: {incident_id}",
   "error.incident": "The operation failed. Create a support report from About.",
   "error.diagnostic": "The operation needs attention ({code}).",
+  "error.yaml_unknown_field": "Unknown YAML field: {field}.",
   "error.project_manifest_ambiguous": "This folder has both project.cpress and project.yaml. Keep only project.cpress.",
   "error.project_manifest_legacy": "Rename project.yaml to project.cpress manually, then open the project again.",
   "error.project_manifest_missing": "This folder does not contain project.cpress.",
