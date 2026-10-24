@@ -223,22 +223,6 @@
       "stage": "9в",
       "owner": "coder:src/componentpress/build"
     },
-    "src/componentpress/data_sources/xlsx_reader.py|_formula_xml_states": {
-      "path": "src/componentpress/data_sources/xlsx_reader.py",
-      "name": "_formula_xml_states",
-      "line": 31,
-      "length": 38,
-      "stage": "8б",
-      "owner": "coder:src/componentpress/data_sources"
-    },
-    "src/componentpress/data_sources/xlsx_reader.py|XlsxReader.read": {
-      "path": "src/componentpress/data_sources/xlsx_reader.py",
-      "name": "XlsxReader.read",
-      "line": 85,
-      "length": 136,
-      "stage": "8б",
-      "owner": "coder:src/componentpress/data_sources"
-    },
     "src/componentpress/diagnostics/logging.py|_inspect_crash_candidate": {
       "path": "src/componentpress/diagnostics/logging.py",
       "name": "_inspect_crash_candidate",
