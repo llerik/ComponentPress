@@ -1272,12 +1272,12 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
     def _connect_canvas_signals(self, tab: DocumentTab) -> None:
         tab.canvas.selectionChanged.connect(self._canvas_selection_changed)
         tab.canvas.nodeContextMenuRequested.connect(self._canvas_context_menu)
-        tab.canvas.moveRequested.connect(self._move_selected)
-        tab.canvas.nudgeRequested.connect(self._move_selected)
-        tab.canvas.resizeRequested.connect(self._resize_selected)
+        tab.canvas.moveRequested.connect(lambda ids, dx, dy, item=tab: self._move_canvas_nodes(item, item.canvas.dispatch_context, ids, dx, dy))
+        tab.canvas.nudgeRequested.connect(lambda ids, dx, dy, item=tab: self._move_canvas_nodes(item, item.canvas.dispatch_context, ids, dx, dy))
+        tab.canvas.resizeRequested.connect(lambda node_id, width, height, ax, ay, item=tab: self._resize_canvas_node(item, item.canvas.dispatch_context, node_id, width, height, ax, ay))
         tab.canvas.lineResizeRequested.connect(self._resize_line_selected)
         tab.canvas.placementRequested.connect(self._place_element)
-        tab.canvas.drawRequested.connect(self._draw_element)
+        tab.canvas.drawRequested.connect(lambda kind, x1, y1, x2, y2, item=tab: self._draw_canvas_element(item, item.canvas.dispatch_context, kind, x1, y1, x2, y2))
         tab.canvas.toolCancelled.connect(self._tool_cancelled)
         tab.canvas.deleteRequested.connect(self.delete_selected)
 
@@ -1296,6 +1296,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         for candidate in self._tabs.values():
             if candidate is not self.active_tab:
                 candidate.canvas.cancel_tool()
+                candidate.canvas.cancel_gesture()
                 candidate.canvas.release_preview()
         tab = self.active_tab
         self._sync_component_tree_selection()
@@ -2823,6 +2824,31 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         selected = tuple(ids)
         self._apply_tree("Переместить элементы", move_nodes, selected, dx_mm, dy_mm, selected=selected)
 
+    def _canvas_context_is_current(self, tab, context) -> bool:
+        if tab is not self.active_tab or self.session is None or context is None:
+            return False
+        document = self.session.documents.get(tab.component_id)
+        return document is not None and context == (id(self.session), tab.identity, tab.component_id, document.revision)
+
+    def _move_canvas_nodes(self, tab, context, ids, dx, dy) -> None:
+        accepted = False
+        if self._canvas_context_is_current(tab, context):
+            selected = tuple(ids)
+            accepted = self._apply_tree("Переместить элементы", move_nodes, selected, dx, dy, selected=selected)
+        tab.canvas.report_gesture_outcome(accepted)
+
+    def _resize_canvas_node(self, tab, context, node_id, width, height, anchor_x, anchor_y) -> None:
+        accepted = False
+        if self._canvas_context_is_current(tab, context):
+            accepted = self._resize_selected(node_id, width, height, anchor_x, anchor_y)
+        tab.canvas.report_gesture_outcome(accepted)
+
+    def _draw_canvas_element(self, tab, context, kind, x1, y1, x2, y2) -> None:
+        accepted = False
+        if self._canvas_context_is_current(tab, context):
+            accepted = self._draw_element(kind, x1, y1, x2, y2)
+        tab.canvas.report_gesture_outcome(accepted)
+
     @staticmethod
     def _default_name_key(node_type: str) -> str | None:
         return {
@@ -2931,8 +2957,8 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
             ungroup.triggered.connect(lambda: self.ungroup_selected())
         menu.exec(point)
 
-    def _resize_selected(self, node_id: str, width_mm: float, height_mm: float, anchor_x: float = 0.0, anchor_y: float = 0.0) -> None:
-        self._apply_tree("Изменить размер элемента", resize_node, node_id, width_mm, height_mm, (anchor_x, anchor_y), selected=(node_id,))
+    def _resize_selected(self, node_id: str, width_mm: float, height_mm: float, anchor_x: float = 0.0, anchor_y: float = 0.0) -> bool:
+        return self._apply_tree("Изменить размер элемента", resize_node, node_id, width_mm, height_mm, (anchor_x, anchor_y), selected=(node_id,))
 
     def _rotate_selected(self, degrees: float) -> None:
         ids = self._selected_ids()
@@ -3185,14 +3211,14 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
     def _tool_write_allowed(self, tool: str) -> bool:
         return tool != "html" or self._operation_allowed("resource_write")
 
-    def _draw_element(self, tool: str, x1: float, y1: float, x2: float, y2: float) -> None:
+    def _draw_element(self, tool: str, x1: float, y1: float, x2: float, y2: float) -> bool:
         if self.session is None or self.active_tab is None:
-            return
+            return False
         node = self._drawn_node(tool, x1, y1, x2, y2)
         if node is None:
-            return
+            return False
         node_id = node.id
-        self._apply_tree(tr("ui.draw_element"), add_node, node, selected=(node_id,))
+        return self._apply_tree(tr("ui.draw_element"), add_node, node, selected=(node_id,))
 
     def _drawn_node(self, tool, x1, y1, x2, y2):
         component_id = self.active_tab.component_id

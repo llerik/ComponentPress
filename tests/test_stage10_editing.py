@@ -168,6 +168,36 @@ def test_arrow_hold_batches_repeats_and_blocked_group_warning_cannot_reenter(
     assert group_overlay_after.x() == pytest.approx(group_overlay_before.x())
 
 
+def test_switching_tabs_cancels_an_uncommitted_arrow_nudge(tmp_path: Path, qtbot, monkeypatch) -> None:
+    window, _root, tab = _editor(tmp_path, qtbot, monkeypatch)
+    before = window.session.documents["forest-card"].model
+    history_count = tab.undo_stack.count()
+    assert window.add_component("second", "Вторая карта")
+    second = window.active_tab
+    assert second is not None
+    QTest.keyPress(tab.canvas, Qt.Key.Key_Right)
+
+    window.tabs.setCurrentWidget(second)
+
+    assert window.session.documents["forest-card"].model == before
+    assert tab.undo_stack.count() == history_count
+    assert not tab.canvas.gesture_active
+
+
+def test_focus_loss_commits_one_pending_arrow_nudge(tmp_path: Path, qtbot, monkeypatch) -> None:
+    window, _root, tab = _editor(tmp_path, qtbot, monkeypatch)
+    window._set_selection(("heading",), source="tree")
+    before = locations(window.session.documents["forest-card"].model)["heading"].node
+    history_count = tab.undo_stack.count()
+    QTest.keyPress(tab.canvas, Qt.Key.Key_Right)
+    QApplication.sendEvent(tab.canvas, QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.OtherFocusReason))
+
+    after = locations(window.session.documents["forest-card"].model)["heading"].node
+    assert after.x_mm == pytest.approx(before.x_mm + 0.1)
+    assert tab.undo_stack.count() == history_count + 1
+    assert not tab.canvas.gesture_active
+
+
 def _component() -> ComponentDefinition:
     return ComponentDefinition(
         schema_version=8,

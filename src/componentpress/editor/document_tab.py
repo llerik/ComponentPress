@@ -337,14 +337,15 @@ class DocumentTab(QWidget):
         active_component = component or document.model
         if selected is None:
             selected = self.canvas.selected_ids
-        self.canvas.set_component_model(active_component, selected)
-        self.canvas.set_preview_pending(True)
+        context = (id(session), self.identity, self.component_id, document.revision)
         self.preview_generation += 1
         self._preview_arguments = PreviewArguments(
             session.snapshot, active_component, document.revision, dpi, fit, selected,
             component is not None if bindings_resolved is None else bindings_resolved,
             self.preview_row_number, source_label,
         )
+        self.canvas.set_component_model(active_component, selected, context=context)
+        self.canvas.set_preview_pending(True)
         self.preview_status.setText(
             tr("ui.preview_source_updating") if self.preview_source.text()
             else tr("ui.preview_source_waiting")

@@ -94,21 +94,26 @@ def update_node(component: ComponentDefinition, node_id: str, **changes: object)
         raise TreeOperationError(f"элемент {node_id!r} не найден")
     if _is_effectively_locked(component, node_id) and not (set(changes) == {"locked"} and not _has_locked_ancestor(component, node_id)):
         raise TreeOperationError("заблокированный элемент нельзя изменять визуально")
+    elements = _replace_nodes(component.elements, node_id, changes)
+    return _refresh_frames(component.model_copy(update={"elements": elements}))
 
-    def replace(nodes: tuple[Node, ...]) -> tuple[Node, ...]:
-        result: list[Node] = []
-        for node in nodes:
-            if node.id == node_id:
-                values = node.model_dump(mode="python")
-                values.update(changes)
-                result.append(type(node).model_validate(values))
-            elif isinstance(node, GroupNode):
-                result.append(node.model_copy(update={"children": replace(node.children)}))
-            else:
-                result.append(node)
-        return tuple(result)
 
-    return _refresh_frames(component.model_copy(update={"elements": replace(component.elements)}))
+def _replace_nodes(nodes: tuple[Node, ...], node_id: str, changes: dict[str, object]) -> tuple[Node, ...]:
+    result = []
+    for node in nodes:
+        if node.id == node_id:
+            result.append(_updated_node(node, changes))
+        elif isinstance(node, GroupNode):
+            result.append(node.model_copy(update={"children": _replace_nodes(node.children, node_id, changes)}))
+        else:
+            result.append(node)
+    return tuple(result)
+
+
+def _updated_node(node: Node, changes: dict[str, object]) -> Node:
+    values = node.model_dump(mode="python")
+    values.update(changes)
+    return type(node).model_validate(values)
 
 
 def add_node(component: ComponentDefinition, node: Node, parent_id: str | None = None) -> ComponentDefinition:
@@ -167,58 +172,75 @@ def resize_node(
         raise TreeOperationError(f"элемент {node_id!r} не найден")
     _ensure_unlocked_selection(component, (node_id,), "изменить размер")
     if isinstance(item.node, GroupNode):
-        _ensure_unprotected_subtrees(component, (node_id,), "изменить размер")
-        old = item.node
-        fx, fy, old_width, old_height = old.frame.x_mm, old.frame.y_mm, old.frame.width_mm, old.frame.height_mm
-        scale_x = width_mm / (old_width * math.hypot(old.transform.m11, old.transform.m21))
-        scale_y = height_mm / (old_height * math.hypot(old.transform.m12, old.transform.m22))
-        ax, ay = fx + old_width * anchor[0], fy + old_height * anchor[1]
-        transform = old.transform
-        shift_x = transform.m11 * ax + transform.m12 * ay - transform.m11 * scale_x * ax - transform.m12 * scale_y * ay
-        shift_y = transform.m21 * ax + transform.m22 * ay - transform.m21 * scale_x * ax - transform.m22 * scale_y * ay
-        changes = {
-            "x_mm": old.x_mm + shift_x, "y_mm": old.y_mm + shift_y,
-            "transform": {
-                "m11": transform.m11 * scale_x, "m12": transform.m12 * scale_y,
-                "m21": transform.m21 * scale_x, "m22": transform.m22 * scale_y,
-            },
-        }
-        return update_node(component, node_id, **changes)
+        return _resize_group(component, item, width_mm, height_mm, anchor)
     if isinstance(item.node, LineNode):
-        old = item.node
-        left, top, old_width, old_height = local_bounds(old)
-        scale_x = math.hypot(old.transform.m11, old.transform.m21)
-        scale_y = math.hypot(old.transform.m12, old.transform.m22)
-        new_width = width_mm / scale_x if old_width > 0 else 0.0
-        new_height = height_mm / scale_y if old_height > 0 else 0.0
-        if old_width == 0 and width_mm > 0:
-            new_width = width_mm / scale_x
-        if old_height == 0 and height_mm > 0:
-            new_height = height_mm / scale_y
-        if math.hypot(new_width, new_height) <= 0.001:
-            new_width = 0.001
-        ax, ay = anchor
-        anchor_x, anchor_y = left + old_width * ax, top + old_height * ay
-        new_left, new_top = anchor_x - new_width * ax, anchor_y - new_height * ay
-        new_dx = math.copysign(new_width, old.dx_mm if old.dx_mm else 1.0)
-        new_dy = math.copysign(new_height, old.dy_mm if old.dy_mm else 1.0)
-        origin_x = new_left if new_dx >= 0 else new_left + new_width
-        origin_y = new_top if new_dy >= 0 else new_top + new_height
-        transform = old.transform
-        return update_node(
-            component, node_id,
-            x_mm=old.x_mm + transform.m11 * origin_x + transform.m12 * origin_y,
-            y_mm=old.y_mm + transform.m21 * origin_x + transform.m22 * origin_y,
-            dx_mm=new_dx, dy_mm=new_dy,
-        )
-    old_width, old_height = item.node.width_mm, item.node.height_mm
-    transform = item.node.transform
-    width = width_mm / math.hypot(transform.m11, transform.m21)
-    height = height_mm / math.hypot(transform.m12, transform.m22)
-    ax, ay = old_width * anchor[0], old_height * anchor[1]
-    x_mm = item.node.x_mm + transform.m11 * (ax - width * anchor[0]) + transform.m12 * (ay - height * anchor[1])
-    y_mm = item.node.y_mm + transform.m21 * (ax - width * anchor[0]) + transform.m22 * (ay - height * anchor[1])
-    return update_node(component, node_id, x_mm=x_mm, y_mm=y_mm, width_mm=width, height_mm=height)
+        return _resize_line(component, item.node, width_mm, height_mm, anchor)
+    return _resize_positioned(component, item.node, width_mm, height_mm, anchor)
+
+
+def _resize_group(component, item, width_mm, height_mm, anchor):
+    _ensure_unprotected_subtrees(component, (item.node.id,), "изменить размер")
+    old = item.node
+    frame, transform = old.frame, old.transform
+    scale_x = width_mm / (frame.width_mm * math.hypot(transform.m11, transform.m21))
+    scale_y = height_mm / (frame.height_mm * math.hypot(transform.m12, transform.m22))
+    ax, ay = frame.x_mm + frame.width_mm * anchor[0], frame.y_mm + frame.height_mm * anchor[1]
+    shift_x = transform.m11 * ax + transform.m12 * ay - transform.m11 * scale_x * ax - transform.m12 * scale_y * ay
+    shift_y = transform.m21 * ax + transform.m22 * ay - transform.m21 * scale_x * ax - transform.m22 * scale_y * ay
+    changes = {"x_mm": old.x_mm + shift_x, "y_mm": old.y_mm + shift_y}
+    changes["transform"] = _scaled_transform(transform, scale_x, scale_y)
+    return update_node(component, old.id, **changes)
+
+
+def _scaled_transform(transform, scale_x, scale_y):
+    return {"m11": transform.m11 * scale_x, "m12": transform.m12 * scale_y,
+            "m21": transform.m21 * scale_x, "m22": transform.m22 * scale_y}
+
+
+def _resize_line(component, old, width_mm, height_mm, anchor):
+    left, top, old_width, old_height = local_bounds(old)
+    scale_x, scale_y = _transform_scales(old)
+    width, height = _line_resize_dimensions(width_mm / scale_x, height_mm / scale_y)
+    anchor_x = left + old_width * anchor[0]
+    anchor_y = top + old_height * anchor[1]
+    new_left = anchor_x - width * anchor[0]
+    new_top = anchor_y - height * anchor[1]
+    dx, dy = _signed_line_size(old, width, height)
+    x_mm, y_mm = _line_resize_origin(old, new_left, new_top, width, height, dx, dy)
+    return update_node(component, old.id, x_mm=x_mm, y_mm=y_mm, dx_mm=dx, dy_mm=dy)
+
+
+def _line_resize_dimensions(width, height):
+    return (0.001, height) if math.hypot(width, height) <= 0.001 else (width, height)
+
+
+def _signed_line_size(old, width, height):
+    return math.copysign(width, old.dx_mm or 1.0), math.copysign(height, old.dy_mm or 1.0)
+
+
+def _line_resize_origin(old, left, top, width, height, dx, dy):
+    x, y = (left if dx >= 0 else left + width), (top if dy >= 0 else top + height)
+    return Affine.node(old).point(x, y)
+
+
+def _resize_positioned(component, old, width_mm, height_mm, anchor):
+    scale_x, scale_y = _transform_scales(old)
+    width, height = width_mm / scale_x, height_mm / scale_y
+    ax, ay = old.width_mm * anchor[0], old.height_mm * anchor[1]
+    x_mm, y_mm = _positioned_resize_origin(old, width, height, anchor, ax, ay)
+    return update_node(component, old.id, x_mm=x_mm, y_mm=y_mm, width_mm=width, height_mm=height)
+
+
+def _positioned_resize_origin(old, width, height, anchor, ax, ay):
+    transform = old.transform
+    x_shift = transform.m11 * (ax - width * anchor[0]) + transform.m12 * (ay - height * anchor[1])
+    y_shift = transform.m21 * (ax - width * anchor[0]) + transform.m22 * (ay - height * anchor[1])
+    return old.x_mm + x_shift, old.y_mm + y_shift
+
+
+def _transform_scales(node):
+    transform = node.transform
+    return math.hypot(transform.m11, transform.m21), math.hypot(transform.m12, transform.m22)
 
 
 def rotate_node(component: ComponentDefinition, node_id: str, degrees: float) -> ComponentDefinition:
@@ -269,29 +291,30 @@ def duplicate_nodes(
     _ensure_unlocked_selection(component, (item.node.id for item in selected), "дублировать")
     _ensure_unprotected_subtrees(component, (item.node.id for item in selected), "дублировать")
     generated_ids = set(locations(component))
+    clones = {item.node.id: _clone_node(item.node, generated_ids, new_id, new_default_name) for item in selected}
+    return _insert_duplicates(component, selected, clones)
 
-    def clone(node: Node) -> Node:
-        name = new_default_name(node) or node.name
-        node_id = new_id(node, name)
-        if not node_id or node_id in generated_ids:
-            raise TreeOperationError("для копии нужен новый уникальный ID")
-        generated_ids.add(node_id)
-        changes = {"id": node_id, "name": name}
-        if isinstance(node, GroupNode):
-            changes["children"] = tuple(clone(child) for child in node.children)
-        return type(node).model_validate(node.model_copy(update=changes).model_dump(mode="python"))
 
-    clones = {item.node.id: clone(item.node) for item in selected}
+def _clone_node(node, generated_ids, new_id, new_default_name):
+    name = new_default_name(node) or node.name
+    node_id = new_id(node, name)
+    if not node_id or node_id in generated_ids:
+        raise TreeOperationError("для копии нужен новый уникальный ID")
+    generated_ids.add(node_id)
+    changes = {"id": node_id, "name": name}
+    if isinstance(node, GroupNode):
+        changes["children"] = tuple(_clone_node(child, generated_ids, new_id, new_default_name) for child in node.children)
+    return type(node).model_validate(node.model_copy(update=changes).model_dump(mode="python"))
+
+
+def _insert_duplicates(component, selected, clones):
     parents = dict.fromkeys(item.parent_id for item in selected)
     result = component
     for parent_id in parents:
         chosen = {item.node.id for item in selected if item.parent_id == parent_id}
         siblings = parent_nodes(result, parent_id)
-        inserted = []
-        for node in siblings:
-            if node.id in chosen:
-                inserted.append(clones[node.id])
-        result = _replace_children(result, parent_id, (*siblings, *inserted))
+        copies = tuple(clones[node.id] for node in siblings if node.id in chosen)
+        result = _replace_children(result, parent_id, (*siblings, *copies))
     return _refresh_frames(result)
 
 
@@ -388,9 +411,16 @@ def reparent_nodes(component: ComponentDefinition, node_ids: Iterable[str], new_
     selected, old_parent_id = _selection(component, node_ids)
     _ensure_unlocked_selection(component, (item.node.id for item in selected), "перенести")
     _ensure_unprotected_subtrees(component, (item.node.id for item in selected), "перенести")
+    index = locations(component)
+    _validate_reparent_target(component, index, selected, new_parent_id)
+    if old_parent_id == new_parent_id:
+        return component
+    return _move_to_parent(component, selected, old_parent_id, new_parent_id)
+
+
+def _validate_reparent_target(component, index, selected, new_parent_id):
     if new_parent_id is not None and _is_effectively_locked(component, new_parent_id):
         raise TreeOperationError("нельзя переносить в заблокированную группу")
-    index = locations(component)
     if new_parent_id is not None:
         target = index.get(new_parent_id)
         if target is None or not isinstance(target.node, GroupNode):
@@ -403,8 +433,9 @@ def reparent_nodes(component: ComponentDefinition, node_ids: Iterable[str], new_
             if ancestor in selected_ids:
                 raise TreeOperationError("перенос создаст цикл")
             ancestor = index[ancestor].parent_id
-    if old_parent_id == new_parent_id:
-        return component
+
+
+def _move_to_parent(component, selected, old_parent_id, new_parent_id):
     old_children = tuple(node for node in parent_nodes(component, old_parent_id) if node.id not in {item.node.id for item in selected})
     result = _replace_children(component, old_parent_id, old_children)
     refreshed = locations(result)
@@ -429,9 +460,10 @@ def drop_nodes(
     if target_id in ids:
         return component
     result = reparent_nodes(component, ids, new_parent_id)
-    if target_id is None:
-        return result
+    return result if target_id is None else _order_dropped_nodes(result, ids, new_parent_id, target_id, before)
 
+
+def _order_dropped_nodes(result, ids, new_parent_id, target_id, before):
     siblings = list(parent_nodes(result, new_parent_id))
     moved = [node for node in siblings if node.id in ids]
     if len(moved) != len(ids):
@@ -509,28 +541,38 @@ def align_nodes(component: ComponentDefinition, node_ids: Iterable[str], edge: s
     _ensure_unlocked_selection(component, (item.node.id for item in selected), "выровнять")
     _ensure_unprotected_subtrees(component, (item.node.id for item in selected), "выровнять")
     bounds = {item.node.id: node_bounds(component, item.node.id) for item in selected}
-    if edge in {"left", "top"}:
-        target = min(bound[0 if edge == "left" else 1] for bound in bounds.values())
-    else:
-        target = max(
-            bound[0] + bound[2] if edge == "right" else bound[1] + bound[3]
-            for bound in bounds.values()
-        )
+    target = _alignment_target(bounds.values(), edge)
     result = component
     for item in selected:
-        x, y, width, height = bounds[item.node.id]
-        if edge == "left":
-            dx, dy = target - x, 0.0
-        elif edge == "right":
-            dx, dy = target - (x + width), 0.0
-        elif edge == "top":
-            dx, dy = 0.0, target - y
-        else:
-            dx, dy = 0.0, target - (y + height)
-        if dx or dy:
-            current = locations(result)[item.node.id].node
-            result = update_node(result, item.node.id, x_mm=current.x_mm + dx, y_mm=current.y_mm + dy)
+        dx, dy = _alignment_delta(bounds[item.node.id], edge, target)
+        result = _move_aligned_node(result, item.node.id, dx, dy)
     return result
+
+
+def _alignment_target(bounds, edge):
+    index = 0 if edge == "left" else 1
+    values = (bound[index] for bound in bounds)
+    if edge in {"left", "top"}:
+        return min(values)
+    return max(bound[0] + bound[2] if edge == "right" else bound[1] + bound[3] for bound in bounds)
+
+
+def _alignment_delta(bounds, edge, target):
+    x, y, width, height = bounds
+    if edge == "left":
+        return target - x, 0.0
+    if edge == "right":
+        return target - (x + width), 0.0
+    if edge == "top":
+        return 0.0, target - y
+    return 0.0, target - (y + height)
+
+
+def _move_aligned_node(component, node_id, dx, dy):
+    if not (dx or dy):
+        return component
+    current = locations(component)[node_id].node
+    return update_node(component, node_id, x_mm=current.x_mm + dx, y_mm=current.y_mm + dy)
 
 
 def node_bounds(component: ComponentDefinition, node_id: str) -> tuple[float, float, float, float]:
