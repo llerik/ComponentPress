@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from html import escape
 from html.parser import HTMLParser
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import unicodedata
 from typing import Callable
@@ -19,16 +19,22 @@ from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNod
 from componentpress.domain.project import ProjectDefinition
 from componentpress.domain.render_plan import ResolvedComponent
 from componentpress.domain.values import CellValue, DataRow, DataSheetSnapshot, FormulaState, cell_is_empty, value_to_text
-from componentpress.bindings.html_policy import validate_html
+from .html_policy import validate_html
 from componentpress.project_io.paths import validate_relative_path
 from componentpress.rendering.resources import ProjectResourceLoader
 
 from .grammar import Reference, parse_references
 from .icons import expand_html_icons, expand_icons
+from .conditions import condition_matches
 
 
 _VARIABLE = re.compile(r'''\{\{\s*vars\s*\[\s*(["'])([^"'\\]+)\1\s*\]\s*\}\}''')
 _ALLOWED_AST = (nodes.Template, nodes.Output, nodes.Getitem, nodes.Name, nodes.Const)
+_HTML_KEY = re.compile(r"\{[A-Za-z0-9_-]+\}")
+
+
+def _template_literal(value: str) -> str:
+    return value.replace(r"\{", "{").replace(r"\}", "}")
 
 
 @dataclass(frozen=True)
@@ -38,6 +44,19 @@ class BindingLocation:
     node_id: str
     source: str
     sheet: str
+
+
+@dataclass(frozen=True)
+class _ResolutionContext:
+    component: ComponentDefinition
+    data: DataSheetSnapshot | None
+    row: DataRow | None
+    owner: Path
+    source: str
+    sheet: str
+
+    def location(self, node: Node, field: str) -> BindingLocation:
+        return BindingLocation(self.owner, field, node.id, self.source, self.sheet)
 
 
 class BindingResolver:
@@ -92,38 +111,77 @@ class BindingResolver:
         location: BindingLocation,
         transform_column: Callable[[str, CellValue], str],
         transform_variable: Callable[[str], str],
+        *, html_text: bool = False, transform_literal: Callable[[str], str] | None = None,
     ) -> str:
         references = parse_references(template)
         pieces: list[str] = []
         cursor = 0
         for reference in references:
             start, end = self._span(template, reference)
-            # Escape markers are syntax only in the original template. Values
-            # inserted from Excel/project variables are opaque data and must
-            # never be unescaped or parsed again.
-            pieces.append(template[cursor:start].replace(r"\{", "{").replace(r"\}", "}"))
-            if reference.kind == "column":
-                if row is None:
-                    raise ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", f"столбец {reference.name!r} без строки данных", location.owner, location.field, node_id=location.node_id))
-                cell = row.values.get(reference.name)
-                if cell is None:
-                    raise ProjectError(Diagnostic(
-                        "COLUMN_UNKNOWN", f"нет столбца {reference.name!r}", location.owner, location.field,
-                        source=location.source, sheet=location.sheet, node_id=location.node_id,
-                    ))
-                raw = self._cell_text(cell, location, reference.name)
-                # The sandbox evaluates only the generated constant-key access.
-                evaluated = self._expression("row", reference.name, {"row": {reference.name: raw}})
-                replacement = transform_column(evaluated, cell)
-            else:
-                if reference.name not in self.project.variables:
-                    raise ProjectError(Diagnostic("VARIABLE_UNKNOWN", f"нет переменной {reference.name!r}", location.owner, location.field, node_id=location.node_id))
-                evaluated = self._expression("vars", reference.name, {"vars": self.project.variables})
-                replacement = transform_variable(evaluated)
-            pieces.append(replacement)
+            pieces.extend((self._literal(template[cursor:start], transform_literal), self._resolve_reference(
+                template, reference, row, location, transform_column, transform_variable, html_text,
+            )))
             cursor = end
-        pieces.append(template[cursor:].replace(r"\{", "{").replace(r"\}", "}"))
+        pieces.append(self._literal(template[cursor:], transform_literal))
         return "".join(pieces)
+
+    @staticmethod
+    def _literal(value: str, transform: Callable[[str], str] | None) -> str:
+        return transform(value) if transform else _template_literal(value)
+
+    def _resolve_reference(self, template, reference, row, location, column, variable, html_text):
+        if reference.kind == "variable":
+            return self._variable_reference(reference, location, variable)
+        start, end = self._span(template, reference)
+        token = template[start:end]
+        if html_text and _HTML_KEY.fullmatch(token):
+            return self._expand_html_key(token, location)
+        return self._column_reference(reference, row, location, column)
+
+    def _variable_reference(self, reference, location, transform):
+        if reference.name not in self.project.variables:
+            raise ProjectError(Diagnostic("VARIABLE_UNKNOWN", f"нет переменной {reference.name!r}", location.owner, location.field, node_id=location.node_id))
+        value = self._expression("vars", reference.name, {"vars": self.project.variables})
+        return transform(value)
+
+    def _column_reference(self, reference, row, location, transform):
+        if row is None:
+            raise ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", f"столбец {reference.name!r} без строки данных", location.owner, location.field, node_id=location.node_id))
+        cell = row.values.get(reference.name)
+        if cell is None:
+            raise ProjectError(Diagnostic("COLUMN_UNKNOWN", f"нет столбца {reference.name!r}", location.owner, location.field, source=location.source, sheet=location.sheet, node_id=location.node_id))
+        raw = self._cell_text(cell, location, reference.name)
+        value = self._expression("row", reference.name, {"row": {reference.name: raw}})
+        return transform(value, cell)
+
+    def _expand_html_key(self, token: str, location: BindingLocation, *, cell: str = "") -> str:
+        return expand_html_icons(
+            token, self.project.icons, loader=self.loader if self.validate_resources else None,
+            owner=location.owner, field=location.field, source=location.source,
+            sheet=location.sheet, cell=cell, node_id=location.node_id,
+        )
+
+    def _expand_html_text(self, value: str, location: BindingLocation) -> str:
+        return expand_html_icons(
+            value, self.project.icons, loader=self.loader if self.validate_resources else None,
+            owner=location.owner, field=location.field, source=location.source,
+            sheet=location.sheet, cell="", node_id=location.node_id,
+        )
+
+    def _resolve_manual_html(self, template: str, row: DataRow | None, location: BindingLocation) -> str:
+        return self._replace(
+            template, row, location,
+            lambda value, cell: self._resolve_html_cell(value, cell, location),
+            lambda value: escape(value, quote=False),
+            html_text=True, transform_literal=lambda value: self._expand_html_text(value, location),
+        )
+
+    def _resolve_html_cell(self, value: str, cell: CellValue, location: BindingLocation) -> str:
+        return expand_icons(
+            value, self.project.icons, loader=self.loader if self.validate_resources else None,
+            owner=location.owner, field=location.field, source=location.source,
+            sheet=location.sheet, cell=cell.coordinate, node_id=location.node_id,
+        )
 
     def resolve_text(self, template: str, row: DataRow | None, location: BindingLocation, *, icons: bool) -> str:
         def column(value: str, cell: CellValue) -> str:
@@ -188,179 +246,166 @@ class BindingResolver:
         ))
 
     def resolve_component(self, component: ComponentDefinition, data: DataSheetSnapshot | None, row: DataRow | None, *, owner: Path | None = None) -> ResolvedComponent:
+        self._check_resolver_input(component, data, row)
+        context = self._context(component, data, row, owner)
+        self._check_condition_columns(component.elements, context)
+        model = component.model_copy(update={"elements": self._resolve_nodes(component.elements, context)})
+        return ResolvedComponent(model, component.id, row, data.version if data else None)
+
+    @staticmethod
+    def _check_resolver_input(component, data, row) -> None:
         if component.data is not None and data is None:
             raise ProjectError(Diagnostic("DATA_NOT_LOADED", "данные компонента не загружены"))
         if component.data is None and row is not None:
             raise ProjectError(Diagnostic("DATA_UNEXPECTED", "статический компонент не использует строки Excel"))
+
+    def _context(self, component, data, row, owner):
         source = component.data.source if component.data else ""
         sheet = component.data.sheet if component.data else ""
         owner = owner or self.root / f"components/{component.id}.yaml"
+        return _ResolutionContext(component, data, row, owner, source, sheet)
 
-        def check_columns(nodes_: tuple[Node, ...]) -> None:
-            for node in nodes_:
-                if isinstance(node, ConditionalGroupNode):
-                    location = BindingLocation(owner, f"elements.{node.id}.condition_column", node.id, source, sheet)
-                    if data is None:
-                        raise ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", "условной группе нужен источник Excel", owner, location.field, node_id=node.id))
-                    normalized = unicodedata.normalize("NFKC", node.condition_column.strip()).casefold()
-                    if not any(unicodedata.normalize("NFKC", name.strip()).casefold() == normalized for name in data.headers):
-                        raise ProjectError(Diagnostic("COLUMN_UNKNOWN", f"нет столбца {node.condition_column!r}", owner, location.field, source=source, sheet=sheet, node_id=node.id))
-                    check_columns(node.children)
-                elif isinstance(node, GroupNode):
-                    check_columns(node.children)
+    def _check_condition_columns(self, nodes_: tuple[Node, ...], context: _ResolutionContext) -> None:
+        for node in nodes_:
+            if isinstance(node, ConditionalGroupNode):
+                self._require_resolver_column(node.condition_column, node, context, "condition_column")
+            if isinstance(node, GroupNode):
+                self._check_condition_columns(node.children, context)
 
-        check_columns(component.elements)
+    def _require_resolver_column(self, column, node, context, field):
+        location = context.location(node, f"elements.{node.id}.{field}")
+        if context.data is None:
+            raise ProjectError(Diagnostic("COLUMN_WITHOUT_DATA", "условной группе нужен источник Excel", location.owner, location.field, node_id=node.id))
+        self._require_declared_column(column, location, context.data.headers)
 
-        def visit(nodes_: tuple[Node, ...]) -> tuple[Node, ...]:
-            resolved: list[Node] = []
-            for node in nodes_:
-                if isinstance(node, ImageNode):
-                    location = BindingLocation(owner, f"elements.{node.id}.source", node.id, source, sheet)
-                    path_template = node.source
-                    empty_source = False
-                    if node.optional and node.source_mode == "manual" and not node.source:
-                        empty_source = True
-                        resolved_path = ""
-                    if node.source_mode == "column":
-                        cell = self._column_cell(node.source_column or "", row, location)
-                        if node.optional and cell_is_empty(cell):
-                            self._cell_text(cell, location, node.source_column or "")
-                            empty_source = True
-                            resolved_path = ""
-                        else:
-                            path_template = self._cell_text(cell, location, node.source_column or "")
-                    if not empty_source and node.source_mode == "column":
-                        try:
-                            from pathlib import PurePosixPath
-                            filename = PurePosixPath(path_template)
-                            if filename.name != path_template or "/" in path_template or "\\" in path_template:
-                                raise ProjectError(Diagnostic(
-                                    "IMAGE_FILENAME_INVALID", "в столбце должно быть имя файла изображения",
-                                    owner, location.field, message_key="error.image_excel_filename",
-                                ))
-                            path_template = f"assets/images/{path_template}"
-                            validate_relative_path(path_template)
-                            if self.validate_resources:
-                                self.loader.image(path_template, owner=owner, field=location.field)
-                        except ProjectError as exc:
-                            raise self._resource_error(exc, location, cell) from exc
-                        resolved_path = path_template
-                    elif not empty_source:
-                        resolved_path = self.resolve_path(path_template, row, location)
-                    resolved.append(node.model_copy(update={
-                        "source": resolved_path,
-                        "source_mode": "manual", "source_column": None,
-                    }))
-                elif isinstance(node, HtmlNode):
-                    location = BindingLocation(owner, f"elements.{node.id}.html", node.id, source, sheet)
-                    html = node.html
-                    if node.content_mode == "column":
-                        cell = self._column_cell(node.content_column or "", row, location)
-                        html = self._cell_text(cell, location, node.content_column or "")
-                        try:
-                            validate_html(html, owner, location.field, allow_images=False)
-                        except ProjectError as exc:
-                            raise ProjectError(Diagnostic(
-                                exc.diagnostic.code, exc.diagnostic.message, owner, location.field,
-                                source=source, sheet=sheet, cell=cell.coordinate, node_id=node.id,
-                                message_key=exc.diagnostic.message_key, params=exc.diagnostic.params,
-                                incident_id=exc.diagnostic.incident_id,
-                            )) from exc
-                        if "{{" in html:
-                            raise ProjectError(Diagnostic("COLUMN_TEMPLATE_FORBIDDEN", "содержимое Excel не может содержать подстановки", owner, location.field, source=source, sheet=sheet, cell=cell.coordinate, node_id=node.id))
-                        html = expand_html_icons(
-                            html, self.project.icons, loader=self.loader if self.validate_resources else None, owner=owner,
-                            field=location.field, source=source, sheet=sheet,
-                            cell=cell.coordinate, node_id=node.id,
-                            strict_unknown=False,
-                        )
-                        try:
-                            validate_html(html, owner, location.field)
-                        except ProjectError as exc:
-                            raise ProjectError(Diagnostic(
-                                exc.diagnostic.code, exc.diagnostic.message, owner, location.field,
-                                source=source, sheet=sheet, cell=cell.coordinate, node_id=node.id,
-                                message_key=exc.diagnostic.message_key, params=exc.diagnostic.params,
-                                incident_id=exc.diagnostic.incident_id,
-                            )) from exc
-                    else:
-                        html = self.resolve_html(html, row, location, content_mode="manual")
-                    resolved.append(node.model_copy(update={"html": html, "content_mode": "manual", "content_column": None}))
-                elif isinstance(node, ConditionalGroupNode):
-                    condition_matches = None
-                    if row is not None:
-                        location = BindingLocation(owner, f"elements.{node.id}.condition_column", node.id, source, sheet)
-                        cell = self._column_cell(node.condition_column, row, location)
-                        value = self._cell_text(cell, location, node.condition_column)
-                        empty = cell_is_empty(cell)
-                        condition_matches = {
-                            "equals": value == node.condition_value,
-                            "not_equals": value != node.condition_value,
-                            "is_empty": empty,
-                            "is_not_empty": not empty,
-                        }[node.condition_operator]
-                    resolved.append(node.model_copy(update={
-                        "condition_matches": condition_matches,
-                        "children": visit(node.children),
-                    }))
-                elif isinstance(node, GroupNode):
-                    resolved.append(node.model_copy(update={"children": visit(node.children)}))
-                else:
-                    resolved.append(node)
-            return tuple(resolved)
+    def _resolve_nodes(self, nodes_: tuple[Node, ...], context: _ResolutionContext) -> tuple[Node, ...]:
+        return tuple(self._resolve_node(node, context) for node in nodes_)
 
-        model = component.model_copy(update={"elements": visit(component.elements)})
-        return ResolvedComponent(model, component.id, row, data.version if data else None)
+    def _resolve_node(self, node: Node, context: _ResolutionContext) -> Node:
+        if isinstance(node, ImageNode):
+            return self._resolve_image(node, context)
+        if isinstance(node, HtmlNode):
+            return self._resolve_html_node(node, context)
+        if isinstance(node, ConditionalGroupNode):
+            return self._resolve_condition(node, context)
+        if isinstance(node, GroupNode):
+            return node.model_copy(update={"children": self._resolve_nodes(node.children, context)})
+        return node
+
+    def _resolve_condition(self, node: ConditionalGroupNode, context: _ResolutionContext) -> Node:
+        matches = None if context.row is None else self._condition_value(node, context)
+        return node.model_copy(update={
+            "condition_matches": matches,
+            "children": self._resolve_nodes(node.children, context),
+        })
+
+    def _condition_value(self, node: ConditionalGroupNode, context: _ResolutionContext) -> bool:
+        location = context.location(node, f"elements.{node.id}.condition_column")
+        cell = self._column_cell(node.condition_column, context.row, location)
+        value = self._cell_text(cell, location, node.condition_column)
+        return condition_matches(node.condition_operator, value, cell_is_empty(cell), node.condition_value)
+
+    def _resolve_image(self, node: ImageNode, context: _ResolutionContext) -> Node:
+        location = context.location(node, f"elements.{node.id}.source")
+        path, _ = self._image_path(node, context, location)
+        return node.model_copy(update={"source": path, "source_mode": "manual", "source_column": None})
+
+    def _image_path(self, node: ImageNode, context: _ResolutionContext, location: BindingLocation) -> tuple[str, CellValue | None]:
+        if node.source_mode == "manual":
+            return self._manual_image_path(node, context, location)
+        cell = self._column_cell(node.source_column or "", context.row, location)
+        if node.optional and cell_is_empty(cell):
+            self._cell_text(cell, location, node.source_column or "")
+            return "", cell
+        return self._column_image_path(self._cell_text(cell, location, node.source_column or ""), location, cell), cell
+
+    def _manual_image_path(self, node, context, location):
+        if node.optional and not node.source:
+            return "", None
+        return self.resolve_path(node.source, context.row, location), None
+
+    def _column_image_path(self, filename: str, location: BindingLocation, cell: CellValue) -> str:
+        if PurePosixPath(filename).name != filename or "/" in filename or "\\" in filename:
+            raise ProjectError(Diagnostic("IMAGE_FILENAME_INVALID", "в столбце должно быть имя файла изображения", location.owner, location.field, source=location.source, sheet=location.sheet, cell=cell.coordinate, node_id=location.node_id, message_key="error.image_excel_filename"))
+        path = f"assets/images/{filename}"
+        try:
+            validate_relative_path(path)
+            if self.validate_resources:
+                self.loader.image(path, owner=location.owner, field=location.field)
+        except ProjectError as exc:
+            raise self._resource_error(exc, location, cell) from exc
+        return path
+
+    def _resolve_html_node(self, node: HtmlNode, context: _ResolutionContext) -> Node:
+        location = context.location(node, f"elements.{node.id}.html")
+        html = self._column_html(node, context, location) if node.content_mode == "column" else self.resolve_html(node.html, context.row, location)
+        return node.model_copy(update={"html": html, "content_mode": "manual", "content_column": None})
+
+    def _column_html(self, node: HtmlNode, context: _ResolutionContext, location: BindingLocation) -> str:
+        cell = self._column_cell(node.content_column or "", context.row, location)
+        html = self._cell_text(cell, location, node.content_column or "")
+        self._validate_source_html(html, location, cell, allow_images=False)
+        if "{{" in html:
+            raise ProjectError(Diagnostic("COLUMN_TEMPLATE_FORBIDDEN", "содержимое Excel не может содержать подстановки", location.owner, location.field, source=location.source, sheet=location.sheet, cell=cell.coordinate, node_id=node.id))
+        html = self._expand_column_html(html, location, cell)
+        self._validate_source_html(html, location, cell, allow_images=True)
+        return html
+
+    def _expand_column_html(self, html: str, location: BindingLocation, cell: CellValue) -> str:
+        try:
+            return expand_html_icons(
+                html, self.project.icons, loader=self.loader if self.validate_resources else None,
+                owner=location.owner, field=location.field, source=location.source,
+                sheet=location.sheet, cell=cell.coordinate, node_id=location.node_id,
+            )
+        except ProjectError as exc:
+            raise self._resource_error(exc, location, cell) from exc
+
+    def _validate_source_html(self, html: str, location: BindingLocation, cell: CellValue, *, allow_images: bool) -> None:
+        try:
+            validate_html(html, location.owner, location.field, allow_images=allow_images)
+        except ProjectError as exc:
+            raise self._resource_error(exc, location, cell) from exc
 
     def validate_columns(self, component: ComponentDefinition, data: DataSheetSnapshot, *, owner: Path | None = None) -> None:
         """Check declared column bindings even when the sheet has no data rows."""
-        source = component.data.source if component.data else ""
-        sheet = component.data.sheet if component.data else ""
-        owner = owner or self.root / f"components/{component.id}.yaml"
-        names = {unicodedata.normalize("NFKC", name.strip()).casefold() for name in data.headers}
+        context = self._context(component, data, None, owner)
+        self._validate_node_columns(component.elements, context)
 
-        def require(column: str, field: str, node_id: str) -> None:
-            normalized = unicodedata.normalize("NFKC", column.strip()).casefold()
-            if normalized not in names:
-                raise ProjectError(Diagnostic(
-                    "COLUMN_UNKNOWN", f"нет столбца {column!r}", owner, field,
-                    source=source, sheet=sheet, node_id=node_id,
-                ))
+    def _validate_node_columns(self, nodes_: tuple[Node, ...], context: _ResolutionContext) -> None:
+        for node in nodes_:
+            self._validate_node_column(node, context)
+            if isinstance(node, GroupNode):
+                self._validate_node_columns(node.children, context)
 
-        def visit(nodes_: tuple[Node, ...]) -> None:
-            for node in nodes_:
-                if isinstance(node, ImageNode):
-                    if node.source_mode == "column":
-                        require(node.source_column or "", f"elements.{node.id}.source", node.id)
-                elif isinstance(node, HtmlNode):
-                    if node.content_mode == "column":
-                        require(node.content_column or "", f"elements.{node.id}.html", node.id)
-                elif isinstance(node, ConditionalGroupNode):
-                    require(node.condition_column, f"elements.{node.id}.condition_column", node.id)
-                    visit(node.children)
-                elif isinstance(node, GroupNode):
-                    visit(node.children)
+    def _validate_node_column(self, node: Node, context: _ResolutionContext) -> None:
+        if isinstance(node, ImageNode) and node.source_mode == "column":
+            self._require_declared_column(node.source_column or "", context.location(node, f"elements.{node.id}.source"), context.data.headers)
+        if isinstance(node, HtmlNode) and node.content_mode == "column":
+            self._require_declared_column(node.content_column or "", context.location(node, f"elements.{node.id}.html"), context.data.headers)
+        if isinstance(node, ConditionalGroupNode):
+            self._require_declared_column(node.condition_column, context.location(node, f"elements.{node.id}.condition_column"), context.data.headers)
 
-        visit(component.elements)
+    @staticmethod
+    def _require_declared_column(column: str, location: BindingLocation, headers: tuple[str, ...]) -> None:
+        normalized = unicodedata.normalize("NFKC", column.strip()).casefold()
+        names = {unicodedata.normalize("NFKC", name.strip()).casefold() for name in headers}
+        if normalized not in names:
+            raise ProjectError(Diagnostic("COLUMN_UNKNOWN", f"нет столбца {column!r}", location.owner, location.field, source=location.source, sheet=location.sheet, node_id=location.node_id))
 
     def validate_static_resources(self, component: ComponentDefinition, *, owner: Path | None = None) -> None:
         """Validate manual resources even if a bound sheet currently has no rows."""
-        from componentpress.domain.nodes import ConditionalGroupNode, GroupNode
+        context = self._context(component, None, None, owner)
+        self._validate_static_nodes(component.elements, context)
 
-        source = component.data.source if component.data else ""
-        sheet = component.data.sheet if component.data else ""
-        owner = owner or self.root / f"components/{component.id}.yaml"
-
-        def visit(nodes_: tuple[Node, ...]) -> None:
-            for node in nodes_:
-                if isinstance(node, ImageNode) and node.source_mode == "manual" and not (node.optional and not node.source):
-                    self.resolve_path(node.source, None, BindingLocation(owner, f"elements.{node.id}.source", node.id, source, sheet))
-                elif isinstance(node, HtmlNode) and node.content_mode == "manual":
-                    self.resolve_html(node.html, None, BindingLocation(owner, f"elements.{node.id}.html", node.id, source, sheet))
-                elif isinstance(node, GroupNode):
-                    visit(node.children)
-
-        visit(component.elements)
+    def _validate_static_nodes(self, nodes_: tuple[Node, ...], context: _ResolutionContext) -> None:
+        for node in nodes_:
+            if isinstance(node, ImageNode) and node.source_mode == "manual" and not (node.optional and not node.source):
+                self.resolve_path(node.source, None, context.location(node, f"elements.{node.id}.source"))
+            if isinstance(node, HtmlNode) and node.content_mode == "manual":
+                self.resolve_html(node.html, None, context.location(node, f"elements.{node.id}.html"))
+            if isinstance(node, GroupNode):
+                self._validate_static_nodes(node.children, context)
 
     @staticmethod
     def _column_cell(column: str, row: DataRow | None, location: BindingLocation) -> CellValue:
@@ -414,58 +459,10 @@ class _BindingHtmlParser(HTMLParser):
         self.output.append(f"</{tag}>")
 
     def handle_data(self, data: str) -> None:
-        def expand_source(value: str, *, strict_unknown: bool = True) -> str:
-            return expand_html_icons(
-                value, self.resolver.project.icons,
-                loader=self.resolver.loader if self.resolver.validate_resources else None,
-                owner=self.location.owner, field=self.location.field,
-                source=self.location.source, sheet=self.location.sheet,
-                cell="", node_id=self.location.node_id,
-                strict_unknown=strict_unknown,
-            )
-
         if self.content_mode != "manual":
-            self.output.append(expand_source(data, strict_unknown=False))
+            self.output.append(self.resolver._expand_html_text(data, self.location))
             return
-        pieces: list[str] = []
-        cursor = 0
-        for reference in parse_references(data):
-            start, end = self.resolver._span(data, reference)
-            pieces.append(expand_source(data[cursor:start]))
-            if reference.kind == "column":
-                if self.row is None:
-                    raise ProjectError(Diagnostic(
-                        "COLUMN_WITHOUT_DATA", f"столбец {reference.name!r} без строки данных",
-                        self.location.owner, self.location.field, node_id=self.location.node_id,
-                    ))
-                cell = self.row.values.get(reference.name)
-                if cell is None:
-                    raise ProjectError(Diagnostic(
-                        "COLUMN_UNKNOWN", f"нет столбца {reference.name!r}", self.location.owner,
-                        self.location.field, source=self.location.source, sheet=self.location.sheet,
-                        node_id=self.location.node_id,
-                    ))
-                value = self.resolver._cell_text(cell, self.location, reference.name)
-                pieces.append(expand_icons(
-                    value, self.resolver.project.icons,
-                    loader=self.resolver.loader if self.resolver.validate_resources else None,
-                    owner=self.location.owner, field=self.location.field,
-                    source=self.location.source, sheet=self.location.sheet,
-                    cell=cell.coordinate, node_id=self.location.node_id,
-                ))
-                cursor = end
-                continue
-            else:
-                if reference.name not in self.resolver.project.variables:
-                    raise ProjectError(Diagnostic(
-                        "VARIABLE_UNKNOWN", f"нет переменной {reference.name!r}",
-                        self.location.owner, self.location.field, node_id=self.location.node_id,
-                    ))
-                value = self.resolver._expression("vars", reference.name, {"vars": self.resolver.project.variables})
-            pieces.append(escape(value, quote=False))
-            cursor = end
-        pieces.append(expand_source(data[cursor:]))
-        self.output.append("".join(pieces))
+        self.output.append(self.resolver._resolve_manual_html(data, self.row, self.location))
 
     def handle_entityref(self, name: str) -> None:
         self.output.append(f"&{name};")

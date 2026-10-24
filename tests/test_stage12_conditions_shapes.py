@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from componentpress.application.contracts import DocumentSnapshot, ProjectSnapshot
 from componentpress.bindings.resolver import BindingResolver
+from componentpress.bindings.conditions import condition_matches
 from componentpress.domain.component import ComponentDefinition, DataBinding, SizeMM
 from componentpress.domain.diagnostics import ProjectError
 from componentpress.domain.nodes import ConditionalGroupNode, LineNode, ShapeNode
@@ -112,6 +113,25 @@ def test_condition_uses_exact_stable_cell_text_and_keeps_hidden_children_validat
         for row in data.rows
     ]
     assert matches == [True, False, False]
+
+
+@pytest.mark.parametrize(
+    ("operator", "value", "empty", "expected", "result"),
+    [
+        ("equals", " да", False, " да", True),
+        ("not_equals", " Да", False, "да", True),
+        ("is_empty", "", True, None, True),
+        ("is_not_empty", "0", False, None, True),
+        ("is_not_empty", "false", False, None, True),
+        ("is_not_empty", " ", False, None, True),
+        ("is_empty", "0", False, None, False),
+        ("is_empty", "false", False, None, False),
+    ],
+)
+def test_pure_condition_rule_preserves_exact_text_and_empty_values(
+    operator: str, value: str, empty: bool, expected: str | None, result: bool,
+) -> None:
+    assert condition_matches(operator, value, empty, expected) is result
 
 
 def test_column_error_is_reported_on_empty_sheet_and_valid_column_has_no_row_state() -> None:

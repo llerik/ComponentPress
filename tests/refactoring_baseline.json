@@ -143,46 +143,6 @@
       "stage": "20",
       "owner": "coder:stage20"
     },
-    "src/componentpress/bindings/resolver.py|BindingResolver._replace": {
-      "path": "src/componentpress/bindings/resolver.py",
-      "name": "BindingResolver._replace",
-      "line": 88,
-      "length": 39,
-      "stage": "8в",
-      "owner": "coder:src/componentpress/bindings"
-    },
-    "src/componentpress/bindings/resolver.py|BindingResolver.resolve_component": {
-      "path": "src/componentpress/bindings/resolver.py",
-      "name": "BindingResolver.resolve_component",
-      "line": 190,
-      "length": 124,
-      "stage": "8в",
-      "owner": "coder:src/componentpress/bindings"
-    },
-    "src/componentpress/bindings/resolver.py|BindingResolver.resolve_component.visit": {
-      "path": "src/componentpress/bindings/resolver.py",
-      "name": "BindingResolver.resolve_component.visit",
-      "line": 214,
-      "length": 97,
-      "stage": "8в",
-      "owner": "coder:src/componentpress/bindings"
-    },
-    "src/componentpress/bindings/resolver.py|BindingResolver.validate_columns": {
-      "path": "src/componentpress/bindings/resolver.py",
-      "name": "BindingResolver.validate_columns",
-      "line": 315,
-      "length": 30,
-      "stage": "8в",
-      "owner": "coder:src/componentpress/bindings"
-    },
-    "src/componentpress/bindings/resolver.py|_BindingHtmlParser.handle_data": {
-      "path": "src/componentpress/bindings/resolver.py",
-      "name": "_BindingHtmlParser.handle_data",
-      "line": 416,
-      "length": 53,
-      "stage": "20",
-      "owner": "coder:stage20"
-    },
     "src/componentpress/bindings/static.py|resolve_static": {
       "path": "src/componentpress/bindings/static.py",
       "name": "resolve_static",

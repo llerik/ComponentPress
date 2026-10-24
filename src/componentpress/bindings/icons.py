@@ -91,6 +91,16 @@ class _HtmlIconParser(HTMLParser):
         self.output.append(f"<!{decl}>")
 
 
+def _resource_error(exc: ProjectError, *, owner: Path, field: str, source: str,
+                    sheet: str, cell: str, node_id: str) -> ProjectError:
+    diagnostic = exc.diagnostic
+    return ProjectError(Diagnostic(
+        diagnostic.code, diagnostic.message, owner, field, source=source,
+        sheet=sheet, cell=cell, node_id=node_id, message_key=diagnostic.message_key,
+        params=diagnostic.params, incident_id=diagnostic.incident_id,
+    ))
+
+
 def expand_icons(
     text: str,
     icons: dict[str, IconDefinition],
@@ -121,12 +131,8 @@ def expand_icons(
                 try:
                     loader.image(icon.path, owner=owner, field=field)
                 except ProjectError as exc:
-                    raise ProjectError(Diagnostic(
-                        exc.diagnostic.code, exc.diagnostic.message, owner, field,
-                        source=source, sheet=sheet, cell=cell, node_id=node_id,
-                        message_key=exc.diagnostic.message_key, params=exc.diagnostic.params,
-                        incident_id=exc.diagnostic.incident_id,
-                    )) from exc
+                    raise _resource_error(exc, owner=owner, field=field, source=source,
+                                          sheet=sheet, cell=cell, node_id=node_id) from exc
             pieces.append(
                 f'<img src="{escape(icon.path, quote=True)}" '
                 f'width="{icon.width_px}" height="{icon.height_px}" alt="{escape(name, quote=True)}" />'
@@ -187,9 +193,7 @@ def _expand_key(
         try:
             loader.image(icon.path, owner=owner, field=field)
         except ProjectError as exc:
-            raise ProjectError(Diagnostic(
-                exc.diagnostic.code, exc.diagnostic.message, owner, field,
-                source=source, sheet=sheet, cell=cell, node_id=node_id,
-            )) from exc
+            raise _resource_error(exc, owner=owner, field=field, source=source,
+                                  sheet=sheet, cell=cell, node_id=node_id) from exc
     return (f'<img src="{escape(icon.path, quote=True)}" width="{icon.width_px}" '
             f'height="{icon.height_px}" alt="{escape(name, quote=True)}" />')

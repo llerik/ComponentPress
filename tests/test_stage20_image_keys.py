@@ -5,7 +5,12 @@ from pydantic import ValidationError
 from PySide6.QtGui import QColor, QImage
 
 from componentpress.bindings.icons import expand_html_icons
+from componentpress.bindings.resolver import BindingResolver
+from componentpress.domain.component import ComponentDefinition, SizeMM
+from componentpress.domain.diagnostics import ProjectError
+from componentpress.domain.nodes import HtmlNode
 from componentpress.domain.project import IconDefinition, ProjectDefinition
+from componentpress.domain.values import CellValue, DataRow, DataSheetSnapshot
 
 
 def _project(keys: dict[str, IconDefinition]) -> ProjectDefinition:
@@ -16,6 +21,18 @@ def _project(keys: dict[str, IconDefinition]) -> ProjectDefinition:
         version="1.0",
         images=("assets/images/magic.png",),
         icons=keys,
+    )
+
+
+def _html_component(html: str, *, column: str | None = None, bound: bool = False) -> ComponentDefinition:
+    return ComponentDefinition(
+        schema_version=8, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
+        data={"sheet": "Cards"} if column or bound else None,
+        elements=(HtmlNode(
+            id="text", name="Text", type="html", x_mm=0, y_mm=0,
+            width_mm=30, height_mm=20, font_family="Arial", font_size_pt=8,
+            html=html, content_mode="column" if column else "manual", content_column=column,
+        ),),
     )
 
 
@@ -71,6 +88,57 @@ def test_html_key_expands_from_text_nodes_using_configured_pixel_size() -> None:
     assert 'alt="{image_2}"' in result
 
 
+def test_resolver_expands_only_original_html_keys_and_keeps_opaque_values() -> None:
+    project = _project({"magic": IconDefinition(path="assets/images/magic.png", width_px=8, height_px=6)})
+    project = project.model_copy(update={"variables": {"label": "{magic}"}})
+    component = _html_component(
+        '<p>{magic} {{ vars["label"] }} \\{magic\\}</p><img alt="{magic}" src="assets/images/leaf.png" />&lt;{magic}',
+    )
+
+    result = BindingResolver(Path("."), project, validate_resources=False).resolve_component(
+        component, None, None,
+    )
+
+    assert result.component.elements[0].html == (
+        '<p><img src="assets/images/magic.png" width="8" height="6" alt="magic" /> '
+        '{magic} {magic}</p><img alt="{magic}" src="assets/images/leaf.png" />&lt;'
+        '<img src="assets/images/magic.png" width="8" height="6" alt="magic" />'
+    )
+
+
+def test_column_html_expands_keys_from_the_original_cell(tmp_path: Path) -> None:
+    project = _project({"magic": IconDefinition(path="assets/images/magic.png", width_px=8, height_px=6)})
+    component = _html_component("", column="Markup", bound=True)
+    row = DataRow(2, "instance", 1, {"Markup": CellValue("<p>{magic}</p>", "C2")})
+    sheet = DataSheetSnapshot("main", tmp_path / "book.xlsx", "Cards", "hash", 1, ("Markup",), (row,))
+
+    resolved = BindingResolver(tmp_path, project, validate_resources=False).resolve_component(component, sheet, row)
+
+    assert resolved.component.elements[0].html == (
+        '<p><img src="assets/images/magic.png" width="8" height="6" alt="magic" /></p>'
+    )
+
+
+@pytest.mark.parametrize("column", [None, "Markup"])
+def test_unknown_html_key_reports_address_through_component_resolver(column: str | None) -> None:
+    project = _project({})
+    component = _html_component("<p>{missing}</p>", column=column, bound=True)
+    row = DataRow(4, "instance", 1, {"Markup": CellValue("<p>{missing}</p>", "C4")})
+    sheet = DataSheetSnapshot("main", Path("book.xlsx"), "Cards", "hash", 1, ("Markup",), (row,))
+    resolver = BindingResolver(Path("."), project, validate_resources=False)
+
+    with pytest.raises(ProjectError) as caught:
+        resolver.resolve_component(component, sheet, row)
+
+    diagnostic = caught.value.diagnostic
+    assert diagnostic.code == "IMAGE_KEY_UNKNOWN"
+    assert diagnostic.message_key == "error.image_key_unknown"
+    assert diagnostic.params == {"name": "missing"}
+    assert (diagnostic.source, diagnostic.sheet, diagnostic.cell, diagnostic.node_id) == (
+        "main", "Cards", "C4" if column else "", "text",
+    )
+
+
 def test_variable_value_is_not_reparsed_as_an_image_key() -> None:
     from componentpress.bindings.resolver import BindingLocation, BindingResolver
 
@@ -98,6 +166,33 @@ def test_html_unknown_image_key_fails_with_a_diagnostic() -> None:
             source="", sheet="", cell="", node_id="text",
         )
     assert caught.value.diagnostic.code == "IMAGE_KEY_UNKNOWN"
+
+
+def test_html_key_resource_error_keeps_diagnostic_metadata(tmp_path: Path) -> None:
+    from componentpress.domain.diagnostics import Diagnostic
+
+    class FailingLoader:
+        def image(self, relative_path: str, *, owner: Path, field: str) -> None:
+            raise ProjectError(Diagnostic(
+                "RESOURCE_MISSING", relative_path, owner, field,
+                message_key="error.resource_missing", params={"reason": "unavailable"},
+                incident_id="incident-test",
+            ))
+
+    project = _project({"magic": IconDefinition(path="assets/images/magic.png", width_px=8, height_px=8)})
+    with pytest.raises(ProjectError) as caught:
+        expand_html_icons(
+            "<p>{magic}</p>", project.icons, loader=FailingLoader(), owner=tmp_path / "card.yaml",
+            field="elements.text.html", source="main", sheet="Cards", cell="C4", node_id="text",
+        )
+
+    diagnostic = caught.value.diagnostic
+    assert (diagnostic.message_key, diagnostic.params, diagnostic.incident_id) == (
+        "error.resource_missing", {"reason": "unavailable"}, "incident-test",
+    )
+    assert (diagnostic.source, diagnostic.sheet, diagnostic.cell, diagnostic.node_id) == (
+        "main", "Cards", "C4", "text",
+    )
 
 
 def test_unregistered_file_can_be_registered_again_and_keys_follow_registration(tmp_path: Path) -> None:
