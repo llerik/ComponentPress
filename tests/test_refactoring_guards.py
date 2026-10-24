@@ -49,6 +49,12 @@ def test_nested_methods_and_async_are_all_inventoried():
     assert [(f["name"], f["length"]) for f in functions] == [("Rules.outer", 4), ("Rules.outer.inner", 2)]
 
 
+def test_editor_lazy_public_export_is_not_a_package_load_cycle():
+    source = 'def __getattr__(name):\n    if name == "MainWindow":\n        from .main_window import MainWindow\n        return MainWindow\n'
+    inventory = Inventory("src/componentpress/editor/__init__.py", ast.parse(source))
+    assert inventory.imports == []
+
+
 def test_only_explicit_production_roots_are_scanned(tmp_path):
     included = ("src/componentpress/test_smoke.py", "packaging/release_test.py", "examples/tests/generator.py")
     excluded = ("tests/test_rule.py", "tests/support/helper.py", ".venv/test.py", "build/test.py", "dist/test.py", "releases/1/test.py")

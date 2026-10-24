@@ -204,6 +204,47 @@ def test_cancelled_window_close_keeps_preview_queue_open(make_editor, monkeypatc
     assert window._preview_coordinator.phase is PreviewPhase.RENDER
 
 
+def test_stale_selection_falls_back_to_component_properties(make_editor):
+    window, _root, _errors = make_editor()
+
+    window._show_selection(("removed-node",))
+
+    assert not window.component_properties_group.isHidden()
+    assert window.multi_properties_group.isHidden()
+    assert window.element_properties_group.isHidden()
+
+
+@pytest.mark.parametrize("phase", ("fonts", "render"))
+def test_preview_close_retries_after_worker_return(make_editor, monkeypatch, phase):
+    from componentpress.editor.preview_worker import FontReadSucceeded, PreviewRenderSucceeded
+    from componentpress.preview_coordinator import PreviewJob
+
+    window, _root, _errors = make_editor()
+    tab = window.active_tab
+    request = tab.preview_request_data(window._preview_session_identity)
+    released = []
+    job = PreviewJob(request, tab, SimpleNamespace(close=lambda: released.append(True)))
+    window._preview_coordinator.submit(job)
+    if phase == "render":
+        window._preview_coordinator.begin_render(request.identity.request)
+    timers = []
+    waits = iter((False, True))
+    monkeypatch.setattr(window, "_confirm_all_dirty", lambda: True)
+    monkeypatch.setattr(window._preview_pool, "waitForDone", lambda _timeout: next(waits))
+    monkeypatch.setattr(main_window_module.QTimer, "singleShot", lambda delay, callback: timers.append((delay, callback)))
+
+    assert not window.close()
+    assert window._preview_close_pending is True
+    assert timers == [(25, window._retry_preview_close)]
+    timers.pop()[1]()
+
+    assert window._preview_coordinator.active is None
+    assert released == [True]
+    result = FontReadSucceeded(request.identity, ()) if phase == "fonts" else PreviewRenderSucceeded(request.identity, QImage(), ())
+    window._finish_preview_on_close(result)
+    assert released == [True]
+
+
 def test_preview_first_and_last_follow_filtered_excel_rows(make_editor, qtbot):
     window, _root, errors = make_editor(excel=True)
     tab = window.open_component("forest-card")

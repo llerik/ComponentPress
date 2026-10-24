@@ -119,6 +119,9 @@ class Inventory(ast.NodeVisitor):
         target = "." * node.level + (node.module or "")
         if node.level:
             target = importlib.util.resolve_name(target, self.package)
+        if self.path.endswith("/editor/__init__.py") and self.scope == ["__getattr__"]:
+            self.generic_visit(node)
+            return
         # Keep imported names: `from componentpress import rendering` is an edge too.
         for alias in node.names:
             self.add_import(node, target + "." + alias.name, "from")
