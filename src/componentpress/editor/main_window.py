@@ -536,6 +536,13 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         if self.controller.recovery_diagnostics:
             details = "; ".join(format_diagnostic(item) for item in self.controller.recovery_diagnostics)
             self.statusBar().showMessage(f"Восстановление операций: {details}", 15000)
+        component_diagnostics = tuple(
+            diagnostic
+            for document in session.documents.values()
+            for diagnostic in document.committed.diagnostics
+        )
+        if component_diagnostics:
+            self._add_events(component_diagnostics)
         if self.controller.preview is not None:
             self.controller.preview.invalidate(session.snapshot.root)
             self._validate_all(force_read=True)
@@ -1027,7 +1034,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         if self.session is None or component_id not in self.session.documents:
             return
         document = self.session.documents[component_id]
-        if document.has_invalid_draft:
+        if document.has_invalid_draft or not document.model_ready or document.model is None:
             self._show_error(ProjectError(Diagnostic("INVALID_DRAFT", "Исправьте черновик в режиме «Текст» перед изменением свойств компонента", document.source.path)))
             tab = self._tabs.get(component_id)
             if tab is not None:
@@ -1088,7 +1095,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         if not self._component_deletion_ready(component_id):
             return False
         document = self.session.documents[component_id]
-        if confirm and not self._confirm_component_delete(document.model.name):
+        if confirm and not self._confirm_component_delete(document.display_name):
             return False
         if document.draft_diagnostics and not self._confirm_draft_delete():
             return False
@@ -1287,7 +1294,12 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
     def _install_component_tab(self, tab: DocumentTab, component_id: str) -> None:
         # Seed the editor before adding it to the tab widget: palette events can
         # rehighlight it synchronously, and must not turn an empty editor into a draft.
-        tab.set_text(self.session.documents[component_id].current_text)
+        document = self.session.documents[component_id]
+        tab.set_text(document.current_text)
+        self._show_document_diagnostics(tab, document.current_diagnostics)
+        if not document.model_ready:
+            tab.set_mode("text")
+            tab.layout_mode.setEnabled(False)
         tab.text_editor.installEventFilter(self)
         tab.draftChanged.connect(lambda text, item=tab: self._draft_changed(item, text))
         index = self.tabs.addTab(tab, "")
@@ -1321,15 +1333,33 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
     def _show_active_tab(self, tab: DocumentTab) -> None:
         document = self.session.documents[tab.component_id]
         self.undo_group.setActiveStack(tab.undo_stack)
+        tab.set_text(document.current_text)
+        self._show_document_diagnostics(tab, document.current_diagnostics)
+        tab.layout_mode.setEnabled(document.model_ready)
+        if not document.model_ready:
+            self._show_invalid_component_tab(tab)
+            return
         valid_ids = locations(document.model)
         selected = tuple(node_id for node_id in tab.canvas.selected_ids if node_id in valid_ids)
         self._install_element_model(document.model, selected)
         self.properties.show_component(document.model)
-        tab.set_text(document.current_text)
         self.status_zoom.setText(tr("ui.zoom_status", percent=tab.canvas.zoom_percent))
         self._populate_data_panel()
         self._project_history_focus = False
         self._refresh_preview(tab)
+
+    def _show_invalid_component_tab(self, tab: DocumentTab) -> None:
+        tab.set_mode("text")
+        self.element_tree.setModel(None)
+        self.properties.show_component(None)
+        self.element_properties.show_node(None)
+        self.element_properties_group.hide()
+        self.component_properties_group.show()
+        tab.resolved_component = None
+        self._clear_preview(tab, "", tr("ui.component_text_only"))
+        self._populate_data_panel()
+        self.status_zoom.clear()
+        self._project_history_focus = False
 
     @staticmethod
     def _fill_combo(combo: QComboBox, values: list[tuple[str, object]], current: object = None) -> None:
@@ -1348,6 +1378,9 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         if self.session is None or tab is None:
             return
         document = self.session.documents[tab.component_id]
+        if not document.model_ready or document.model is None:
+            self._disable_data_panel()
+            return
         binding = document.model.data
         source = self.session.snapshot.model.data_source
         sources = [(tr("ui.data_no_xlsx"), None)] + ([(source.path, "main")] if source else [])
@@ -1360,6 +1393,13 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         headers = list(data.headers) if data is not None else []
         self._fill_combo(self.data_column, [(header, header) for header in headers], self.data_column.currentData())
         self._update_data_panel_controls(data, binding is not None)
+
+    def _disable_data_panel(self) -> None:
+        controls = (self.data_source, self.data_sheet, self.data_row, self.data_column,
+                    self.data_refresh, self.data_validate, self.data_validate_all,
+                    self.data_insert, self.data_export, self.data_export_zip)
+        for control in controls:
+            control.setEnabled(False)
 
     def _data_sheet_options(self, source) -> list[tuple[str, object]]:
         if source is None or self.controller.preview is None:
@@ -1415,6 +1455,12 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         self._filter_events(self.event_search.text())
         if reveal:
             self.events_dock.show()
+
+    @staticmethod
+    def _show_document_diagnostics(tab: DocumentTab, diagnostics) -> None:
+        items = tuple(diagnostics)
+        message = "\n".join(format_diagnostic(item) for item in items)
+        tab.set_diagnostics(items, message)
 
     def _format_event_items(self) -> None:
         for index in range(self.event_list.count()):
@@ -1479,7 +1525,10 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         component_id = self.active_tab.component_id
         if not self._apply_draft(component_id):
             return
-        component = self.session.documents[component_id].model
+        document = self.session.documents[component_id]
+        if not document.model_ready or document.model is None:
+            return
+        component = document.model
         result = self._active_validation_result(component_id, component)
         if result is None:
             return
@@ -1548,11 +1597,11 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         tab = self.active_tab
         if self.session is None or tab is None or self.controller.preview is None:
             return None
-        if self.session.documents[tab.component_id].model.data is None:
+        document = self.session.documents[tab.component_id]
+        if not document.model_ready or document.model is None or document.model.data is None:
             return None
         try:
-            component = self.session.documents[tab.component_id].model
-            data = self._read_data_snapshot(tab, component, force)
+            data = self._read_data_snapshot(tab, document.model, force)
         except ProjectError as exc:
             self._add_events(exc.diagnostics if isinstance(exc, ValidationIssues) else (exc.diagnostic,))
             self.statusBar().showMessage(format_diagnostic(exc.diagnostic), 10000)
@@ -1583,6 +1632,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         if self.session is None:
             return False
         document = self.session.documents[tab.component_id]
+        if not document.model_ready: return self._clear_invalid_component_preview(tab)
         if document.model.data is None or self.controller.preview is None:
             active_component, source_label, bindings_resolved = self._static_preview(tab, document.model)
         else:
@@ -1598,6 +1648,11 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         )
         self._update_preview_navigation(tab)
         return True
+
+    def _clear_invalid_component_preview(self, tab: DocumentTab) -> bool:
+        tab.resolved_component = None
+        self._clear_preview(tab, "", tr("ui.component_text_only"))
+        return False
 
     def _static_preview(self, tab: DocumentTab, component: ComponentDefinition):
         tab.resolved_component = None
@@ -1662,12 +1717,11 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         tab = self.active_tab
         if self.session is None or tab is None or tab.resolved_component is None or self.controller.preview is None:
             return
-        component = self.session.documents[tab.component_id].model
-        if component.data is None:
+        document = self.session.documents[tab.component_id]
+        component = document.model
+        if not document.model_ready or component is None or component.data is None:
             return
-        data = self.controller.preview.cached_data(self.session.snapshot, tab.component_id, component=component)
-        if data is None:
-            return
+        if (data := self.controller.preview.cached_data(self.session.snapshot, tab.component_id, component=component)) is None: return
         eligible = [row for row in data.rows if copies_for_mode(row, self.data_mode.mode) > 0]
         if not eligible:
             return
@@ -1705,7 +1759,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         if self.controller.preview is not None:
             data = self.controller.preview.cached_data(self.session.snapshot, tab.component_id)
         if data is None:
-            position = tr("ui.instance_position", current=1, total=1) if document and document.model.data is None else tr("ui.instance_position_empty")
+            position = tr("ui.instance_position", current=1, total=1) if document and document.model is not None and document.model.data is None else tr("ui.instance_position_empty")
             tab.instance_position.setText(position)
             tab.instance_position.setAccessibleName(position)
             for button in (tab.preview_first, tab.preview_previous, tab.preview_next, tab.preview_last):
@@ -1909,6 +1963,8 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
 
     def _preview_quality_diagnostics(self, request: PreviewRequest, quality) -> tuple[Diagnostic, ...]:
         document = request.snapshot.documents[request.identity.component_id]
+        if document.model is None:
+            return ()
         binding = document.model.data
         data = None
         row = None
@@ -2021,7 +2077,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
             return
         try:
             for component_id, document in tuple(self.session.documents.items()):
-                if document.model.data is not None:
+                if document.model is not None and document.model.data is not None:
                     self.controller.update_component(component_id, data=None)
             self.controller.save_all()
             self.controller.service.clear_data_source(self.session)
@@ -2195,14 +2251,15 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
                 and self.active_tab is tab)
 
     def _start_build(self, active_only: bool) -> None:
-        if self.session is None or self.controller.build is None or not self._operation_allowed("build"):
-            return
+        if self.session is None or self.controller.build is None or not self._operation_allowed("build"): return
         if self._build_progress is not None:
             self._build_progress.raise_()
             self._build_progress.activateWindow()
             return
         tab = self.active_tab if active_only else None
         if active_only and tab is None:
+            return
+        if not self._build_component_valid(tab):
             return
         scope = (self.session.documents[tab.component_id].model.name if tab is not None
                  else tr("ui.build_scope_project"))
@@ -2213,6 +2270,12 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         dialog.finished.connect(lambda _result: self._build_dialog_closed(dialog))
         self._build_progress = dialog
         dialog.open()
+
+    def _build_component_valid(self, tab) -> bool:
+        if tab is None or self.session.documents[tab.component_id].model_ready:
+            return True
+        self._add_events(self.session.documents[tab.component_id].current_diagnostics)
+        return False
 
     def _edit_build_settings(self, dialog: BuildDialog) -> None:
         if self._show_program_settings(dialog):
@@ -2250,7 +2313,8 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         )
 
     def _save_and_launch_build(self, active_only: bool, dialog: BuildDialog) -> None:
-        if not self._save_all_for_reservation(self._build_operation_id):
+        component_ids = self._reserved_build_request.component_ids if self._reserved_build_request else None
+        if not self._save_all_for_reservation(self._build_operation_id, component_ids):
             self._cancel_pending_build()
             self._finish_build_dialog()
             self.statusBar().showMessage(tr("ui.build_cancelled"), 7000)
@@ -2465,7 +2529,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
             tab.set_text(self.session.documents[tab.component_id].current_text)
             tab.set_mode("text")
             tab.text_editor.setFocus()
-        elif self._apply_draft(tab.component_id):
+        elif self.session.documents[tab.component_id].model_ready and self._apply_draft(tab.component_id):
             tab.set_mode("layout")
             self._refresh_preview(tab)
         else:
@@ -2476,14 +2540,12 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         if self.session is None or not self._user_editing_allowed():
             return
         document = self.session.documents[tab.component_id]
-        try:
-            self.controller.prepare_text(tab.component_id, text)
-        except ProjectError as exc:
-            document.set_draft(text, (exc.diagnostic,))
-            tab.show_diagnostic(format_diagnostic(exc.diagnostic))
-        else:
-            document.set_draft(text)
-            tab.show_diagnostic()
+        snapshot = self.controller.prepare_text(tab.component_id, text)
+        document.set_draft(text, snapshot.diagnostics, snapshot)
+        self._show_document_diagnostics(tab, snapshot.diagnostics)
+        if not document.model_ready:
+            tab.invalidate_preview()
+            tab.canvas.clear_document()
         self._update_tab_title(tab.component_id)
         self._update_actions()
 
@@ -2494,14 +2556,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         if document.draft_text is None:
             return True
         tab = self._tabs.get(component_id)
-        try:
-            after = self.controller.prepare_text(component_id, document.draft_text)
-        except ProjectError as exc:
-            document.set_draft(document.draft_text, (exc.diagnostic,))
-            if tab is not None:
-                tab.show_diagnostic(format_diagnostic(exc.diagnostic))
-            self.statusBar().showMessage(format_diagnostic(exc.diagnostic), 7000)
-            return False
+        after = document.draft_snapshot or self.controller.prepare_text(component_id, document.draft_text)
         if after.text == document.committed.text:
             document.clear_draft()
             return True
@@ -2519,11 +2574,19 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         if tab is not None:
             tab.undo_stack.push(command)
             tab.set_text(after.text)
-            tab.show_diagnostic()
+            self._show_document_diagnostics(tab, after.diagnostics)
+            if not document.model_ready:
+                self._clear_invalid_component_tab(tab)
         else:
             document.replace_snapshot(after)
             self._document_changed(component_id)
         return True
+
+    @staticmethod
+    def _clear_invalid_component_tab(tab: DocumentTab) -> None:
+        tab.set_mode("text")
+        tab.invalidate_preview()
+        tab.canvas.clear_document()
 
     def _install_element_model(self, component, selected: tuple[str, ...] = ()) -> None:
         model = element_model(component)
@@ -2564,11 +2627,13 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         self._set_selection(tuple(ids), source="canvas")
 
     def _set_selection(self, ids: tuple[str, ...], *, source: str) -> None:
-        del source  # Kept in the API to make signal origins explicit at call sites.
         tab = self.active_tab
         if tab is None or self.session is None or self._selection_sync:
             return
-        component = self.session.documents[tab.component_id].model
+        document = self.session.documents[tab.component_id]
+        if document.model is None or not document.model_ready:
+            return
+        component = document.model
         selected = self._normalize_selection(ids, locations(component))
         self._selection_sync = True
         tab.canvas.select_ids(selected)
@@ -2612,7 +2677,10 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         self._update_actions()
 
     def _show_selected_node(self, tab, node_id) -> bool:
-        found = locations(self.session.documents[tab.component_id].model).get(node_id)
+        document = self.session.documents[tab.component_id]
+        if not document.model_ready or document.model is None:
+            return False
+        found = locations(document.model).get(node_id)
         if found is None:
             return False
         self._show_single_selection(tab, node_id, found.node)
@@ -2720,7 +2788,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
             self.properties.show_component(self.session.documents[tab.component_id].model)
             return
         try:
-            values = self.session.documents[tab.component_id].model.model_dump(mode="python")
+            values = self.session.documents[tab.component_id].require_model().model_dump(mode="python")
             values.update(changes)
             updated = ComponentDefinition.model_validate(values)
         except (ValidationError, ValueError) as exc:
@@ -2758,12 +2826,15 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
     def _document_changed(self, component_id: str, selected: tuple[str, ...] | None = None) -> None:
         if self.session is None:
             return
+        document = self.session.documents[component_id]
         self._validate_changed_document(component_id)
         tab = self._tabs.get(component_id)
         if tab is not None:
             selected = self._current_tab_selection(tab, component_id, selected)
             self._refresh_preview(tab, selected=selected)
             tab.set_text(self.session.documents[component_id].current_text)
+            self._show_document_diagnostics(tab, document.current_diagnostics)
+            tab.layout_mode.setEnabled(document.model_ready)
         if tab is self.active_tab:
             self._refresh_active_document_properties(component_id, selected)
         self._update_tab_title(component_id)
@@ -2771,7 +2842,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         self._update_actions()
 
     def _validate_changed_document(self, component_id):
-        if self.controller.preview is None:
+        if self.controller.preview is None or not self.session.documents[component_id].model_ready:
             return
         snapshot = self._snapshot_for_current_documents()
         if snapshot is None:
@@ -2781,12 +2852,18 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
             self._add_events(diagnostics)
 
     def _current_tab_selection(self, tab, component_id, selected):
-        current_ids = locations(self.session.documents[component_id].model)
+        document = self.session.documents[component_id]
+        current_ids = locations(document.model) if document.model_ready and document.model is not None else {}
         values = tab.canvas.selected_ids if selected is None else selected
         return tuple(node_id for node_id in values if node_id in current_ids)
 
     def _refresh_active_document_properties(self, component_id, selected):
         document = self.session.documents[component_id]
+        if not document.model_ready or document.model is None:
+            self.element_tree.setModel(None)
+            self.properties.show_component(None)
+            self.element_properties.show_node(None)
+            return
         self._install_element_model(document.model, selected or ())
         self.properties.show_component(document.model)
         self._populate_data_panel()
@@ -2795,7 +2872,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         self._update_actions()
 
     def _selected_ids(self) -> tuple[str, ...]:
-        if self.active_tab is None:
+        if self.active_tab is None or self.session is None or not self.session.documents[self.active_tab.component_id].model_ready:
             return ()
         selected = self.active_tab.canvas.selected_ids
         if selected:
@@ -2909,6 +2986,8 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
             return False
         component_id = self.active_tab.component_id
         component = self.session.documents[component_id].model
+        if component is None:
+            return
         selected = self._selected_ids()
         if not selected:
             return False
@@ -3356,7 +3435,9 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
             return False
         self._update_tab_title(component_id)
         self._refresh_component_tree()
-        self.statusBar().showMessage("Документ сохранён", 3000)
+        saved = self.session.documents[component_id]
+        message = tr("ui.saved_with_errors") if saved.current_diagnostics else tr("ui.saved")
+        self.statusBar().showMessage(message, 7000 if saved.current_diagnostics else 3000)
         self._update_actions()
         return True
 
@@ -3368,32 +3449,51 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
             return True
         return self._save_all_documents(reservation)
 
-    def _save_all_for_reservation(self, reservation: str | None) -> bool:
+    def _save_all_for_reservation(self, reservation: str | None, component_ids: tuple[str, ...] | None = None) -> bool:
         self._save_reservation_id = reservation
         try:
-            return self.save_all()
+            if component_ids is None:
+                return self.save_all()
+            return self._save_all_documents(reservation, component_ids)
         finally:
             self._save_reservation_id = None
 
-    def _save_all_documents(self, reservation: str | None = None) -> bool:
-        for component_id in tuple(self.session.documents):
-            if not self._apply_draft(component_id, reservation=reservation):
-                tab = self._tabs.get(component_id)
-                if tab is not None:
-                    self.tabs.setCurrentWidget(tab)
-                    tab.set_mode("text")
-                return False
+    def _save_all_documents(self, reservation: str | None = None, component_ids: tuple[str, ...] | None = None) -> bool:
+        if self.session is None:
+            return True
+        selected = component_ids if component_ids is not None else tuple(self.session.documents)
+        if not self._apply_selected_drafts(selected, reservation):
+            return False
         try:
-            self.controller.save_all()
+            if component_ids is None:
+                self.controller.save_all()
+            else:
+                self.controller.save_components(component_ids)
         except ProjectError as exc:
             self._show_error(exc)
             return False
+        self._finish_save_all(selected)
+        return True
+
+    def _apply_selected_drafts(self, component_ids, reservation) -> bool:
+        for component_id in component_ids:
+            if self._apply_draft(component_id, reservation=reservation):
+                continue
+            tab = self._tabs.get(component_id)
+            if tab is not None:
+                self.tabs.setCurrentWidget(tab)
+                tab.set_mode("text")
+            return False
+        return True
+
+    def _finish_save_all(self, selected) -> None:
         for component_id in self._tabs:
             self._update_tab_title(component_id)
         self._refresh_component_tree()
-        self.statusBar().showMessage("Все документы сохранены", 3000)
+        invalid_count = sum(bool(self.session.documents[item].current_diagnostics) for item in selected)
+        message = tr("ui.saved_all_with_errors", count=invalid_count) if invalid_count else tr("ui.saved_all")
+        self.statusBar().showMessage(message, 7000 if invalid_count else 3000)
         self._update_actions()
-        return True
 
     def close_tab(self, index: int) -> bool:
         if not self._operation_allowed("close_tab"):
@@ -3428,7 +3528,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
     def _confirm_document(self, component_id: str) -> bool:
         if self.session is None or not self.session.documents[component_id].dirty:
             return True
-        name = self.session.documents[component_id].model.name
+        name = self.session.documents[component_id].display_name
         choice = self._ask_unsaved_choice(tr("ui.unsaved_component_message", name=name))
         if choice == QMessageBox.StandardButton.Cancel:
             return False
@@ -3518,7 +3618,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         if tab is None:
             return
         document = self.session.documents[component_id]
-        title = document.model.name + (" *" if document.dirty else "")
+        title = document.display_name + (" *" if document.dirty else "")
         index = self.tabs.indexOf(tab)
         if index >= 0:
             self.tabs.setTabText(index, title)
@@ -3575,7 +3675,8 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         return operation_allowed(context, operation)
 
     def _visual_editing_allowed(self) -> bool:
-        return editing_actions(self._editing_context()).layout
+        return bool(self.active_tab and self.session and self.session.documents[self.active_tab.component_id].model_ready
+                    and editing_actions(self._editing_context()).layout)
 
     def _update_actions(self) -> None:
         self._update_project_visibility()
@@ -3614,9 +3715,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         selected = self._selected_ids()
         self.delete_widget_action.setVisible(bool(actions.layout and selected))
         for tab in self._tabs.values():
-            tab.text_editor.setReadOnly(not actions.text if tab is self.active_tab else not self._user_editing_allowed())
-            tab.layout_mode.setEnabled(self._user_editing_allowed())
-            tab.text_mode.setEnabled(self._user_editing_allowed())
+            self._update_tab_editing(tab, actions)
         self.element_tree.setEnabled(actions.layout)
         self.properties.setEnabled(actions.layout)
         self.element_properties.setEnabled(actions.layout and bool(selected))
@@ -3627,6 +3726,17 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
             button.setEnabled(actions.layout and actions.align)
         self._apply_group_actions(actions)
         self._sync_tool_buttons()
+
+    def _update_tab_editing(self, tab, actions) -> None:
+        document = self.session.documents.get(tab.component_id)
+        if document is None:
+            tab.text_editor.setReadOnly(True)
+            tab.layout_mode.setEnabled(False)
+            tab.text_mode.setEnabled(False)
+            return
+        tab.text_editor.setReadOnly(not actions.text if tab is self.active_tab else not self._user_editing_allowed())
+        tab.layout_mode.setEnabled(self._user_editing_allowed() and document.model_ready)
+        tab.text_mode.setEnabled(self._user_editing_allowed())
 
     def _apply_group_actions(self, actions) -> None:
         self.group_action.setEnabled(actions.layout and actions.group)

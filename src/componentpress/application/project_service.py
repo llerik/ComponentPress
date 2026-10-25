@@ -84,7 +84,20 @@ class ProjectService:
         return ProjectSession.from_snapshot(self.create(root, name))
 
     def open_session(self, root: Path) -> ProjectSession:
-        return ProjectSession.from_snapshot(self.open(root))
+        operation_id = uuid4().hex
+        self._log_event("open", "started", operation_id=operation_id)
+        try:
+            editor_open = getattr(self.projects, "open_for_editor", self.projects.open)
+            snapshot = editor_open(root)
+        except ProjectError as exc:
+            self._log_event("open", "failed", code=exc.diagnostic.code, operation_id=operation_id)
+            raise
+        except Exception as exc:
+            self._log_exception("open", exc)
+            raise
+        failed = any(item.diagnostics for item in snapshot.documents.values())
+        self._log_event("open", "degraded" if failed else "succeeded", code="DOCUMENT_INVALID" if failed else "OK", operation_id=operation_id)
+        return ProjectSession.from_snapshot(snapshot)
 
     def migrate_session(self, root: Path) -> ProjectSession:
         return ProjectSession.from_snapshot(self.migrate(root))
@@ -98,6 +111,8 @@ class ProjectService:
         document = snapshot.documents.get(component_id)
         if document is None:
             raise ProjectError(Diagnostic("COMPONENT_UNKNOWN", "компонент не найден", root))
+        if document.model is None:
+            raise ProjectError(document.diagnostics[0])
         size = document.model.size_mm.model_copy(update={"width": width_mm, "height": height_mm})
         return self.projects.save_component(snapshot, component_id, size_mm=size)
 
@@ -151,13 +166,17 @@ class ProjectService:
             return False
 
     def node_id(self, session: ProjectSession, component_id: str, name: str, prefix: str) -> str:
-        existing = locations(session.documents[component_id].model)
+        existing = locations(session.documents[component_id].require_model())
         return self.identifiers.create(name, existing, prefix=prefix)
 
     def prepare_model(self, session: ProjectSession, component_id: str, model: ComponentDefinition):
-        ensure_visual_edit_respects_locks(session.documents[component_id].model, model)
+        document = session.documents[component_id]
+        current = document.require_model()
+        if document.has_invalid_draft:
+            raise ProjectError(next(iter(document.draft_diagnostics)))
+        ensure_visual_edit_respects_locks(current, model)
         return self.projects.prepare_component(
-            session.snapshot, component_id, model, session.documents[component_id].committed
+            session.snapshot, component_id, model, document.committed
         )
 
     def prepare_text(self, session: ProjectSession, component_id: str, text: str):
@@ -167,25 +186,31 @@ class ProjectService:
         document = session.documents.get(component_id)
         if document is None:
             raise ProjectError(Diagnostic("COMPONENT_UNKNOWN", "компонент не найден", session.snapshot.root))
-        if document.draft_text is not None:
-            document.replace_snapshot(self.prepare_text(session, component_id, document.draft_text))
-        # Legacy callers may have changed only the model on DocumentSession.
-        prepared = self.projects.prepare_component(
-            session.snapshot, component_id, document.model, document.committed
-        )
-        if document.committed.text != prepared.text:
-            document.replace_snapshot(prepared)
-        snapshot = self.projects.save_prepared(session.snapshot, component_id, document.committed)
+        target = document.draft_snapshot if document.draft_text is not None else document.committed
+        if target is None:
+            diagnostic = next(iter(document.draft_diagnostics or document.committed.diagnostics), None)
+            raise ProjectError(diagnostic or Diagnostic("DOCUMENT_INVALID", "component text is invalid", document.source.path))
+        if target.model is None or any(item.code == "COMPONENT_ID_MISMATCH" for item in target.diagnostics):
+            snapshot = self.projects.save_raw_component(session.snapshot, component_id, target.text)
+            session.replace_snapshot(snapshot, saved={component_id})
+            return
+        if target.text == document.source.text and target.model != document.source.model:
+            # Legacy callers may have changed only the model on DocumentSession.
+            target = self.projects.prepare_component(session.snapshot, component_id, target.model, target)
+        snapshot = self.projects.save_prepared(session.snapshot, component_id, target)
         session.replace_snapshot(snapshot, saved={component_id})
 
     def save_all(self, session: ProjectSession) -> None:
-        for component_id in tuple(session.documents):
+        self.save_components(session)
+
+    def save_components(self, session: ProjectSession, component_ids: tuple[str, ...] | None = None) -> None:
+        for component_id in (component_ids if component_ids is not None else tuple(session.documents)):
             if session.documents[component_id].dirty:
                 self.save_document(session, component_id)
 
     @_logged("import_image")
     def import_image(self, root: Path, source: Path, folder: str = "") -> str:
-        snapshot = self.projects.open(root)
+        snapshot = getattr(self.projects, "open_for_editor", self.projects.open)(root)
         with self.write_lock(snapshot.root):
             relative = self.resources.import_image(snapshot.root, source, folder)
         if relative not in snapshot.model.images:
@@ -196,7 +221,7 @@ class ProjectService:
 
     @_logged("import_image_folder")
     def import_image_folder(self, root: Path, source: Path, folder: str = "", *, cancellation=None, on_progress=None) -> tuple[str, ...]:
-        snapshot = self.projects.open(root)
+        snapshot = getattr(self.projects, "open_for_editor", self.projects.open)(root)
         with self.write_lock(root.resolve()):
             paths = self.resources.import_image_folder(root.resolve(), source, folder, cancellation=cancellation, on_progress=on_progress)
         new_paths = tuple(path for path in paths if path not in snapshot.model.images)
@@ -320,7 +345,7 @@ class ProjectService:
                 source_path = relative
             elif clear_data_source:
                 source_path = None
-            if source_path is None and any(document.model.data is not None for document in session.documents.values()):
+            if source_path is None and any(document.model is not None and document.model.data is not None for document in session.documents.values()):
                 raise ProjectError(Diagnostic("DATA_SOURCE_IN_USE", "сначала отвяжите листы компонентов от Excel", session.snapshot.root))
             from componentpress.domain.project import CopiesColumns, DataSource, ProjectDefinition
             candidate = ProjectDefinition.model_validate(current.model_dump(mode="python") | {
@@ -345,7 +370,7 @@ class ProjectService:
         session.replace_snapshot(updated)
 
     def clear_data_source(self, session: ProjectSession) -> None:
-        if any(item.model.data is not None for item in session.documents.values()):
+        if any(item.model is not None and item.model.data is not None for item in session.documents.values()):
             raise ProjectError(Diagnostic("DATA_SOURCE_IN_USE", "сначала отвяжите листы компонентов от Excel", session.snapshot.root))
         updated = self.projects.save_project(session.snapshot, data_source=None)
         session.replace_snapshot(updated)

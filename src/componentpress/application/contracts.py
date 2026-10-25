@@ -13,7 +13,8 @@ class DocumentSnapshot:
     path: Path
     text: str
     disk_hash: str
-    model: ComponentDefinition
+    model: ComponentDefinition | None
+    diagnostics: tuple[Diagnostic, ...] = ()
 
 
 @dataclass(frozen=True)

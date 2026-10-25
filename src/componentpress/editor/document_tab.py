@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from PySide6.QtCore import QEvent, QRegularExpression, QSize, QTimer, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QImage, QSyntaxHighlighter, QTextCharFormat, QUndoStack
+from PySide6.QtGui import QColor, QFont, QImage, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QTextFormat, QUndoStack
 from PySide6.QtWidgets import (
     QButtonGroup,
     QHBoxLayout,
@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QStackedWidget,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -85,6 +86,7 @@ class YamlHighlighter(QSyntaxHighlighter):
 
 
 class DocumentTab(QWidget):
+    _diagnostics = ()
     zoomChanged = Signal(int)
     previewError = Signal(str)
     modeRequested = Signal(str)
@@ -258,12 +260,32 @@ class DocumentTab(QWidget):
         style_warning(self.diagnostic, bool(message))
         self.diagnostic.setVisible(bool(message))
 
+    def set_diagnostics(self, diagnostics, message: str = "") -> None:
+        self._diagnostics = tuple(diagnostics)
+        from .theme import is_dark_theme
+
+        color = QColor("#632323" if is_dark_theme() else "#ffe1e1")
+        selections = []
+        document = self.text_editor.document()
+        for item in self._diagnostics:
+            if item.line is None or not 1 <= item.line <= document.blockCount():
+                continue
+            cursor = QTextCursor(document.findBlockByNumber(item.line - 1))
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = cursor
+            selection.format.setBackground(color)
+            selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
+            selections.append(selection)
+        self.text_editor.setExtraSelections(selections)
+        self.show_diagnostic(message)
+
     def changeEvent(self, event) -> None:
         super().changeEvent(event)
         if hasattr(self, "highlighter") and event.type() in (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange):
             blocked = self.text_editor.blockSignals(True)
             try:
                 self.highlighter.update_theme()
+                self.set_diagnostics(self._diagnostics, self.diagnostic.text())
             finally:
                 self.text_editor.blockSignals(blocked)
 
@@ -335,16 +357,16 @@ class DocumentTab(QWidget):
     def queue_preview(self, session: ProjectSession, *, component: ComponentDefinition | None = None, dpi: int = 96, fit: bool = False, selected: tuple[str, ...] | None = None, bindings_resolved: bool | None = None, source_label: str = "") -> int:
         document = session.documents[self.component_id]
         active_component = component or document.model
-        if selected is None:
-            selected = self.canvas.selected_ids
-        context = (id(session), self.identity, self.component_id, document.revision)
+        if active_component is None: return self._drop_preview()
+        selected = self.canvas.selected_ids if selected is None else selected
         self.preview_generation += 1
         self._preview_arguments = PreviewArguments(
             session.snapshot, active_component, document.revision, dpi, fit, selected,
             component is not None if bindings_resolved is None else bindings_resolved,
             self.preview_row_number, source_label,
         )
-        self.canvas.set_component_model(active_component, selected, context=context)
+        self.canvas.set_component_model(active_component, selected,
+                                        context=(id(session), self.identity, self.component_id, document.revision))
         self.canvas.set_preview_pending(True)
         self.preview_status.setText(
             tr("ui.preview_source_updating") if self.preview_source.text()
@@ -352,6 +374,10 @@ class DocumentTab(QWidget):
         )
         self.preview_timer.start()
         return self.preview_generation
+
+    def _drop_preview(self) -> int:
+        self.invalidate_preview()
+        return 0
 
     def render_queued_preview(self, *, register_fonts: bool = False):
         arguments = self._preview_arguments

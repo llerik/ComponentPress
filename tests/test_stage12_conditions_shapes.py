@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import shutil
 from pathlib import Path
 
@@ -282,4 +283,29 @@ def test_schema_rejects_previous_project_version_before_migrate_can_create_lock(
         FileProjectRepository().migrate(root)
     assert caught.value.diagnostic.code == "SCHEMA_UNSUPPORTED"
     assert {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()} == original
+    assert not (root / ".componentpress" / "locks").exists()
+
+
+def test_recovery_preflight_rejects_invalid_migration_backup_without_writes(tmp_path: Path) -> None:
+    root = tmp_path / "game"
+    shutil.copytree(ROOT / "examples" / "demo-game", root)
+    backup = root / ".componentpress" / "migrations" / "backup"
+    component = root / "components" / "forest-card.yaml"
+    backup_component = backup / "components" / component.name
+    backup_component.parent.mkdir(parents=True)
+    backup_component.write_text(component.read_text(encoding="utf-8").replace("schema_version: 8", "schema_version: 7", 1), encoding="utf-8")
+    old_hash = hashlib.sha256(backup_component.read_bytes()).hexdigest()
+    new_hash = hashlib.sha256(component.read_bytes()).hexdigest()
+    journal = root / ".componentpress" / "migrations" / "v1-to-v2-active.json"
+    journal.write_text(json.dumps({
+        "status": "in_progress", "backup": ".componentpress/migrations/backup",
+        "files": {"components/forest-card.yaml": {"old": old_hash, "new": new_hash}},
+    }), encoding="utf-8")
+    before = {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+    with pytest.raises(ProjectError) as caught:
+        FileProjectRepository().open_for_editor(root)
+
+    assert caught.value.diagnostic.code == "SCHEMA_UNSUPPORTED"
+    assert {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
     assert not (root / ".componentpress" / "locks").exists()

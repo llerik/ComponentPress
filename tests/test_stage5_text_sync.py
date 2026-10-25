@@ -158,8 +158,9 @@ def test_invalid_draft_keeps_last_model_and_blocks_save(tmp_path: Path, qtbot) -
     assert tab.diagnostic.isVisible()
     assert window.element_tree.model() is not None
     assert not window.element_tree.isEnabled()
-    assert not window.save_active()
-    assert (root / "components/forest-card.yaml").read_text(encoding="utf-8") == document.source.text
+    assert window.save_active()
+    assert (root / "components/forest-card.yaml").read_text(encoding="utf-8") == "schema_version: 8\nelements: ["
+    assert not document.model_ready
     window._clear_tabs(discard=True)
 
 

@@ -26,8 +26,9 @@ class _Preparing:
 
 
 class BuildService:
-    def __init__(self, save_all: Callable[[ProjectSession], None], runtime_factory: Callable[[Path], BuildRuntime], cancellation_factory: Callable[[], Cancellation], prepare_message: Callable[[], str]):
+    def __init__(self, save_all: Callable[[ProjectSession], None], runtime_factory: Callable[[Path], BuildRuntime], cancellation_factory: Callable[[], Cancellation], prepare_message: Callable[[], str], save_selected=None):
         self.save_all = save_all
+        self.save_selected = save_selected
         self.runtime_factory = runtime_factory
         self.cancellation_factory = cancellation_factory
         self.prepare_message = prepare_message
@@ -48,7 +49,7 @@ class BuildService:
         root = session.snapshot.root.resolve()
         if self._preparing or any(runtime.is_active() for runtime in self._runtimes.values()):
             raise ProjectError(Diagnostic("BUILD_ACTIVE", "для проекта уже выполняется сборка", root))
-        self.save_all(session)
+        self._save_request(session, request)
         runtime = self._runtime(root)
         recovery = runtime.recover(root)
         job_id = uuid4().hex
@@ -63,6 +64,12 @@ class BuildService:
             if job_id in self._preparing:
                 self._finish(job_id, runtime.fail(job_id, None, error, mode))
         return job_id
+
+    def _save_request(self, session: ProjectSession, request: BuildRequest) -> None:
+        if request.component_ids is not None and self.save_selected is not None:
+            self.save_selected(session, request.component_ids)
+        else:
+            self.save_all(session)
 
     def _prepared(self, job_id: str, snapshot: BuildInputSnapshot | None, error: Exception | None) -> None:
         pending = self._preparing.get(job_id)

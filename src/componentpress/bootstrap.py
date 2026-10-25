@@ -68,6 +68,7 @@ def build_service(service=None) -> BuildService:
         lambda root: QtBuildRuntime(root, InputSnapshotBuilder(), ProjectWriteLock),
         CancellationToken,
         lambda: tr("ui.build_prepare"),
+        save_selected=service.save_components,
     )
 
 

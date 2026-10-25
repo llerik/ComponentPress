@@ -99,7 +99,7 @@ def component_model(session: ProjectSession) -> QStandardItemModel:
     model.setHorizontalHeaderLabels([tr("ui.component_header")])
     for ref in session.snapshot.model.components:
         document = session.documents[ref.id]
-        item = QStandardItem(document.model.name)
+        item = QStandardItem(document.display_name)
         item.setEditable(False)
         item.setData(ref.id, ID_ROLE)
         item.setToolTip(ref.path)

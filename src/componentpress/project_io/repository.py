@@ -46,6 +46,25 @@ def _registration_journal(root: Path) -> Path:
     return root / ".componentpress" / "transactions" / "add-component.json"
 
 
+def _pending_recovery(root: Path) -> bool:
+    transactions = root / ".componentpress" / "transactions"
+    return any((
+        _registration_journal(root).exists(),
+        (transactions / "component-membership.json").exists(),
+        any((transactions / "resource-imports").glob("*.json")),
+        (root / ".componentpress" / "migrations" / "v1-to-v2-active.json").exists(),
+        any((root / ".componentpress" / "versioning").glob("*/publish.json")),
+    ))
+
+
+def _other_recovery_pending(root: Path) -> bool:
+    transactions = root / ".componentpress" / "transactions"
+    return ((transactions / "component-membership.json").exists()
+            or (root / ".componentpress" / "migrations" / "v1-to-v2-active.json").exists()
+            or any((transactions / "resource-imports").glob("*.json"))
+            or any((root / ".componentpress" / "versioning").glob("*/publish.json")))
+
+
 def _assert_snapshot_current(snapshot: ProjectSnapshot) -> None:
     project = snapshot.root / PROJECT_MANIFEST
     _assert_file_hash(project, snapshot.disk_hash, "описание проекта изменено после чтения")
@@ -62,15 +81,81 @@ def _assert_file_hash(path: Path, expected: str, message: str) -> None:
         raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", message, path))
 
 
+def _editor_project(root: Path):
+    check_case_collisions(root)
+    path = project_manifest_path(root)
+    text, digest = _read_text(path)
+    model, _ = parse_project(text, path)
+    if migration_required(root):
+        raise ProjectError(Diagnostic("MIGRATION_REQUIRED", "проект формата 1; подтвердите миграцию в формат 2", path, "schema_version"))
+    paths = (model.data_source.path,) if model.data_source else ()
+    paths += (*model.images, *(icon.path for icon in model.icons.values()))
+    for relative in paths:
+        check_exact_case(root, relative)
+        resolve_project_path(root, relative)
+    return path, text, digest, model
+
+
+def _editor_component_path(root: Path, ref, project_path: Path, seen: set[str]) -> Path:
+    if not ref.path.startswith("components/") or not ref.path.endswith(".yaml"):
+        raise ProjectError(Diagnostic("COMPONENT_PATH", "документ должен находиться в components/ и иметь .yaml", project_path, f"components.{ref.id}.path"))
+    if ref.path.casefold() in seen:
+        raise ProjectError(Diagnostic("COMPONENT_PATH_DUPLICATE", "повторный путь компонента", project_path, f"components.{ref.id}.path"))
+    seen.add(ref.path.casefold())
+    check_exact_case(root, ref.path)
+    return resolve_project_path(root, ref.path)
+
+
+def _editor_node_diagnostics(root: Path, path: Path, nodes: tuple[Node, ...]) -> list[Diagnostic]:
+    diagnostics = []
+    for node in nodes:
+        candidates = (node.source,) if isinstance(node, ImageNode) and node.source_mode == "manual" else ()
+        if isinstance(node, HtmlNode) and node.content_mode == "manual":
+            candidates = html_image_sources(node.html)
+        if isinstance(node, GroupNode):
+            diagnostics.extend(_editor_node_diagnostics(root, path, node.children))
+        for candidate in candidates:
+            if parse_references(candidate):
+                continue
+            relative = candidate.replace(r"\{", "{").replace(r"\}", "}")
+            try:
+                check_exact_case(root, relative)
+                resolve_project_path(root, relative)
+            except ProjectError as exc:
+                diagnostics.append(exc.diagnostic)
+    return diagnostics
+
+
+def _editor_component(root: Path, project_path: Path, ref, project_model, seen: set[str]) -> DocumentSnapshot:
+    path = _editor_component_path(root, ref, project_path, seen)
+    text, digest = _read_text(path)
+    try:
+        model, _ = parse_component(text, path, project_model.variables)
+    except ProjectError as exc:
+        return DocumentSnapshot(path, text, digest, None, (exc.diagnostic,))
+    diagnostics = []
+    if model.id != ref.id:
+        diagnostics.append(Diagnostic("COMPONENT_ID_MISMATCH", "ID в реестре не совпадает с документом", path, "id"))
+    if model.data and project_model.data_source is None:
+        diagnostics.append(Diagnostic("DATA_SOURCE_UNKNOWN", "задайте XLSX в настройках проекта", path, "data.sheet"))
+    diagnostics.extend(_editor_node_diagnostics(root, path, model.elements))
+    return DocumentSnapshot(path, text, digest, model, tuple(diagnostics))
+
+
 def _recover_registration_before_open(root: Path) -> None:
     if _registration_journal(root).exists():
-        with _registration_write_lock(root):
-            pass
+        with ProjectWriteLock(root):
+            preflight_project_schemas(root)
+            recover_add_component(root)
 
 
 @contextmanager
 def _registration_write_lock(root: Path):
     with ProjectWriteLock(root):
+        if _pending_recovery(root):
+            if _other_recovery_pending(root):
+                raise ProjectError(Diagnostic("RECOVERY_PENDING", "завершите восстановление проекта перед записью", root))
+            preflight_project_schemas(root)
         recover_add_component(root)
         yield
 
@@ -185,6 +270,18 @@ class FileProjectRepository:
             documents[ref.id] = DocumentSnapshot(path, doc_text, doc_hash, doc_model)
         return ProjectSnapshot(root, text, disk_hash, model, MappingProxyType(documents))
 
+    def open_for_editor(self, root: Path) -> ProjectSnapshot:
+        """Open readable component YAML for editing, retaining validation failures."""
+        root = root.resolve()
+        if _pending_recovery(root):
+            # The strict path proves every affected schema before it can recover files.
+            return self.open(root)
+        project_path, text, digest, model = _editor_project(root)
+        seen: set[str] = set()
+        documents = {ref.id: _editor_component(root, project_path, ref, model, seen)
+                     for ref in model.components}
+        return ProjectSnapshot(root, text, digest, model, MappingProxyType(documents))
+
     def migrate(self, root: Path) -> ProjectSnapshot:
         root = root.resolve()
         preflight_project_schemas(root)
@@ -202,13 +299,17 @@ class FileProjectRepository:
         validated, _ = parse_project(text, snapshot.root / PROJECT_MANIFEST)
         if validated.components != snapshot.model.components:
             raise ProjectError(Diagnostic("COMPONENT_REGISTRY", "реестр компонентов изменяется отдельной операцией", snapshot.root / PROJECT_MANIFEST, "components"))
-        for document in snapshot.documents.values():
-            checked, _ = parse_component(document.text, document.path, validated.variables)
-            if checked.data and validated.data_source is None:
-                raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", "задайте XLSX в настройках проекта", document.path, "data.sheet"))
+        checked_snapshot = snapshot.__class__(snapshot.root, text, snapshot.disk_hash, validated, snapshot.documents)
+        for component_id, document in snapshot.documents.items():
+            if document.model is None:
+                continue
+            checked = self.prepare_text(checked_snapshot, component_id, document.text)
+            old = {(item.code, item.field, item.line) for item in document.diagnostics}
+            if checked.model is None or any((item.code, item.field, item.line) not in old for item in checked.diagnostics):
+                raise ProjectError(next(iter(checked.diagnostics)))
         with _registration_write_lock(snapshot.root):
             atomic_write(snapshot.root / PROJECT_MANIFEST, text.encode("utf-8"), snapshot.disk_hash)
-        return self.open(snapshot.root)
+        return self.open_for_editor(snapshot.root)
 
     def save_component(self, snapshot: ProjectSnapshot, component_id: str, **changes: object) -> ProjectSnapshot:
         document = snapshot.documents[component_id]
@@ -224,7 +325,7 @@ class FileProjectRepository:
             if file_hash(snapshot.root / PROJECT_MANIFEST) != snapshot.disk_hash:
                 raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "описание проекта изменено после чтения", snapshot.root / PROJECT_MANIFEST))
             atomic_write(document.path, text.encode("utf-8"), document.disk_hash)
-        return self.open(snapshot.root)
+        return self.open_for_editor(snapshot.root)
 
     def prepare_component(
         self,
@@ -245,12 +346,27 @@ class FileProjectRepository:
 
     def prepare_text(self, snapshot: ProjectSnapshot, component_id: str, text: str) -> DocumentSnapshot:
         document = snapshot.documents[component_id]
-        checked, _ = parse_component(text, document.path, snapshot.model.variables)
+        try:
+            checked, _ = parse_component(text, document.path, snapshot.model.variables)
+        except ProjectError as exc:
+            return DocumentSnapshot(document.path, text, document.disk_hash, None, (exc.diagnostic,))
+        diagnostics = list(document.diagnostics if text == document.text else ())
         if checked.id != component_id:
-            raise ProjectError(Diagnostic("COMPONENT_ID_MISMATCH", "ID компонента нельзя изменить", document.path, "id"))
+            diagnostics.append(Diagnostic("COMPONENT_ID_MISMATCH", "ID в реестре не совпадает с документом", document.path, "id"))
         if checked.data and snapshot.model.data_source is None:
-            raise ProjectError(Diagnostic("DATA_SOURCE_UNKNOWN", "задайте XLSX в настройках проекта", document.path, "data.sheet"))
-        return DocumentSnapshot(document.path, text, document.disk_hash, checked)
+            diagnostics.append(Diagnostic("DATA_SOURCE_UNKNOWN", "задайте XLSX в настройках проекта", document.path, "data.sheet"))
+        return DocumentSnapshot(document.path, text, document.disk_hash, checked, tuple(diagnostics))
+
+    def save_raw_component(self, snapshot: ProjectSnapshot, component_id: str, text: str) -> ProjectSnapshot:
+        document = snapshot.documents[component_id]
+        encoded = text.encode("utf-8")
+        with ProjectWriteLock(snapshot.root):
+            if _pending_recovery(snapshot.root):
+                raise ProjectError(Diagnostic("RECOVERY_PENDING", "завершите восстановление проекта перед записью", snapshot.root))
+            if file_hash(snapshot.root / PROJECT_MANIFEST) != snapshot.disk_hash:
+                raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "описание проекта изменено после чтения", snapshot.root / PROJECT_MANIFEST))
+            atomic_write(document.path, encoded, document.disk_hash)
+        return self.open_for_editor(snapshot.root)
 
     def save_prepared(
         self,
@@ -263,7 +379,7 @@ class FileProjectRepository:
             if file_hash(snapshot.root / PROJECT_MANIFEST) != snapshot.disk_hash:
                 raise ProjectError(Diagnostic("FILE_CHANGED_EXTERNALLY", "описание проекта изменено после чтения", snapshot.root / PROJECT_MANIFEST))
             atomic_write(checked.path, checked.text.encode("utf-8"), snapshot.documents[component_id].disk_hash)
-        return self.open(snapshot.root)
+        return self.open_for_editor(snapshot.root)
 
     def add_component(self, snapshot: ProjectSnapshot, component_id: str, name: str, **values: object) -> ProjectSnapshot:
         if not re.fullmatch(r"[a-z][a-z0-9-]*", component_id):

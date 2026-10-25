@@ -105,6 +105,11 @@ class InputSnapshotBuilder:
         ordered = tuple(item.id for item in source.model.components if item.id in selected)
         if not ordered:
             raise ProjectError(Diagnostic("BUILD_EMPTY", "не выбраны компоненты для сборки", source.root))
+        for component_id in ordered:
+            document = source.documents[component_id]
+            if document.model is None or any(item.severity == "error" for item in document.diagnostics):
+                diagnostic = next(iter(document.diagnostics), None)
+                raise ProjectError(diagnostic or Diagnostic("DOCUMENT_INVALID", "component text is invalid", document.path))
         return ordered
 
     @staticmethod

@@ -288,6 +288,9 @@ class PreviewService:
         component_overrides: dict[str, ComponentDefinition] | None = None,
         _request_ids: dict[str, int] | None = None,
     ) -> tuple[Diagnostic, ...]:
+        invalid = self._document_diagnostics(snapshot, component_ids)
+        if invalid:
+            return invalid
         operation_id = uuid4().hex
         plan, diagnostic = self._validation_plan(
             snapshot, component_ids=component_ids, component_overrides=component_overrides,
@@ -299,6 +302,13 @@ class PreviewService:
             assert diagnostic is not None
             return (diagnostic,)
         return self._validate_plan(snapshot, plan, force_read, manual, component_overrides)
+
+    @staticmethod
+    def _document_diagnostics(snapshot, component_ids):
+        requested = component_ids if component_ids is not None else tuple(snapshot.documents)
+        return tuple(diagnostic for key in requested
+                     if (document := snapshot.documents.get(key)) is not None
+                     for diagnostic in document.diagnostics)
 
     def _validate_plan(self, snapshot, plan, force_read, manual, component_overrides):
         try:
@@ -357,6 +367,9 @@ class PreviewService:
             if self._stale_request(plan):
                 break
             model = (overrides or {}).get(component_id, document.model)
+            if model is None:
+                batch.diagnostics.extend(document.diagnostics)
+                continue
             self._stage_component(snapshot, plan, batch, component_id, document, model, force_read, manual)
         return batch
 

@@ -80,12 +80,13 @@ class ProjectController:
 
     def update_component(self, component_id: str, **changes: object) -> None:
         document = self.document(component_id)
-        values = document.model.model_dump(mode="python")
+        current = document.require_model()
+        values = current.model_dump(mode="python")
         values.update(changes)
         prepared = self.service.prepare_model(
             self.session,
             component_id,
-            type(document.model).model_validate(values),
+            type(current).model_validate(values),
         )
         document.replace_snapshot(prepared)
 
@@ -113,6 +114,10 @@ class ProjectController:
         if self.session is None:
             return
         self.service.save_all(self.session)
+
+    def save_components(self, component_ids: tuple[str, ...]) -> None:
+        if self.session is not None:
+            self.service.save_components(self.session, component_ids)
 
     def revert_document(self, component_id: str) -> None:
         if self.session is not None:
