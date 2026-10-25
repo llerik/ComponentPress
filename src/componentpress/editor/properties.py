@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -24,6 +25,12 @@ from componentpress.i18n import tr
 from componentpress.app_assets import set_themed_icon
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, LineNode, Node, ShapeNode
+
+_POSITION_ROWS = (
+    (("north_west", "left", "top"), ("north", "center", "top"), ("north_east", "right", "top")),
+    (("west", "left", "center"), ("center", "center", "center"), ("east", "right", "center")),
+    (("south_west", "left", "bottom"), ("south", "center", "bottom"), ("south_east", "right", "bottom")),
+)
 
 
 class ComponentProperties(QWidget):
@@ -154,6 +161,7 @@ class ElementProperties(QWidget):
 
     nodeChanged = Signal(dict)
     rotationRequested = Signal(float)
+    positionRequested = Signal(object)
     insertImageRequested = Signal()
     selectImageRequested = Signal()
     colorRequested = Signal(str)
@@ -235,7 +243,6 @@ class ElementProperties(QWidget):
         color_row.addWidget(self.color_swatch)
         color_row.addWidget(self.color_edit)
         self.alignment_group = QButtonGroup(self)
-        self.alignment_group.setExclusive(True)
         self.alignment_buttons: dict[str, QPushButton] = {}
         alignment_widget = QWidget()
         alignment_row = QHBoxLayout(alignment_widget)
@@ -308,6 +315,7 @@ class ElementProperties(QWidget):
         form.addRow(tr("ui.color"), self.color_widget)
         self.alignment_widget = alignment_widget
         form.addRow(tr("ui.text_alignment"), self.alignment_widget)
+        self._create_position_controls(form)
         outer.addLayout(form)
         self.html_edit = QPlainTextEdit()
         self.html_edit.setObjectName("htmlSource")
@@ -352,6 +360,49 @@ class ElementProperties(QWidget):
         self.apply_html.clicked.connect(lambda: self.nodeChanged.emit({"html": self.html_edit.toPlainText()}))
         self.insert_image.clicked.connect(self.insertImageRequested)
         self.setEnabled(False)
+
+    def _create_position_controls(self, form: QFormLayout) -> None:
+        position = QWidget()
+        layout = QVBoxLayout(position)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.position_buttons = {}
+        self._add_gravity_grid(layout)
+        self._add_axis_centering(layout)
+        form.addRow(tr("ui.element_position"), position)
+
+    def _add_gravity_grid(self, layout):
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(2)
+        for row, values in enumerate(_POSITION_ROWS):
+            for column, (key, horizontal, vertical) in enumerate(values):
+                value = (horizontal, vertical)
+                button = self._position_button(f"gravity_{key}", f"gravity_{key}.png", value)
+                self.position_buttons[key] = button
+                grid.addWidget(button, row, column)
+        layout.addLayout(grid)
+
+    def _add_axis_centering(self, layout):
+        axes = QHBoxLayout()
+        axes.setContentsMargins(0, 0, 0, 0)
+        self.center_horizontal_button = self._position_button("horizontal_center", "align_horizontal_center.png", ("center", None))
+        self.center_vertical_button = self._position_button("vertical_center", "align_vertical_center.png", (None, "center"))
+        axes.addWidget(self.center_horizontal_button)
+        axes.addWidget(self.center_vertical_button)
+        layout.addLayout(axes)
+
+    def _position_button(self, name: str, icon: str, position: tuple[str | None, str | None]) -> QPushButton:
+        button = QPushButton()
+        prefix = "gravity" if name.startswith("gravity_") else "position"
+        button.setObjectName(f"{prefix}{name.removeprefix('gravity_').title().replace('_', '')}")
+        button.setFixedSize(32, 32)
+        button.setIconSize(QSize(20, 20))
+        label = tr(f"ui.{name}")
+        button.setToolTip(label)
+        button.setAccessibleName(label)
+        set_themed_icon(button, icon)
+        button.clicked.connect(lambda _checked=False: self.positionRequested.emit(position))
+        return button
 
     @staticmethod
     def _number(name: str, minimum: float, maximum: float) -> QDoubleSpinBox:
@@ -662,6 +713,7 @@ class ElementProperties(QWidget):
             self.font_combo, self.font_spin, self.color_edit, self.color_swatch,
             self.html_edit, self.insert_image, self.apply_html,
             *self.alignment_buttons.values(),
+            *self.position_buttons.values(), self.center_horizontal_button, self.center_vertical_button,
         ):
             widget.setEnabled(not locked)
         if not locked:

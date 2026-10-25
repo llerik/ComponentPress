@@ -549,6 +549,24 @@ def align_nodes(component: ComponentDefinition, node_ids: Iterable[str], edge: s
     return result
 
 
+def align_node_to_component(component: ComponentDefinition, node_id: str, horizontal: str | None, vertical: str | None) -> ComponentDefinition:
+    if horizontal not in {None, "left", "center", "right"} or vertical not in {None, "top", "center", "bottom"}:
+        raise ValueError("неизвестное положение элемента")
+    if horizontal is None and vertical is None:
+        raise ValueError("необходимо указать хотя бы одну ось")
+    selected, _ = _selection(component, (node_id,))
+    _ensure_unlocked_selection(component, (node_id,), "выровнять")
+    _ensure_unprotected_subtrees(component, (node_id,), "выровнять")
+    left, top, width, height = node_bounds(component, node_id)
+    x = left if horizontal is None else {
+        "left": 0.0, "center": (component.size_mm.width - width) / 2, "right": component.size_mm.width - width,
+    }[horizontal]
+    y = top if vertical is None else {
+        "top": 0.0, "center": (component.size_mm.height - height) / 2, "bottom": component.size_mm.height - height,
+    }[vertical]
+    return move_nodes(component, (selected[0].node.id,), x - left, y - top)
+
+
 def _alignment_target(bounds, edge):
     index = 0 if edge == "left" else 1
     values = (bound[index] for bound in bounds)
@@ -571,8 +589,7 @@ def _alignment_delta(bounds, edge, target):
 def _move_aligned_node(component, node_id, dx, dy):
     if not (dx or dy):
         return component
-    current = locations(component)[node_id].node
-    return update_node(component, node_id, x_mm=current.x_mm + dx, y_mm=current.y_mm + dy)
+    return move_nodes(component, (node_id,), dx, dy)
 
 
 def node_bounds(component: ComponentDefinition, node_id: str) -> tuple[float, float, float, float]:

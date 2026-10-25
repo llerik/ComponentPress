@@ -469,7 +469,7 @@ class ComponentCanvas(QGraphicsView):
         candidates = [
             (index, (center.x() - viewport_point.x()) ** 2 + (center.y() - viewport_point.y()) ** 2)
             for index, center in enumerate(self._handle_centers(overlay))
-            if abs(center.x() - viewport_point.x()) <= 14 and abs(center.y() - viewport_point.y()) <= 14
+            if abs(center.x() - viewport_point.x()) <= 6 and abs(center.y() - viewport_point.y()) <= 6
         ]
         return min(candidates, key=lambda value: value[1])[0] if candidates else None
 
@@ -692,13 +692,22 @@ class ComponentCanvas(QGraphicsView):
     def _place_tool(self, point):
         x, y = point.x() / self._world_per_mm_x, point.y() / self._world_per_mm_y
         width, height = self._placement_size(x, y)
-        preview = self.scene().addRect(_placement_rect(x, y, width, height, self._world_per_mm_x, self._world_per_mm_y),
-                                       QPen(QColor("#14A44D"), 0, Qt.PenStyle.DashLine))
+        preview = None
+        if width is not None and height is not None:
+            preview = self.scene().addRect(
+                _placement_rect(x, y, width, height, self._world_per_mm_x, self._world_per_mm_y),
+                QPen(QColor("#14A44D"), 0, Qt.PenStyle.DashLine),
+            )
         self.placementRequested.emit(self._tool, x, y)
-        self.scene().removeItem(preview)
+        if preview is not None:
+            self.scene().removeItem(preview)
 
     def _placement_size(self, x, y):
-        width, height = (30.0, 30.0) if self._tool == "image" else (40.0, 15.0)
+        if self._tool == "image":
+            size = min(30.0, 0.75 * min(self._component.size_mm.width, self._component.size_mm.height),
+                       self._component.size_mm.width - x, self._component.size_mm.height - y)
+            return (size, size) if size >= 0.001 else (None, None)
+        width, height = 40.0, 15.0
         width = max(0.001, min(width, self._component.size_mm.width - x))
         height = max(0.001, min(height, self._component.size_mm.height - y))
         return width, height
@@ -861,7 +870,7 @@ class ComponentCanvas(QGraphicsView):
             return
         self._restore_gesture_overlay(gesture)
         self._dispatch_gesture(gesture, lambda: self.moveRequested.emit(
-            tuple(gesture.starts), dx / self._world_per_mm_x, dy / self._world_per_mm_y, gesture.context,
+            tuple(gesture.starts), dx / self._world_per_mm_x, dy / self._world_per_mm_y,
         ))
 
     def _dispatch_gesture(self, gesture, request):

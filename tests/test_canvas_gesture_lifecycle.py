@@ -4,7 +4,7 @@ from PySide6.QtGui import QColor, QImage
 
 from componentpress.domain.component import ComponentDefinition, SizeMM
 from componentpress.domain.geometry import local_bounds
-from componentpress.domain.nodes import GroupNode, LineNode, ShapeNode
+from componentpress.domain.nodes import GroupNode, HtmlNode, ImageNode, LineNode, ShapeNode
 from componentpress.domain.tree import locations, resize_node
 from componentpress.editor.canvas import ComponentCanvas
 
@@ -79,10 +79,9 @@ def test_group_resize_keeps_world_anchor_with_shear(anchor):
     assert _world_anchor(resized, "group", anchor) == pytest.approx(_world_anchor(component, "group", anchor))
 
 
-def _canvas(qtbot):
-    node = ShapeNode(
-        id="shape", name="Shape", type="rectangle", x_mm=20, y_mm=20,
-        width_mm=20, height_mm=20,
+def _canvas(qtbot, node=None):
+    node = node or ShapeNode(
+        id="shape", name="Shape", type="rectangle", x_mm=20, y_mm=20, width_mm=20, height_mm=20,
     )
     component = ComponentDefinition(
         schema_version=8, id="card", name="Card", size_mm=SizeMM(width=100, height=100),
@@ -96,6 +95,28 @@ def _canvas(qtbot):
     image.fill(QColor("white"))
     canvas.set_document(image, component, selected=(node.id,))
     return canvas, component
+
+
+@pytest.mark.parametrize("node", [
+    ImageNode(id="image", name="Image", type="image", x_mm=20, y_mm=20, width_mm=20, height_mm=20, source="assets/image.png"),
+    HtmlNode(id="html", name="HTML", type="html", x_mm=20, y_mm=20, width_mm=20, height_mm=20,
+             font_family="Arial", font_size_pt=10, html="Text"),
+], ids=("image", "html"))
+def test_drag_emits_move_request_with_document_context(qtbot, node):
+    canvas, component = _canvas(qtbot, node)
+    token = ("document", component.id)
+    canvas.set_component_model(component, (node.id,), context=token)
+    requests = []
+    canvas.moveRequested.connect(lambda *args: requests.append((args, canvas.dispatch_context)))
+    start = canvas.mapFromScene(canvas._overlays[node.id].sceneBoundingRect().center())
+    qtbot.mousePress(canvas.viewport(), Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseMove(canvas.viewport(), pos=start + QPoint(15, 0))
+    qtbot.mouseRelease(canvas.viewport(), Qt.MouseButton.LeftButton, pos=start + QPoint(15, 0))
+
+    assert len(requests) == 1
+    assert len(requests[0][0]) == 3
+    assert requests[0][0][0] == (node.id,)
+    assert requests[0][1] == token
 
 
 def _start_move(qtbot, canvas):

@@ -502,13 +502,26 @@ class MainWindowShell:
         self.multi_properties_group = QGroupBox(tr("ui.align_group"))
         layout = QHBoxLayout(self.multi_properties_group)
         self.align_buttons = {}
-        for edge in ("left", "right", "top", "bottom"):
-            button = QPushButton(tr(f"ui.align_{edge}"))
-            button.setObjectName(f"align{edge.title()}")
-            button.clicked.connect(lambda _checked=False, edge=edge: self._align_selected(edge))
-            self.align_buttons[edge] = button
-            layout.addWidget(button)
+        icons = {
+            "left": "align_horizontal_left.png", "right": "align_horizontal_right.png",
+            "top": "align_vertical_top.png", "bottom": "align_vertical_bottom.png",
+        }
+        for edge, icon in icons.items():
+            layout.addWidget(self._alignment_button(edge, icon))
         self.multi_properties_group.hide()
+
+    def _alignment_button(self, edge, icon):
+        label = tr(f"ui.align_{edge}")
+        button = QPushButton()
+        button.setObjectName(f"align{edge.title()}")
+        button.setFixedSize(34, 34)
+        button.setIconSize(QSize(22, 22))
+        button.setToolTip(label)
+        button.setAccessibleName(label)
+        set_themed_icon(button, icon)
+        button.clicked.connect(lambda _checked=False: self._align_selected(edge))
+        self.align_buttons[edge] = button
+        return button
 
     def _build_component_properties(self) -> None:
         self.component_properties_group = QGroupBox(tr("ui.component_properties"))

@@ -95,7 +95,7 @@ def test_canvas_resize_handles_keep_the_opposite_anchor(handle, anchor, qtbot):
     assert requested[-1][3:] == pytest.approx(anchor)
 
 
-def test_resize_target_extends_ten_pixels_around_cube_and_uses_screen_space(qtbot):
+def test_resize_target_extends_six_pixels_around_cube_and_uses_screen_space(qtbot):
     node = ShapeNode(id="shape", name="Shape", type="rectangle", x_mm=20, y_mm=20, width_mm=20, height_mm=30,
                      transform={"m11":0, "m12":-1, "m21":1, "m22":0})
     canvas = ComponentCanvas()
@@ -105,8 +105,8 @@ def test_resize_target_extends_ten_pixels_around_cube_and_uses_screen_space(qtbo
     canvas.set_document(QImage(1000, 1000, QImage.Format.Format_ARGB32), _component((node,), width=100, height=100), selected=("shape",))
     overlay = canvas._overlays["shape"]
     center = canvas._handle_centers(overlay)[3].toPoint()
-    assert canvas._handle_hit(overlay, QPointF(center.x() + 13, center.y())) == 3
-    assert canvas._handle_hit(overlay, QPointF(center.x() + 15, center.y())) is None
+    assert canvas._handle_hit(overlay, QPointF(center.x() + 5, center.y())) == 3
+    assert canvas._handle_hit(overlay, QPointF(center.x() + 7, center.y())) is None
     middle = canvas.mapFromScene(overlay.mapToScene(overlay.rect().center()))
     assert canvas._handle_hit(overlay, QPointF(middle)) is None
 

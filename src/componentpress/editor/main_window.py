@@ -65,6 +65,7 @@ from componentpress.platforms.services import PlatformServices
 from componentpress.app_assets import set_themed_icon
 from componentpress.domain.tree import (
     TreeOperationError,
+    align_node_to_component,
     align_nodes,
     effectively_locked_ids,
     contains_locked_node,
@@ -475,6 +476,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         self.properties.backgroundChanged.connect(lambda value: self._edit_active(background=value))
         self.properties.backgroundColorRequested.connect(self._pick_background_color)
         self.element_properties.nodeChanged.connect(self._edit_selected_node)
+        self.element_properties.positionRequested.connect(self._position_selected)
         self.element_properties.selectImageRequested.connect(self.select_element_image)
         self.element_properties.rotationRequested.connect(self._rotate_selected)
         self.element_properties.insertImageRequested.connect(self.insert_html_image)
@@ -2777,7 +2779,24 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
 
     def _align_selected(self, edge: str) -> None:
         selected = self._selected_ids()
-        self._apply_tree("Выровнять элементы", align_nodes, selected, edge, selected=selected)
+        self._run_geometry_alignment(tr("ui.align_action"), align_nodes, selected, edge, selected=selected)
+
+    def _position_selected(self, position: tuple[str | None, str | None]) -> None:
+        if self.active_tab is None or len(self._selected_ids()) != 1:
+            return
+        horizontal, vertical = position
+        node_id = self._selected_ids()[0]
+        self._run_geometry_alignment(tr("ui.position_action"), align_node_to_component, node_id,
+                                     horizontal, vertical, selected=(node_id,))
+
+    def _run_geometry_alignment(self, label, operation, *args, **kwargs):
+        operation_id = uuid4().hex
+        context = {"operation": "geometry_alignment", "operation_id": operation_id, "phase": "apply"}
+        technical_log.log_event("editor.geometry_alignment", status="started", **context)
+        accepted = self._apply_tree(label, operation, *args, **kwargs)
+        technical_log.log_event("editor.geometry_alignment", status="succeeded" if accepted else "not_committed",
+                                **context)
+        return accepted
 
     def _edit_active(self, **changes: object) -> None:
         tab = self.active_tab
@@ -3337,12 +3356,26 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         name = name or self._next_default_name("image")
         node_id = node_id or self.controller.node_id(self.active_tab.component_id, name, "image")
         if width_mm is None or height_mm is None:
-            width_mm = max(0.001, min(30.0, component.size_mm.width - x_mm))
-            height_mm = max(0.001, min(30.0, component.size_mm.height - y_mm))
+            width_mm = height_mm = 30.0
+        size = self._initial_image_size(component, x_mm, y_mm, width_mm, height_mm)
+        if size is None:
+            QMessageBox.warning(self, tr("ui.operation_unavailable"), tr("error.image_too_small_for_component"))
+            return False
+        width_mm, height_mm = size
         node = self._image_node(node_id, name, source, x_mm, y_mm, width_mm, height_mm, source_mode, source_column, fit)
         if node is None:
             return False
         return self._apply_tree(tr("ui.image_add_title"), add_node, node, selected=(node_id,))
+
+    @staticmethod
+    def _initial_image_size(component, x_mm, y_mm, width_mm, height_mm):
+        if min(width_mm, height_mm, component.size_mm.width - x_mm, component.size_mm.height - y_mm) <= 0:
+            return None
+        limit = min(0.75 * min(component.size_mm.width, component.size_mm.height),
+                    component.size_mm.width - x_mm, component.size_mm.height - y_mm)
+        scale = min(1.0, limit / max(width_mm, height_mm))
+        width, height = width_mm * scale, height_mm * scale
+        return (width, height) if min(width, height) >= 0.001 else None
 
     def _image_node(self, node_id, name, source, x_mm, y_mm, width, height, source_mode, source_column, fit):
         try:

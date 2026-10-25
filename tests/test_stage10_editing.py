@@ -5,7 +5,7 @@ import shutil
 
 import pytest
 from pydantic import ValidationError
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QColor, QFocusEvent, QImage, QKeyEvent, QPainter, QTextCursor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -20,6 +20,7 @@ from componentpress.domain.project import ProjectDefinition
 from componentpress.domain.schema import SCHEMA_VERSION
 from componentpress.domain.tree import (
     TreeOperationError,
+    align_node_to_component,
     align_nodes,
     locations,
     move_nodes,
@@ -109,6 +110,35 @@ def test_arrow_nudge_commits_one_undoable_move_and_saves(
     assert window.save_active()
     reopened = FileProjectRepository().open(root)
     assert locations(reopened.documents["forest-card"].model)["heading"].node == after.node
+
+
+@pytest.mark.parametrize("node_type", ["image", "html"])
+def test_drag_moves_image_and_html_in_one_undoable_edit(tmp_path, qtbot, monkeypatch, node_type):
+    window, _root, tab = _editor(tmp_path, qtbot, monkeypatch)
+    assert window.add_component("drag-test", "Drag test")
+    tab = window.active_tab
+    qtbot.waitUntil(lambda: tab.displayed_generation == tab.preview_generation, timeout=15000)
+    if node_type == "image":
+        assert window.add_image("assets/images/leaf.png", 10, 10, width_mm=8, height_mm=6)
+        node_id = tab.canvas.selected_ids[0]
+    else:
+        assert window.add_html("<p>Text</p>", 10, 10, name="Text")
+        node_id = tab.canvas.selected_ids[0]
+    component = window.session.documents[tab.component_id].model
+    before = node_bounds(component, node_id)
+    history_count = tab.undo_stack.count()
+    start = tab.canvas.mapFromScene(tab.canvas._overlays[node_id].sceneBoundingRect().center())
+    end = start + QPoint(24, 13)
+
+    qtbot.mousePress(tab.canvas.viewport(), Qt.MouseButton.LeftButton, pos=start)
+    assert type(tab.canvas._gesture).__name__ == "MoveGesture"
+    qtbot.mouseMove(tab.canvas.viewport(), pos=end)
+    qtbot.mouseRelease(tab.canvas.viewport(), Qt.MouseButton.LeftButton, pos=end)
+
+    after = node_bounds(window.session.documents[tab.component_id].model, node_id)
+    assert after[:2] != pytest.approx(before[:2])
+    assert after[2:] == pytest.approx(before[2:])
+    assert tab.undo_stack.count() == history_count + 1
 
 
 def test_arrow_hold_batches_repeats_and_blocked_group_warning_cannot_reenter(
@@ -343,6 +373,81 @@ def test_geometry_alignment_uses_node_and_group_bounds(edge: str) -> None:
     assert [node.id for node in aligned.elements] == [node.id for node in component.elements]
 
 
+@pytest.mark.parametrize("horizontal,vertical", [
+    (horizontal, vertical)
+    for horizontal in ("left", "center", "right")
+    for vertical in ("top", "center", "bottom")
+])
+def test_single_node_position_uses_component_bounds_and_preserves_size(horizontal, vertical):
+    node = ImageNode(
+        id="placed", name="Placed", type="image", x_mm=17, y_mm=19, width_mm=11, height_mm=7,
+        source="assets/images/leaf.png", transform={"m11": 1.2, "m12": 0.2, "m21": 0.1, "m22": 1.1},
+    )
+    parent = GroupNode(
+        id="parent", name="Parent", type="group", x_mm=8, y_mm=10,
+        transform={"m11": 1.1, "m12": 0.1, "m21": 0.2, "m22": 1.2}, children=(node,),
+    )
+    component = _component().model_copy(update={"elements": (parent,)})
+    before = node_bounds(component, node.id)
+
+    positioned = align_node_to_component(component, node.id, horizontal, vertical)
+    left, top, width, height = node_bounds(positioned, node.id)
+
+    expected_left = {"left": 0, "center": (component.size_mm.width - width) / 2,
+                     "right": component.size_mm.width - width}[horizontal]
+    expected_top = {"top": 0, "center": (component.size_mm.height - height) / 2,
+                    "bottom": component.size_mm.height - height}[vertical]
+    assert (left, top) == pytest.approx((expected_left, expected_top))
+    assert (width, height) == pytest.approx(before[2:])
+
+
+def test_single_axis_centering_preserves_other_world_axis_and_locked_nodes_are_rejected():
+    component = _component()
+    before = node_bounds(component, "back")
+    centered = align_node_to_component(component, "back", "center", None)
+    after = node_bounds(centered, "back")
+    assert (after[0], after[1] + after[3] / 2) == pytest.approx(
+        ((component.size_mm.width - after[2]) / 2, before[1] + before[3] / 2)
+    )
+    locked = component.model_copy(update={"elements": (component.elements[0].model_copy(update={"locked": True}),)})
+    with pytest.raises(TreeOperationError):
+        align_node_to_component(locked, "back", "center", "center")
+
+
+def test_multi_alignment_applies_world_offsets_inside_transformed_group():
+    children = (
+        ImageNode(id="first", name="First", type="image", x_mm=3, y_mm=4, width_mm=8, height_mm=5,
+                  source="assets/images/leaf.png"),
+        ImageNode(id="second", name="Second", type="image", x_mm=18, y_mm=20, width_mm=4, height_mm=9,
+                  source="assets/images/leaf.png"),
+    )
+    group = GroupNode(id="parent", name="Parent", type="group", x_mm=7, y_mm=12,
+                      transform={"m11": 1.2, "m12": 0.3, "m21": 0.2, "m22": 1.1}, children=children)
+    component = _component().model_copy(update={"elements": (group,)})
+    before = {node.id: node_bounds(component, node.id) for node in children}
+
+    aligned = align_nodes(component, ("first", "second"), "right")
+    after = {node.id: node_bounds(aligned, node.id) for node in children}
+
+    assert after["first"][0] + after["first"][2] == pytest.approx(after["second"][0] + after["second"][2])
+    assert all(after[node_id][1] == pytest.approx(before[node_id][1]) for node_id in before)
+
+
+def test_aligning_an_already_aligned_selection_is_a_no_op():
+    component = _component()
+    aligned = align_nodes(component, ("back", "front"), "left")
+    assert align_nodes(aligned, ("back", "front"), "left") == aligned
+
+
+def test_initial_image_size_limit_preserves_ratio_and_rejects_unrepresentable_minimum():
+    component = ComponentDefinition(schema_version=8, id="wide", name="Wide", size_mm=SizeMM(width=100, height=200))
+    assert MainWindow._initial_image_size(component, 0, 0, 0.02, 0.01) == pytest.approx((0.02, 0.01))
+    assert MainWindow._initial_image_size(component, 0, 0, 140, 70) == pytest.approx((75, 37.5))
+    assert MainWindow._initial_image_size(component, 0, 0, 1_000_000, 1) is None
+    tiny = component.model_copy(update={"size_mm": SizeMM(width=0.001, height=0.001)})
+    assert MainWindow._initial_image_size(tiny, 0, 0, 1, 1) is None
+
+
 def test_lock_inheritance_guards_visual_edits_but_allows_sibling_reordering() -> None:
     component = _component().model_copy(update={
         "elements": (
@@ -380,6 +485,23 @@ def test_font_picker_preserves_unknown_saved_family_without_emitting_a_change(qt
     properties.show_node(node)
     assert "Unavailable ComponentPress Test Family" in properties.font_combo.currentText()
     assert not changed
+
+
+def test_component_position_controls_have_all_icons_and_axis_actions(qtbot):
+    ensure_gui_application()
+    component = _component()
+    properties = ElementProperties()
+    qtbot.addWidget(properties)
+    requests = []
+    properties.positionRequested.connect(requests.append)
+    properties.show_node(component.elements[0], component=component)
+
+    assert len(properties.position_buttons) == 9
+    assert all(not button.icon().isNull() for button in properties.position_buttons.values())
+    properties.position_buttons["center"].click()
+    properties.center_horizontal_button.click()
+    properties.center_vertical_button.click()
+    assert requests == [("center", "center"), ("center", None), (None, "center")]
 
 
 def test_visual_lock_guard_allows_layer_crossing_and_preserves_yaml_edit_path() -> None:

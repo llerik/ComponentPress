@@ -284,6 +284,28 @@ def test_active_static_validation_ignores_missing_project_excel_and_checks_resou
     assert not any("DATA_SOURCE_MISSING" in item for item in messages)
 
 
+def test_new_image_is_capped_but_can_be_enlarged_and_multi_alignment_uses_icons(make_editor):
+    window, _root, errors = make_editor()
+    component_id = window.active_tab.component_id
+    component = window.session.documents[component_id].model
+    limit = 0.75 * min(component.size_mm.width, component.size_mm.height)
+    assert window.add_image("assets/images/leaf.png", 1, 1, width_mm=limit * 2, height_mm=limit)
+    first_id = window.active_tab.canvas.selected_ids[0]
+    first = locations(window.session.documents[component_id].model)[first_id]
+    assert max(first.node.width_mm, first.node.height_mm) == pytest.approx(limit)
+
+    window._edit_selected_node({"width_mm": limit + 1, "height_mm": limit / 2})
+    enlarged = locations(window.session.documents[component_id].model)[first_id].node
+    assert enlarged.width_mm > limit
+    assert window.add_image("assets/images/leaf.png", 20, 20, width_mm=8, height_mm=6)
+    second_id = window.active_tab.canvas.selected_ids[0]
+    window._set_selection((first_id, second_id), source="tree")
+    assert window.multi_properties_group.isVisible()
+    assert not window.element_properties_group.isVisible()
+    assert all(not button.icon().isNull() for button in window.align_buttons.values())
+    assert not errors
+
+
 def test_component_creation_validates_excel_and_enables_image_column(make_editor, qtbot):
     window, root, errors = make_editor(excel=True)
     values = {"name": "Excel image", "width": 63, "height": 88,
