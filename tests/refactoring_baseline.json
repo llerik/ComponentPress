@@ -431,46 +431,6 @@
       "stage": "21",
       "owner": "coder:stage21"
     },
-    "src/componentpress/project_io/repository.py|FileProjectRepository.create": {
-      "path": "src/componentpress/project_io/repository.py",
-      "name": "FileProjectRepository.create",
-      "line": 82,
-      "length": 31,
-      "stage": "9б",
-      "owner": "coder:src/componentpress/project_io"
-    },
-    "src/componentpress/project_io/repository.py|FileProjectRepository.open": {
-      "path": "src/componentpress/project_io/repository.py",
-      "name": "FileProjectRepository.open",
-      "line": 114,
-      "length": 73,
-      "stage": "9б",
-      "owner": "coder:src/componentpress/project_io"
-    },
-    "src/componentpress/project_io/repository.py|FileProjectRepository.add_component": {
-      "path": "src/componentpress/project_io/repository.py",
-      "name": "FileProjectRepository.add_component",
-      "line": 268,
-      "length": 24,
-      "stage": "9б",
-      "owner": "coder:src/componentpress/project_io"
-    },
-    "src/componentpress/project_io/repository.py|FileProjectRepository.remove_component": {
-      "path": "src/componentpress/project_io/repository.py",
-      "name": "FileProjectRepository.remove_component",
-      "line": 308,
-      "length": 31,
-      "stage": "9б",
-      "owner": "coder:src/componentpress/project_io"
-    },
-    "src/componentpress/project_io/repository.py|FileProjectRepository.restore_component": {
-      "path": "src/componentpress/project_io/repository.py",
-      "name": "FileProjectRepository.restore_component",
-      "line": 352,
-      "length": 36,
-      "stage": "9б",
-      "owner": "coder:src/componentpress/project_io"
-    },
     "src/componentpress/project_io/resource_transactions.py|_rollback": {
       "path": "src/componentpress/project_io/resource_transactions.py",
       "name": "_rollback",
@@ -484,30 +444,6 @@
       "name": "publish_resources",
       "line": 61,
       "length": 52,
-      "stage": "9б",
-      "owner": "coder:src/componentpress/project_io"
-    },
-    "src/componentpress/project_io/schema_checks.py|preflight_project_schemas": {
-      "path": "src/componentpress/project_io/schema_checks.py",
-      "name": "preflight_project_schemas",
-      "line": 23,
-      "length": 76,
-      "stage": "9б",
-      "owner": "coder:src/componentpress/project_io"
-    },
-    "src/componentpress/project_io/transactions.py|recover_component_membership": {
-      "path": "src/componentpress/project_io/transactions.py",
-      "name": "recover_component_membership",
-      "line": 73,
-      "length": 52,
-      "stage": "9б",
-      "owner": "coder:src/componentpress/project_io"
-    },
-    "src/componentpress/project_io/transactions.py|change_component_membership": {
-      "path": "src/componentpress/project_io/transactions.py",
-      "name": "change_component_membership",
-      "line": 127,
-      "length": 35,
       "stage": "9б",
       "owner": "coder:src/componentpress/project_io"
     },
