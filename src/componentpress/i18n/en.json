@@ -1,6 +1,11 @@
 {
   "app.name": "ComponentPress",
   "about.title": "About",
+  "dev.ruff_baseline_created": "Ruff pilot baseline created with {count} existing diagnostics.",
+  "dev.ruff_baseline_changed": "Ruff pilot baseline changed: {new} new, {stale} missing diagnostics.",
+  "dev.ruff_check_passed": "Ruff pilot passed with {count} approved diagnostics.",
+  "dev.ruff_check_failed": "Ruff pilot check failed ({error}).",
+  "dev.ruff_help": "Check the domain/application Ruff pilot. Options: --language ru|en, --bootstrap (initial baseline only).",
   "ui.close": "Close",
   "about.description": "Print-ready tabletop game component editor",
   "about.schema": "Supported project and component schema: {version}",

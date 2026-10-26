@@ -25,6 +25,14 @@ ComponentPress — настольный редактор печатных ком
 
 ## Проверки и сборка
 
+Ruff проверяет пилот из `domain` и `application`:
+
+```powershell
+.\project.cmd lint
+```
+
+После обновления уже настроенного Windows-окружения выполните `.\project.cmd setup`, чтобы установить новый dev-инструмент. На macOS/Linux используйте `make lint`; для существующего окружения выполните `python -m pip install -e '.[test,lint]'` или `make setup`.
+
 Полный набор тестов запускается двумя командами из корня репозитория в PowerShell. UI-тесты должны выполняться последовательно:
 
 ```powershell
@@ -32,7 +40,7 @@ $env:QT_SCALE_FACTOR='0.8'; .\.venv\Scripts\python.exe -B -m pytest -n auto -m "
 $env:QT_SCALE_FACTOR='0.8'; .\.venv\Scripts\python.exe -B -m pytest -n 0 -m ui
 ```
 
-Подробные параметры запуска описаны в `docs/09-parallel-tests.md`. Windows-дистрибутив собирается командой `.\project.cmd release`; версия приложения задаётся в `src/componentpress/version.py`. Конкретные изменения и ограничения выпуска описываются в его `releases/<версия>/CHANGES.txt`. Готовый EXE создаётся локально и не входит в Git.
+Существующие замечания пилота учтены отдельно и не исправляются этим этапом. Подробные параметры тестов описаны в `docs/09-parallel-tests.md`. Windows-дистрибутив собирается командой `.\project.cmd release`; версия приложения задаётся в `src/componentpress/version.py`. Конкретные изменения и ограничения выпуска описываются в его `releases/<версия>/CHANGES.txt`. Готовый EXE создаётся локально и не входит в Git.
 
 ## Формат проекта и примеры
 

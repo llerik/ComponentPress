@@ -2,7 +2,7 @@ PYTHON ?= python3.14
 VENV_PYTHON := .venv/bin/python
 READY := .venv/.componentpress-ready
 
-.PHONY: run cli test setup
+.PHONY: run cli test lint setup
 
 run: $(READY)
 	$(VENV_PYTHON) -m componentpress $(ARGS)
@@ -13,6 +13,9 @@ cli: $(READY)
 test: $(READY)
 	$(VENV_PYTHON) -m pytest $(ARGS)
 
+lint: $(READY)
+	$(VENV_PYTHON) -X utf8 tests/support/ruff_guard.py $(ARGS)
+
 setup: $(READY)
 
 $(READY): Makefile pyproject.toml
@@ -21,5 +24,5 @@ $(READY): Makefile pyproject.toml
 		exit 1; \
 	fi
 	@if [ ! -x "$(VENV_PYTHON)" ]; then "$(PYTHON)" -m venv .venv; fi
-	"$(VENV_PYTHON)" -m pip install -e '.[test]'
+	"$(VENV_PYTHON)" -m pip install -e '.[test,lint]'
 	@touch "$(READY)"

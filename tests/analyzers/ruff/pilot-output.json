@@ -1,0 +1,387 @@
+[
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 53,
+      "row": 6
+    },
+    "filename": "D:\\workspace\\ComponentPress\\src\\componentpress\\application\\ports.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from componentpress.domain.project import ProjectDefinition",
+          "end_location": {
+            "column": 72,
+            "row": 6
+          },
+          "location": {
+            "column": 1,
+            "row": 6
+          }
+        }
+      ],
+      "message": "Remove unused import: `componentpress.domain.project.DataSource`"
+    },
+    "location": {
+      "column": 43,
+      "row": 6
+    },
+    "message": "`componentpress.domain.project.DataSource` imported but unused",
+    "name": "unused-import",
+    "noqa_row": 6,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 72,
+      "row": 21
+    },
+    "filename": "D:\\workspace\\ComponentPress\\src\\componentpress\\application\\preview_service.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from componentpress.domain.project import DataSource",
+          "end_location": {
+            "column": 72,
+            "row": 21
+          },
+          "location": {
+            "column": 1,
+            "row": 21
+          }
+        }
+      ],
+      "message": "Remove unused import: `componentpress.domain.project.ProjectDefinition`"
+    },
+    "location": {
+      "column": 55,
+      "row": 21
+    },
+    "message": "`componentpress.domain.project.ProjectDefinition` imported but unused",
+    "name": "unused-import",
+    "noqa_row": 21,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 10,
+      "row": 12
+    },
+    "filename": "D:\\workspace\\ComponentPress\\src\\componentpress\\application\\project_service.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 13
+          },
+          "location": {
+            "column": 1,
+            "row": 12
+          }
+        }
+      ],
+      "message": "Remove unused import: `re`"
+    },
+    "location": {
+      "column": 8,
+      "row": 12
+    },
+    "message": "`re` imported but unused",
+    "name": "unused-import",
+    "noqa_row": 12,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 19,
+      "row": 13
+    },
+    "filename": "D:\\workspace\\ComponentPress\\src\\componentpress\\application\\project_service.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 14
+          },
+          "location": {
+            "column": 1,
+            "row": 13
+          }
+        }
+      ],
+      "message": "Remove unused import: `unicodedata`"
+    },
+    "location": {
+      "column": 8,
+      "row": 13
+    },
+    "message": "`unicodedata` imported but unused",
+    "name": "unused-import",
+    "noqa_row": 13,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 23,
+      "row": 316
+    },
+    "filename": "D:\\workspace\\ComponentPress\\src\\componentpress\\application\\project_service.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 317
+          },
+          "location": {
+            "column": 1,
+            "row": 316
+          }
+        }
+      ],
+      "message": "Remove unused import: `hashlib`"
+    },
+    "location": {
+      "column": 16,
+      "row": 316
+    },
+    "message": "`hashlib` imported but unused",
+    "name": "unused-import",
+    "noqa_row": 316,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 39,
+      "row": 6
+    },
+    "filename": "D:\\workspace\\ComponentPress\\src\\componentpress\\domain\\component.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from .nodes import GroupNode, Node",
+          "end_location": {
+            "column": 56,
+            "row": 6
+          },
+          "location": {
+            "column": 1,
+            "row": 6
+          }
+        }
+      ],
+      "message": "Remove unused import"
+    },
+    "location": {
+      "column": 31,
+      "row": 6
+    },
+    "message": "`.nodes.HtmlNode` imported but unused",
+    "name": "unused-import",
+    "noqa_row": 6,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 50,
+      "row": 6
+    },
+    "filename": "D:\\workspace\\ComponentPress\\src\\componentpress\\domain\\component.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from .nodes import GroupNode, Node",
+          "end_location": {
+            "column": 56,
+            "row": 6
+          },
+          "location": {
+            "column": 1,
+            "row": 6
+          }
+        }
+      ],
+      "message": "Remove unused import"
+    },
+    "location": {
+      "column": 41,
+      "row": 6
+    },
+    "message": "`.nodes.ImageNode` imported but unused",
+    "name": "unused-import",
+    "noqa_row": 6,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 78,
+      "row": 8
+    },
+    "filename": "D:\\workspace\\ComponentPress\\src\\componentpress\\domain\\geometry.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from .nodes import GroupFrame, GroupNode, LineNode, PositionedNode, Transform",
+          "end_location": {
+            "column": 89,
+            "row": 8
+          },
+          "location": {
+            "column": 1,
+            "row": 8
+          }
+        }
+      ],
+      "message": "Remove unused import: `.nodes.ShapeNode`"
+    },
+    "location": {
+      "column": 69,
+      "row": 8
+    },
+    "message": "`.nodes.ShapeNode` imported but unused",
+    "name": "unused-import",
+    "noqa_row": 8,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 60,
+      "row": 15
+    },
+    "filename": "D:\\workspace\\ComponentPress\\src\\componentpress\\domain\\tree.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from componentpress.domain.nodes import GroupNode, LineNode, Node",
+          "end_location": {
+            "column": 98,
+            "row": 15
+          },
+          "location": {
+            "column": 1,
+            "row": 15
+          }
+        }
+      ],
+      "message": "Remove unused import"
+    },
+    "location": {
+      "column": 52,
+      "row": 15
+    },
+    "message": "`componentpress.domain.nodes.HtmlNode` imported but unused",
+    "name": "unused-import",
+    "noqa_row": 15,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 71,
+      "row": 15
+    },
+    "filename": "D:\\workspace\\ComponentPress\\src\\componentpress\\domain\\tree.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from componentpress.domain.nodes import GroupNode, LineNode, Node",
+          "end_location": {
+            "column": 98,
+            "row": 15
+          },
+          "location": {
+            "column": 1,
+            "row": 15
+          }
+        }
+      ],
+      "message": "Remove unused import"
+    },
+    "location": {
+      "column": 62,
+      "row": 15
+    },
+    "message": "`componentpress.domain.nodes.ImageNode` imported but unused",
+    "name": "unused-import",
+    "noqa_row": 15,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 98,
+      "row": 15
+    },
+    "filename": "D:\\workspace\\ComponentPress\\src\\componentpress\\domain\\tree.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from componentpress.domain.nodes import GroupNode, LineNode, Node",
+          "end_location": {
+            "column": 98,
+            "row": 15
+          },
+          "location": {
+            "column": 1,
+            "row": 15
+          }
+        }
+      ],
+      "message": "Remove unused import"
+    },
+    "location": {
+      "column": 89,
+      "row": 15
+    },
+    "message": "`componentpress.domain.nodes.ShapeNode` imported but unused",
+    "name": "unused-import",
+    "noqa_row": 15,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  }
+]

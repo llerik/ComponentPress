@@ -9,6 +9,7 @@ if /i "%ACTION%"=="setup" goto setup_command
 if /i "%ACTION%"=="run" goto run
 if /i "%ACTION%"=="cli" goto cli
 if /i "%ACTION%"=="test" goto test
+if /i "%ACTION%"=="lint" goto lint
 if /i "%ACTION%"=="release" goto release
 
 echo Usage: project.cmd [setup^|run^|cli^|test^|release] [arguments]
@@ -68,6 +69,14 @@ exit /b %errorlevel%
 call :ensure_setup
 if errorlevel 1 goto failed
 ".venv\Scripts\python.exe" -m pytest %2 %3 %4 %5 %6 %7 %8 %9
+set "RESULT=%errorlevel%"
+popd
+exit /b %RESULT%
+
+:lint
+call :ensure_setup
+if errorlevel 1 goto failed
+".venv\Scripts\python.exe" -X utf8 -B tests\support\ruff_guard.py %2 %3 %4 %5 %6 %7 %8 %9
 set "RESULT=%errorlevel%"
 popd
 exit /b %RESULT%

@@ -1,0 +1,157 @@
+{
+  "source_revision": "0f1833dd61b716766f5f77202d2421abd4b7057c",
+  "dirty_paths": [
+    " M Makefile",
+    " M README.md",
+    " M changes.md",
+    " M project.cmd",
+    " M pyproject.toml",
+    " M requirements/windows-py314.lock",
+    " M src/componentpress/i18n/en.json",
+    " M src/componentpress/i18n/ru.json"
+  ],
+  "version": "0.16.8",
+  "python": "3.14.8",
+  "command": "ruff check --config pyproject.toml --target-version py314 --select E4,E7,E9,F --ignore-noqa --no-respect-gitignore --no-force-exclude --no-cache --output-format json",
+  "config_sha256": "0359a4593c4269e9995e02f5c02e58794a5979a44efc42e84e281e05149ab603",
+  "files": [
+    "src/componentpress/application/__init__.py",
+    "src/componentpress/application/build_service.py",
+    "src/componentpress/application/contracts.py",
+    "src/componentpress/application/edits.py",
+    "src/componentpress/application/identifiers.py",
+    "src/componentpress/application/png_archive.py",
+    "src/componentpress/application/ports.py",
+    "src/componentpress/application/preview_service.py",
+    "src/componentpress/application/project_service.py",
+    "src/componentpress/application/sessions.py",
+    "src/componentpress/application/version_service.py",
+    "src/componentpress/domain/__init__.py",
+    "src/componentpress/domain/component.py",
+    "src/componentpress/domain/copy_mode.py",
+    "src/componentpress/domain/diagnostics.py",
+    "src/componentpress/domain/geometry.py",
+    "src/componentpress/domain/html_resources.py",
+    "src/componentpress/domain/nodes.py",
+    "src/componentpress/domain/project.py",
+    "src/componentpress/domain/render_plan.py",
+    "src/componentpress/domain/schema.py",
+    "src/componentpress/domain/tree.py",
+    "src/componentpress/domain/values.py"
+  ],
+  "diagnostics": [
+    {
+      "rule": "F401",
+      "path": "src/componentpress/application/ports.py",
+      "scope": "",
+      "context": "ImportFrom(module='componentpress.domain.project', names=[alias(name='DataSource'), alias(name='ProjectDefinition')], level=0)",
+      "message": "`componentpress.domain.project.DataSource` imported but unused",
+      "line": 6,
+      "stage": "27",
+      "owner": "coder:src/componentpress/application"
+    },
+    {
+      "rule": "F401",
+      "path": "src/componentpress/application/preview_service.py",
+      "scope": "",
+      "context": "ImportFrom(module='componentpress.domain.project', names=[alias(name='DataSource'), alias(name='ProjectDefinition')], level=0)",
+      "message": "`componentpress.domain.project.ProjectDefinition` imported but unused",
+      "line": 21,
+      "stage": "27",
+      "owner": "coder:src/componentpress/application"
+    },
+    {
+      "rule": "F401",
+      "path": "src/componentpress/application/project_service.py",
+      "scope": "",
+      "context": "Import(names=[alias(name='re')])",
+      "message": "`re` imported but unused",
+      "line": 12,
+      "stage": "27",
+      "owner": "coder:src/componentpress/application"
+    },
+    {
+      "rule": "F401",
+      "path": "src/componentpress/application/project_service.py",
+      "scope": "",
+      "context": "Import(names=[alias(name='unicodedata')])",
+      "message": "`unicodedata` imported but unused",
+      "line": 13,
+      "stage": "27",
+      "owner": "coder:src/componentpress/application"
+    },
+    {
+      "rule": "F401",
+      "path": "src/componentpress/application/project_service.py",
+      "scope": "ProjectService.update_project_settings",
+      "context": "Import(names=[alias(name='hashlib')])",
+      "message": "`hashlib` imported but unused",
+      "line": 316,
+      "stage": "27",
+      "owner": "coder:src/componentpress/application"
+    },
+    {
+      "rule": "F401",
+      "path": "src/componentpress/domain/component.py",
+      "scope": "",
+      "context": "ImportFrom(module='nodes', names=[alias(name='GroupNode'), alias(name='HtmlNode'), alias(name='ImageNode'), alias(name='Node')], level=1)",
+      "message": "`.nodes.HtmlNode` imported but unused",
+      "line": 6,
+      "stage": "27",
+      "owner": "coder:src/componentpress/domain"
+    },
+    {
+      "rule": "F401",
+      "path": "src/componentpress/domain/component.py",
+      "scope": "",
+      "context": "ImportFrom(module='nodes', names=[alias(name='GroupNode'), alias(name='HtmlNode'), alias(name='ImageNode'), alias(name='Node')], level=1)",
+      "message": "`.nodes.ImageNode` imported but unused",
+      "line": 6,
+      "stage": "27",
+      "owner": "coder:src/componentpress/domain"
+    },
+    {
+      "rule": "F401",
+      "path": "src/componentpress/domain/geometry.py",
+      "scope": "",
+      "context": "ImportFrom(module='nodes', names=[alias(name='GroupFrame'), alias(name='GroupNode'), alias(name='LineNode'), alias(name='PositionedNode'), alias(name='ShapeNode'), alias(name='Transform')], level=1)",
+      "message": "`.nodes.ShapeNode` imported but unused",
+      "line": 8,
+      "stage": "27",
+      "owner": "coder:src/componentpress/domain"
+    },
+    {
+      "rule": "F401",
+      "path": "src/componentpress/domain/tree.py",
+      "scope": "",
+      "context": "ImportFrom(module='componentpress.domain.nodes', names=[alias(name='GroupNode'), alias(name='HtmlNode'), alias(name='ImageNode'), alias(name='LineNode'), alias(name='Node'), alias(name='ShapeNode')], level=0)",
+      "message": "`componentpress.domain.nodes.HtmlNode` imported but unused",
+      "line": 15,
+      "stage": "27",
+      "owner": "coder:src/componentpress/domain"
+    },
+    {
+      "rule": "F401",
+      "path": "src/componentpress/domain/tree.py",
+      "scope": "",
+      "context": "ImportFrom(module='componentpress.domain.nodes', names=[alias(name='GroupNode'), alias(name='HtmlNode'), alias(name='ImageNode'), alias(name='LineNode'), alias(name='Node'), alias(name='ShapeNode')], level=0)",
+      "message": "`componentpress.domain.nodes.ImageNode` imported but unused",
+      "line": 15,
+      "stage": "27",
+      "owner": "coder:src/componentpress/domain"
+    },
+    {
+      "rule": "F401",
+      "path": "src/componentpress/domain/tree.py",
+      "scope": "",
+      "context": "ImportFrom(module='componentpress.domain.nodes', names=[alias(name='GroupNode'), alias(name='HtmlNode'), alias(name='ImageNode'), alias(name='LineNode'), alias(name='Node'), alias(name='ShapeNode')], level=0)",
+      "message": "`componentpress.domain.nodes.ShapeNode` imported but unused",
+      "line": 15,
+      "stage": "27",
+      "owner": "coder:src/componentpress/domain"
+    }
+  ],
+  "untracked_count": 3,
+  "untracked_paths_redacted": true,
+  "exit_code": 1
+}

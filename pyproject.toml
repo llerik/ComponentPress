@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=9,<10", "pytest-qt>=4.5,<5", "pytest-xdist>=3.8,<4"]
+lint = ["ruff==0.16.8"]
 package = ["PyInstaller>=6.22,<7"]
 
 [tool.setuptools.packages.find]
@@ -33,3 +34,10 @@ version = {attr = "componentpress.version.APPLICATION_VERSION"}
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["ui: uses Qt widgets, input, or desktop integration and must run sequentially"]
+
+[tool.ruff]
+target-version = "py314"
+preview = false
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

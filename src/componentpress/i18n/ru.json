@@ -1,6 +1,11 @@
 {
   "app.name": "ComponentPress",
   "about.title": "О программе",
+  "dev.ruff_baseline_created": "Создан исходный baseline пилота Ruff: существующих замечаний — {count}.",
+  "dev.ruff_baseline_changed": "Baseline пилота Ruff изменился: новых замечаний — {new}, отсутствующих — {stale}.",
+  "dev.ruff_check_passed": "Проверка пилота Ruff пройдена; учтённых замечаний — {count}.",
+  "dev.ruff_check_failed": "Проверка пилота Ruff завершилась ошибкой ({error}).",
+  "dev.ruff_help": "Проверить пилот Ruff для domain/application. Параметры: --language ru|en, --bootstrap (только первичное создание baseline).",
   "ui.close": "Закрыть",
   "about.description": "Редактор печатных компонентов настольных игр",
   "about.schema": "Поддерживаемая схема проекта и компонентов: {version}",
