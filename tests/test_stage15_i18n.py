@@ -72,6 +72,7 @@ def test_unsaved_alert_and_about_close_buttons_use_both_catalogs(tmp_path: Path,
                     QMessageBox.StandardButton.Discard,
                     QMessageBox.StandardButton.Cancel,
                 )] == list(labels[:3])
+                assert all(button.width() >= button.sizeHint().width() for button in dialog.buttons())
                 dialog.button(QMessageBox.StandardButton.Cancel).click()
 
             QTimer.singleShot(0, cancel_prompt)

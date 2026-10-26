@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QSize, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDockWidget, QGroupBox, QHBoxLayout, QLabel,
@@ -167,6 +167,9 @@ class MainWindowShell:
             )
         except (ValueError, TypeError):
             return self._reject_program_preferences(parent)
+        # Remove the accepted modal form before restyling the whole application.
+        dialog.deleteLater()
+        QCoreApplication.sendPostedEvents(dialog, QEvent.Type.DeferredDelete)
         return self._save_program_preferences(preferences, parent)
 
     def _reject_program_preferences(self, parent) -> bool:

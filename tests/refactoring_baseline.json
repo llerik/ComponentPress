@@ -247,14 +247,6 @@
       "stage": "9а",
       "owner": "coder:src/componentpress/editor"
     },
-    "src/componentpress/editor/dialogs.py|ImageManagerDialog.refresh": {
-      "path": "src/componentpress/editor/dialogs.py",
-      "name": "ImageManagerDialog.refresh",
-      "line": 221,
-      "length": 21,
-      "stage": "20",
-      "owner": "coder:stage20"
-    },
     "src/componentpress/editor/dialogs.py|ImageAddDialog.__init__": {
       "path": "src/componentpress/editor/dialogs.py",
       "name": "ImageAddDialog.__init__",

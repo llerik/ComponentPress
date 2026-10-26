@@ -53,7 +53,6 @@ def test_program_settings_save_theme_without_file_or_toolbar_control(isolated_th
     validate_catalogs()
     set_language(locale)
     window = MainWindow(project_controller())
-    qtbot.addWidget(window)
 
     assert window.settings_menu.title() == ("Настройки" if locale == "ru" else "Settings")
     assert not hasattr(window, "theme_menu")
@@ -75,7 +74,6 @@ def test_program_settings_save_theme_without_file_or_toolbar_control(isolated_th
     assert QApplication.instance().styleSheet()
 
     reopened = MainWindow(project_controller())
-    qtbot.addWidget(reopened)
     assert reopened._theme == "dark"
 
 
@@ -129,6 +127,34 @@ def test_theme_change_closes_visible_tooltip(isolated_theme) -> None:
     assert QToolTip.isVisible()
     apply_theme("light")
     assert not QToolTip.isVisible()
+
+
+def test_theme_change_keeps_main_and_dialog_windows_visible(isolated_theme, qtbot, qapp) -> None:
+    from PySide6.QtWidgets import QDialog, QMainWindow
+
+    window = QMainWindow()
+    dialog = QDialog(window)
+    qtbot.addWidget(window)
+    qtbot.addWidget(dialog)
+    apply_theme("light")
+    window.show()
+    dialog.show()
+    qapp.processEvents()
+
+    apply_theme("dark")
+
+    assert window.isVisible()
+    assert dialog.isVisible()
+
+
+def test_dark_theme_uses_light_blue_primary_palette(isolated_theme) -> None:
+    from PySide6.QtGui import QPalette
+
+    apply_theme("dark")
+    palette = theme_palette()
+
+    assert palette.color(QPalette.ColorRole.Highlight).name() == "#6baaf2"
+    assert palette.color(QPalette.ColorRole.HighlightedText).name() == "#202124"
 
 
 def test_canvas_background_uses_the_new_palette_on_first_theme_change(isolated_theme, qapp) -> None:

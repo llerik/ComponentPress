@@ -3,7 +3,8 @@ from types import SimpleNamespace
 import shutil
 
 import pytest
-from PySide6.QtGui import QImage
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QDialog
 
 from componentpress.editor import dialogs
@@ -102,8 +103,9 @@ def test_image_manager_reveals_properties_and_keys_for_selected_tile(tmp_path: P
     assert manager.images.count() == 1
     manager.images.setCurrentRow(0)
     assert manager.key_name.text() == "image_2"
+    assert manager.key_name.isReadOnly()
     assert manager.keys.count() == 0
-    assert manager.add_key_button.text() == "Сохранить ключ"
+    assert manager.add_key_button.text() == "Добавить ключ"
     qtbot.waitUntil(lambda: manager.details.maximumWidth() > 0, timeout=1000)
     assert "8 × 8 px" in manager.properties.text()
 
@@ -115,6 +117,64 @@ def test_image_manager_reveals_properties_and_keys_for_selected_tile(tmp_path: P
     assert manager.details.maximumWidth() == 0
     manager.images.setCurrentRow(0)
     qtbot.waitUntil(lambda: manager.details.maximumWidth() > 0, timeout=1000)
+
+
+def test_image_manager_searches_files_and_keys_and_hides_filtered_selection(tmp_path: Path, qtbot) -> None:
+    root = tmp_path / "project"
+    image_dir = root / "assets" / "images"
+    image_dir.mkdir(parents=True)
+    for filename in ("card.png", "marker.png"):
+        image = QImage(8, 8, QImage.Format.Format_ARGB32)
+        image.fill(0xFF000000)
+        assert image.save(str(image_dir / filename), "PNG")
+    project = ProjectDefinition(
+        schema_version=9, id="game", name="Game", version="1.0",
+        images=("assets/images/card.png", "assets/images/marker.png"),
+        icons={
+            "card_face": IconDefinition(path="assets/images/card.png"),
+            "old_card_face": IconDefinition(path="assets/images/card.png"),
+        },
+    )
+    manager = dialogs.ImageManagerDialog(root, project, lambda *_: "", lambda *_: None,
+                                         lambda *_: None, lambda *_: None, lambda *_: None)
+    qtbot.addWidget(manager)
+    manager.images.setCurrentRow(0)
+    assert manager.images.currentItem().text().endswith("{card_face}")
+    manager.search.setText("{old_card}")
+    assert manager.images.count() == 1
+    assert manager.images.item(0).data(Qt.ItemDataRole.UserRole) == "assets/images/card.png"
+    manager.search.setText("missing")
+    assert manager.images.count() == 0
+    assert manager.empty_state.text() == "Изображения не найдены"
+    assert manager.key_name.text() == ""
+    manager.search.clear()
+    manager.filter.setCurrentIndex(manager.filter.findData("unkeyed"))
+    assert manager.images.count() == 1
+    assert manager.images.item(0).data(Qt.ItemDataRole.UserRole) == "assets/images/marker.png"
+    assert manager.images.item(0).text().endswith("Без ключа")
+
+
+def test_image_thumbnail_preview_preserves_transparency_on_checkerboard(qtbot) -> None:
+    source = QImage(8, 8, QImage.Format.Format_ARGB32)
+    source.fill(0x00000000)
+    preview = dialogs.ImageManagerDialog._preview_pixmap(QPixmap.fromImage(source)).toImage()
+
+    assert preview.pixelColor(0, 0).alpha() == 255
+    assert preview.pixelColor(0, 0) != preview.pixelColor(12, 0)
+
+
+def test_key_dialog_keeps_input_open_for_duplicate_name(qtbot, monkeypatch) -> None:
+    dialog = dialogs.ImageKeyDialog("new", existing_names=("used",))
+    qtbot.addWidget(dialog)
+    shown = []
+    monkeypatch.setattr(dialogs.QMessageBox, "information", lambda *_args: shown.append(True))
+    dialog.name.setText("USED")
+
+    dialog._accept()
+
+    assert dialog.result() == QDialog.DialogCode.Rejected
+    assert dialog.name.text() == "USED"
+    assert shown == [True]
 
 
 def test_adding_image_key_prefills_file_stem(tmp_path: Path, qtbot, monkeypatch) -> None:

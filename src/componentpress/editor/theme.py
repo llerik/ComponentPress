@@ -11,6 +11,7 @@ THEMES = ("system", "light", "dark")
 _CURRENT_THEME = "system"
 _SYSTEM_WATCHING = False
 _CACHE_CONFIGURED = False
+_PRIMARY_COLORS = {"light": "#2478D4", "dark": "#6BAAF2"}
 
 
 def apply_theme(theme: str) -> None:
@@ -52,7 +53,7 @@ def _apply_system_theme(*_args) -> None:
 def _apply_library_theme(mode: str) -> None:
     import qdarktheme
 
-    custom_colors = {"primary": "#2478D4"}
+    custom_colors = {"primary": _PRIMARY_COLORS[mode]}
     application = QApplication.instance()
     if application is not None:
         # PaletteChange handlers must see the new effective mode immediately.
@@ -69,15 +70,16 @@ def _apply_library_theme(mode: str) -> None:
 def _apply_tooltip_theme(application, stylesheet: str, palette) -> None:
     QToolTip.hideText()
     for widget in application.topLevelWidgets():
-        if widget.windowFlags() & Qt.WindowType.ToolTip:
+        if widget.windowType() == Qt.WindowType.ToolTip:
             widget.hide()
-    application.setPalette(palette)
-    QToolTip.setPalette(palette)
     application.setStyleSheet(
         stylesheet
         + "\nQToolTip { background-color: palette(tooltipbase); color: palette(tooltiptext); "
           "border: 1px solid palette(mid); padding: 5px; max-width: 420px; }"
     )
+    if application.palette() != palette:
+        application.setPalette(palette)
+    QToolTip.setPalette(palette)
 
 
 def _publish_effective_theme(mode: str) -> None:
@@ -99,7 +101,8 @@ def is_dark_theme() -> bool:
 def theme_palette():
     import qdarktheme
 
-    return qdarktheme.load_palette("dark" if is_dark_theme() else "light")
+    mode = "dark" if is_dark_theme() else "light"
+    return qdarktheme.load_palette(mode, custom_colors={"primary": _PRIMARY_COLORS[mode]})
 
 
 def style_warning(widget, active: bool = True) -> None:

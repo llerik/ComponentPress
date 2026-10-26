@@ -6,7 +6,7 @@ from pathlib import Path
 from collections.abc import Callable
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -101,8 +101,10 @@ class ResourcePickerDialog(QDialog):
 
 
 class ImageKeyDialog(QDialog):
-    def __init__(self, name: str, parent=None, *, editing=False):
+    def __init__(self, name: str, parent=None, *, editing=False, existing_names=(), original_name=""):
         super().__init__(parent)
+        self.editing = editing
+        self.existing_names = {value.casefold() for value in existing_names if value.casefold() != original_name.casefold()}
         self.setWindowTitle(tr("ui.image_key_edit_title" if editing else "ui.image_key_add_title"))
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -110,6 +112,10 @@ class ImageKeyDialog(QDialog):
         self.name.setObjectName("imageKeyName")
         form.addRow(tr("ui.image_key_name"), self.name)
         layout.addLayout(form)
+        if editing:
+            notice = QLabel(tr("ui.image_key_rename_warning"))
+            notice.setWordWrap(True)
+            layout.addWidget(notice)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         layout.addWidget(buttons)
         buttons.accepted.connect(self._accept)
@@ -118,9 +124,17 @@ class ImageKeyDialog(QDialog):
     def _accept(self) -> None:
         value = self.name.text()
         if not value or not all(character.isascii() and (character.isalnum() or character in "_-") for character in value):
-            QMessageBox.information(self, tr("ui.image_key_add_title"), tr("ui.image_key_name_invalid"))
+            QMessageBox.information(
+                self, tr("ui.image_key_edit_title" if self.editing else "ui.image_key_add_title"),
+                tr("ui.image_key_name_invalid"),
+            )
             return
-        self.name.setText(value.lower())
+        value = value.lower()
+        if value.casefold() in self.existing_names:
+            QMessageBox.information(self, tr("ui.image_key_edit_title" if self.editing else "ui.image_key_add_title"),
+                                    tr("error.image_key_exists", name=value))
+            return
+        self.name.setText(value)
         self.accept()
 
 
@@ -139,9 +153,9 @@ class ImageManagerDialog(QDialog):
         self.resize(900, 560)
         layout = QVBoxLayout(self)
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.images = self._build_image_list()
+        self.browser = self._build_image_list()
         self.details = self._build_details()
-        self.splitter.addWidget(self.images)
+        self.splitter.addWidget(self.browser)
         self.splitter.addWidget(self.details)
         self.splitter.setStretchFactor(0, 1)
         layout.addWidget(self.splitter, 1)
@@ -150,15 +164,49 @@ class ImageManagerDialog(QDialog):
         self.refresh()
 
     def _build_image_list(self):
+        self._build_image_search()
+        self._build_image_filters()
+        self._build_image_grid()
+        browser = QWidget()
+        layout = QVBoxLayout(browser)
+        layout.setContentsMargins(0, 0, 0, 0)
+        filters = QHBoxLayout()
+        filters.addWidget(self.filter)
+        filters.addWidget(self.image_count, 1)
+        layout.addWidget(self.search)
+        layout.addLayout(filters)
+        layout.addWidget(self.images, 1)
+        layout.addWidget(self.empty_state, 1)
+        self.empty_state.hide()
+        return browser
+
+    def _build_image_search(self):
+        self.search = QLineEdit()
+        self.search.setObjectName("imageSearch")
+        self.search.setClearButtonEnabled(True)
+        self.search.setPlaceholderText(tr("ui.image_search_placeholder"))
+
+    def _build_image_filters(self):
+        self.filter = QComboBox()
+        self.filter.setObjectName("imageKeyFilter")
+        for key in ("all", "keyed", "unkeyed"):
+            self.filter.addItem(tr(f"ui.image_filter.{key}"), key)
+        self.image_count = QLabel()
+        self.image_count.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+    def _build_image_grid(self):
         self.images = QListWidget()
         self.images.setObjectName("projectImages")
         self.images.setViewMode(QListWidget.ViewMode.IconMode)
         self.images.setMovement(QListWidget.Movement.Static)
         self.images.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.images.setWrapping(True)
-        self.images.setIconSize(QSize(80, 80))
-        self.images.setGridSize(QSize(130, 116))
-        return self.images
+        self.images.setIconSize(QSize(96, 64))
+        self.images.setGridSize(QSize(154, 126))
+        self.images.setWordWrap(True)
+        self.empty_state = QLabel()
+        self.empty_state.setObjectName("imageSearchEmpty")
+        self.empty_state.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
     def _build_details(self):
         self.details = QWidget()
@@ -172,18 +220,35 @@ class ImageManagerDialog(QDialog):
         return self.details
 
     def _build_key_controls(self, layout):
+        self._build_primary_key_controls(layout)
+        self._build_alias_key_controls(layout)
+
+    def _build_primary_key_controls(self, layout):
         self.copy_name_button = QPushButton(tr("ui.image_copy_name"))
         self.key_name = QLineEdit()
         self.key_name.setObjectName("imageKeyName")
+        self.key_name.setReadOnly(True)
+        layout.addWidget(self.properties)
+        layout.addWidget(self.copy_name_button)
+        layout.addWidget(QLabel(tr("ui.image_primary_key")))
+        key_row = QHBoxLayout()
+        key_row.addWidget(self.key_name, 1)
         self.copy_key_button = QPushButton(tr("ui.image_key_copy"))
+        self.copy_key_button.setToolTip(tr("ui.image_key_copy"))
+        key_row.addWidget(self.copy_key_button)
+        layout.addLayout(key_row)
+
+    def _build_alias_key_controls(self, layout):
         self.keys = QListWidget()
         self.keys.setObjectName("imageKeys")
         self.keys.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.aliases_label = QLabel(tr("ui.image_key_aliases"))
         self.add_key_button = QPushButton(tr("ui.image_key_add"))
-        for widget in (self.properties, self.copy_name_button, self.key_name, self.copy_key_button,
-                       self.aliases_label, self.keys, self.add_key_button):
-            layout.addWidget(widget, 1 if widget is self.keys else 0)
+        self.rename_key_button = QPushButton(tr("ui.image_key_rename"))
+        layout.addWidget(self.aliases_label)
+        layout.addWidget(self.keys, 1)
+        layout.addWidget(self.add_key_button)
+        layout.addWidget(self.rename_key_button)
 
     def _build_actions(self, layout):
         self.import_progress = QLabel()
@@ -203,6 +268,8 @@ class ImageManagerDialog(QDialog):
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._animation.finished.connect(self._details_animation_finished)
         self.images.itemSelectionChanged.connect(self._selection_changed)
+        self.search.textChanged.connect(lambda _text: self.refresh())
+        self.filter.currentIndexChanged.connect(lambda _index: self.refresh())
         self.images.itemDoubleClicked.connect(lambda _item: self._select_image(self.images.currentItem()))
         self.add_button.clicked.connect(self._add_image)
         self.folder_button.clicked.connect(self._import_folder)
@@ -212,29 +279,70 @@ class ImageManagerDialog(QDialog):
         self.keys.customContextMenuRequested.connect(self._key_context_menu)
         self.copy_name_button.clicked.connect(self._copy_name)
         self.copy_key_button.clicked.connect(self._copy_key)
+        self.rename_key_button.clicked.connect(self._rename_primary_key)
         self.refresh()
 
     def refresh(self, project=None) -> None:
         selected = next((image.data(Qt.ItemDataRole.UserRole) for image in self.images.selectedItems()), None)
+        scroll_position = self.images.verticalScrollBar().value()
         if project is not None:
             self.project = project
         self.remove_button.setEnabled(False)
         self.images.clear()
         for relative in self.project.images:
-            path = self.root / relative
-            pixmap = QPixmap(str(path))
-            item = QListWidgetItem(path.name)
-            item.setData(Qt.ItemDataRole.UserRole, relative)
-            if not pixmap.isNull():
-                item.setIcon(QIcon(pixmap.scaled(80, 80, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)))
-                item.setToolTip(tr("ui.image_dimensions", width=pixmap.width(), height=pixmap.height()))
-            else:
-                item.setToolTip(tr("ui.image_manager_read_error"))
-            self.images.addItem(item)
-            if selected is not None and relative == selected:
-                item.setSelected(True)
-                self.images.setCurrentItem(item)
+            self._add_image_item(relative, selected)
+        self._update_image_browser_state()
+        self.images.verticalScrollBar().setValue(scroll_position)
         self._selection_changed()
+
+    def _add_image_item(self, relative: str, selected: str | None) -> None:
+        path = self.root / relative
+        pixmap = QPixmap(str(path))
+        names = sorted(name for name, definition in self.project.icons.items() if definition.path == relative)
+        if not self._matches_filter(relative, names):
+            return
+        key_label = "{" + names[0] + "}" if names else tr("ui.image_unkeyed")
+        item = QListWidgetItem(f"{path.name}\n{key_label}")
+        item.setData(Qt.ItemDataRole.UserRole, relative)
+        if not pixmap.isNull():
+            item.setIcon(QIcon(self._preview_pixmap(pixmap)))
+            item.setToolTip(tr("ui.image_dimensions", width=pixmap.width(), height=pixmap.height()))
+        else:
+            item.setToolTip(tr("ui.image_manager_read_error"))
+        self.images.addItem(item)
+        if relative == selected:
+            item.setSelected(True)
+            self.images.setCurrentItem(item)
+
+    def _update_image_browser_state(self) -> None:
+        self.image_count.setText(tr("ui.image_count", count=self.images.count()))
+        has_items = self.images.count() > 0
+        self.images.setVisible(has_items)
+        self.empty_state.setText(tr("ui.image_search_empty" if self.project.images else "ui.image_manager_empty"))
+        self.empty_state.setVisible(not has_items)
+
+    def _matches_filter(self, relative: str, names: list[str]) -> bool:
+        filter_mode = self.filter.currentData()
+        if filter_mode == "keyed" and not names or filter_mode == "unkeyed" and names:
+            return False
+        query = self.search.text().casefold().strip().strip("{} ")
+        return not query or query in Path(relative).name.casefold() or any(query in name.casefold() for name in names)
+
+    @staticmethod
+    def _preview_pixmap(source: QPixmap) -> QPixmap:
+        preview = QPixmap(112, 76)
+        painter = QPainter(preview)
+        tile = 10
+        for y in range(0, preview.height(), tile):
+            for x in range(0, preview.width(), tile):
+                color = QColor("#DDE2E8" if (x // tile + y // tile) % 2 else "#F0F2F5")
+                painter.fillRect(x, y, tile, tile, color)
+        scaled = source.scaled(
+            preview.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation,
+        )
+        painter.drawPixmap((preview.width() - scaled.width()) // 2, (preview.height() - scaled.height()) // 2, scaled)
+        painter.end()
+        return preview
 
     def _selection_changed(self) -> None:
         selected = self.images.selectedItems()
@@ -252,6 +360,7 @@ class ImageManagerDialog(QDialog):
         self.aliases_label.hide()
         self.copy_key_button.setEnabled(False)
         self.add_key_button.setEnabled(False)
+        self.rename_key_button.setEnabled(False)
         self.remove_button.setEnabled(False)
         self._slide_details(False)
 
@@ -269,7 +378,9 @@ class ImageManagerDialog(QDialog):
         self.aliases_label.setVisible(bool(names[1:]))
         self.keys.setVisible(bool(names[1:]))
         self.copy_key_button.setEnabled(bool(names))
-        self.add_key_button.setText(tr("ui.image_key_save" if names else "ui.image_key_add"))
+        self.add_key_button.setVisible(not names)
+        self.rename_key_button.setVisible(bool(names))
+        self.rename_key_button.setEnabled(bool(names))
         self.add_key_button.setEnabled(not pixmap.isNull())
         self.remove_button.setEnabled(True)
         self._slide_details(True)
@@ -284,7 +395,7 @@ class ImageManagerDialog(QDialog):
     def _slide_details(self, visible: bool) -> None:
         self._animation.stop()
         start = self.details.maximumWidth()
-        end = 285 if visible else 0
+        end = min(420, max(285, self.width() // 3)) if visible else 0
         if visible:
             self.details.show()
         self._animation.setStartValue(start)
@@ -304,7 +415,8 @@ class ImageManagerDialog(QDialog):
 
     def _copy_key(self) -> None:
         from PySide6.QtGui import QGuiApplication
-        QGuiApplication.clipboard().setText("{" + self.key_name.text() + "}")
+        if self.key_name.text():
+            QGuiApplication.clipboard().setText("{" + self.key_name.text() + "}")
 
     def _save_key(self) -> None:
         selected = self.images.selectedItems()
@@ -312,38 +424,56 @@ class ImageManagerDialog(QDialog):
         if item is None:
             return
         relative = item.data(Qt.ItemDataRole.UserRole)
-        self._edit_primary_key(relative)
+        self._edit_primary_key(relative, editing=False)
 
-    def _edit_primary_key(self, relative):
+    def _rename_primary_key(self):
+        selected = self.images.selectedItems()
+        if selected:
+            self._edit_primary_key(selected[0].data(Qt.ItemDataRole.UserRole), editing=True)
+
+    def _edit_primary_key(self, relative, *, editing):
         pixmap = QPixmap(str(self.root / relative))
         if pixmap.isNull():
             return
         names = sorted(name for name, definition in self.project.icons.items() if definition.path == relative)
-        dialog = ImageKeyDialog(Path(relative).stem if not names else self.key_name.text(), self, editing=bool(names))
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
+        original = self.key_name.text() if editing else ""
+        dialog = ImageKeyDialog(
+            Path(relative).stem if not names else original, self, editing=editing,
+            existing_names=tuple(self.project.icons), original_name=original,
+        )
+        while dialog.exec() == QDialog.DialogCode.Accepted:
+            if self._save_primary_key(relative, dialog, original, editing and bool(names)):
+                return
+
+    def _save_primary_key(self, relative, dialog, original, editing) -> bool:
         try:
-            if names:
-                self.key_editor(names[0], dialog.name.text())
+            if editing:
+                self.key_editor(original, dialog.name.text())
             else:
                 self.key_creator(dialog.name.text(), relative)
             self.refresh()
+            return True
         except Exception as exc:
-            QMessageBox.warning(self, tr("ui.image_key_add_title"), format_error(exc))
+            title = "ui.image_key_edit_title" if editing else "ui.image_key_add_title"
+            QMessageBox.warning(self, tr(title), format_error(exc))
+            return False
 
     def _edit_key(self, item) -> None:
         original_name = item.data(Qt.ItemDataRole.UserRole)
         definition = self.project.icons.get(original_name)
         if definition is None:
             return
-        dialog = ImageKeyDialog(original_name, self, editing=True)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        try:
-            self.key_editor(original_name, dialog.name.text())
-            self.refresh()
-        except Exception as exc:
-            QMessageBox.warning(self, tr("ui.image_key_edit_title"), format_error(exc))
+        dialog = ImageKeyDialog(
+            original_name, self, editing=True, existing_names=tuple(self.project.icons),
+            original_name=original_name,
+        )
+        while dialog.exec() == QDialog.DialogCode.Accepted:
+            try:
+                self.key_editor(original_name, dialog.name.text())
+                self.refresh()
+                return
+            except Exception as exc:
+                QMessageBox.warning(self, tr("ui.image_key_edit_title"), format_error(exc))
 
     def _key_context_menu(self, position) -> None:
         item = self.keys.itemAt(position)
@@ -351,8 +481,16 @@ class ImageManagerDialog(QDialog):
             return
         self.keys.setCurrentItem(item)
         menu = QMenu(self.keys)
+        copy = menu.addAction(tr("ui.image_key_copy_alias"))
+        edit = menu.addAction(tr("ui.image_key_rename"))
         remove = menu.addAction(tr("ui.image_key_remove"))
-        if menu.exec(self.keys.mapToGlobal(position)) == remove:
+        selected = menu.exec(self.keys.mapToGlobal(position))
+        if selected == copy:
+            from PySide6.QtGui import QGuiApplication
+            QGuiApplication.clipboard().setText("{" + item.data(Qt.ItemDataRole.UserRole) + "}")
+        elif selected == edit:
+            self._edit_key(item)
+        elif selected == remove:
             self._remove_key(item)
 
     def _remove_key(self, item) -> None:

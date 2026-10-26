@@ -3620,6 +3620,9 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         box.button(QMessageBox.StandardButton.Save).setText(tr("ui.save"))
         box.button(QMessageBox.StandardButton.Discard).setText(tr("ui.discard"))
         box.button(QMessageBox.StandardButton.Cancel).setText(tr("ui.cancel"))
+        for button in box.buttons():
+            button.setMinimumWidth(button.sizeHint().width())
+        box.adjustSize()
         box.setDefaultButton(QMessageBox.StandardButton.Save)
         return QMessageBox.StandardButton(box.exec())
 
