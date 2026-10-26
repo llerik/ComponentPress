@@ -1,4 +1,4 @@
-schema_version: 8
+schema_version: 9
 id: lorem-ipsum-load-test
 name: "Lorem Ipsum load test"
 version: "0.1.0"

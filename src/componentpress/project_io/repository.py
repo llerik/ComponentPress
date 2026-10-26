@@ -22,6 +22,7 @@ from .paths import PROJECT_MANIFEST, check_case_collisions, check_exact_case, pr
 from .transactions import change_component_membership, recover, recover_add_component, register_component
 from .migrations import migrate_v1_to_v2, migration_required, recover_migration, recovery_required
 from .schema_checks import preflight_project_schemas
+from .schema_migration_engine import migrate_schema_on_open
 from .yaml_codec import _load, dump_yaml, parse_component, parse_project, update_tree
 
 
@@ -360,6 +361,7 @@ class FileProjectRepository:
         return self.open(root)
 
     def _recover_before_open(self, root: Path, project_path: Path) -> None:
+        migrate_schema_on_open(root)
         preflight_project_schemas(root)
         _recover_registration_before_open(root)
         from componentpress.versioning.recovery import recover_project_versions
@@ -376,6 +378,7 @@ class FileProjectRepository:
     def open_for_editor(self, root: Path) -> ProjectSnapshot:
         """Open readable component YAML for editing, retaining validation failures."""
         root = root.resolve()
+        migrate_schema_on_open(root)
         if _pending_recovery(root):
             # The strict path proves every affected schema before it can recover files.
             return self.open(root)

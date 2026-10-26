@@ -15,7 +15,7 @@ from componentpress.domain.values import CellValue, DataRow, DataSheetSnapshot
 
 def _project(keys: dict[str, IconDefinition]) -> ProjectDefinition:
     return ProjectDefinition(
-        schema_version=8,
+        schema_version=9,
         id="game",
         name="Game",
         version="1.0",
@@ -26,7 +26,7 @@ def _project(keys: dict[str, IconDefinition]) -> ProjectDefinition:
 
 def _html_component(html: str, *, column: str | None = None, bound: bool = False) -> ComponentDefinition:
     return ComponentDefinition(
-        schema_version=8, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
+        schema_version=9, id="card", name="Card", size_mm=SizeMM(width=40, height=30),
         data={"sheet": "Cards"} if column or bound else None,
         elements=(HtmlNode(
             id="text", name="Text", type="html", x_mm=0, y_mm=0,
@@ -38,21 +38,21 @@ def _html_component(html: str, *, column: str | None = None, bound: bool = False
 
 def test_image_keys_are_lowercase_and_case_insensitively_unique() -> None:
     project = _project({
-        "IMAGE_2": IconDefinition(path="assets/images/magic.png", width_px=8, height_px=8),
+        "IMAGE_2": IconDefinition(path="assets/images/magic.png"),
     })
 
     assert tuple(project.icons) == ("image_2",)
     with pytest.raises(ValidationError):
         _project({
-            "IMAGE_2": IconDefinition(path="assets/images/magic.png", width_px=8, height_px=8),
-            "image_2": IconDefinition(path="assets/images/magic.png", width_px=8, height_px=8),
+            "IMAGE_2": IconDefinition(path="assets/images/magic.png"),
+            "image_2": IconDefinition(path="assets/images/magic.png"),
         })
 
 
 @pytest.mark.parametrize("invalid", ("a b", "имя", "a.b", "a/b", "a\\b", "a:b"))
 def test_image_key_accepts_only_ascii_letters_digits_underscore_and_hyphen(invalid: str) -> None:
     with pytest.raises(ValidationError):
-        _project({invalid: IconDefinition(path="assets/images/magic.png", width_px=8, height_px=8)})
+        _project({invalid: IconDefinition(path="assets/images/magic.png")})
 
 
 @pytest.mark.parametrize("path", (
@@ -62,20 +62,20 @@ def test_image_key_accepts_only_ascii_letters_digits_underscore_and_hyphen(inval
 ))
 def test_registered_images_must_be_flat_png_or_jpeg_paths(path: str) -> None:
     with pytest.raises(ValidationError):
-        ProjectDefinition(schema_version=8, id="game", name="Game", version="1.0", images=(path,))
+        ProjectDefinition(schema_version=9, id="game", name="Game", version="1.0", images=(path,))
 
 
 def test_key_must_reference_a_registered_image() -> None:
     with pytest.raises(ValidationError):
         ProjectDefinition(
-            schema_version=8, id="game", name="Game", version="1.0",
-            icons={"magic": IconDefinition(path="assets/images/magic.png", width_px=8, height_px=8)},
+            schema_version=9, id="game", name="Game", version="1.0",
+            icons={"magic": IconDefinition(path="assets/images/magic.png")},
         )
 
 
-def test_html_key_expands_from_text_nodes_using_configured_pixel_size() -> None:
+def test_html_key_expands_using_text_size_and_preserves_other_html() -> None:
     project = _project({
-        "image_2": IconDefinition(path="assets/images/magic.png", width_px=8, height_px=8),
+        "image_2": IconDefinition(path="assets/images/magic.png"),
     })
 
     result = expand_html_icons(
@@ -84,12 +84,12 @@ def test_html_key_expands_from_text_nodes_using_configured_pixel_size() -> None:
         source="", sheet="", cell="", node_id="text",
     )
 
-    assert '<p><img src="assets/images/magic.png" width="8" height="8"' in result
+    assert '<p><img src="assets/images/magic.png" height="10"' in result
     assert 'alt="{image_2}"' in result
 
 
 def test_resolver_expands_only_original_html_keys_and_keeps_opaque_values() -> None:
-    project = _project({"magic": IconDefinition(path="assets/images/magic.png", width_px=8, height_px=6)})
+    project = _project({"magic": IconDefinition(path="assets/images/magic.png")})
     project = project.model_copy(update={"variables": {"label": "{magic}"}})
     component = _html_component(
         '<p>{magic} {{ vars["label"] }} \\{magic\\}</p><img alt="{magic}" src="assets/images/leaf.png" />&lt;{magic}',
@@ -100,14 +100,14 @@ def test_resolver_expands_only_original_html_keys_and_keeps_opaque_values() -> N
     )
 
     assert result.component.elements[0].html == (
-        '<p><img src="assets/images/magic.png" width="8" height="6" alt="magic" /> '
+        '<p><img src="assets/images/magic.png" height="8" alt="magic" /> '
         '{magic} {magic}</p><img alt="{magic}" src="assets/images/leaf.png" />&lt;'
-        '<img src="assets/images/magic.png" width="8" height="6" alt="magic" />'
+        '<img src="assets/images/magic.png" height="8" alt="magic" />'
     )
 
 
 def test_column_html_expands_keys_from_the_original_cell(tmp_path: Path) -> None:
-    project = _project({"magic": IconDefinition(path="assets/images/magic.png", width_px=8, height_px=6)})
+    project = _project({"magic": IconDefinition(path="assets/images/magic.png")})
     component = _html_component("", column="Markup", bound=True)
     row = DataRow(2, "instance", 1, {"Markup": CellValue("<p>{magic}</p>", "C2")})
     sheet = DataSheetSnapshot("main", tmp_path / "book.xlsx", "Cards", "hash", 1, ("Markup",), (row,))
@@ -115,37 +115,44 @@ def test_column_html_expands_keys_from_the_original_cell(tmp_path: Path) -> None
     resolved = BindingResolver(tmp_path, project, validate_resources=False).resolve_component(component, sheet, row)
 
     assert resolved.component.elements[0].html == (
-        '<p><img src="assets/images/magic.png" width="8" height="6" alt="magic" /></p>'
+        '<p><img src="assets/images/magic.png" height="8" alt="magic" /></p>'
     )
 
 
-@pytest.mark.parametrize("column", [None, "Markup"])
-def test_unknown_html_key_reports_address_through_component_resolver(column: str | None) -> None:
+def test_unknown_excel_html_key_is_preserved_and_reports_address() -> None:
     project = _project({})
-    component = _html_component("<p>{missing}</p>", column=column, bound=True)
+    component = _html_component("", column="Markup", bound=True)
     row = DataRow(4, "instance", 1, {"Markup": CellValue("<p>{missing}</p>", "C4")})
     sheet = DataSheetSnapshot("main", Path("book.xlsx"), "Cards", "hash", 1, ("Markup",), (row,))
     resolver = BindingResolver(Path("."), project, validate_resources=False)
 
-    with pytest.raises(ProjectError) as caught:
-        resolver.resolve_component(component, sheet, row)
-
-    diagnostic = caught.value.diagnostic
+    resolved = resolver.resolve_component(component, sheet, row)
+    assert "{missing}" in resolved.component.elements[0].html
+    diagnostic = resolved.diagnostics[0]
     assert diagnostic.code == "IMAGE_KEY_UNKNOWN"
     assert diagnostic.message_key == "error.image_key_unknown"
     assert diagnostic.params == {"name": "missing"}
     assert (diagnostic.source, diagnostic.sheet, diagnostic.cell, diagnostic.node_id) == (
-        "main", "Cards", "C4" if column else "", "text",
+        "main", "Cards", "C4", "text",
     )
+
+
+def test_unknown_manual_html_key_remains_a_validation_error() -> None:
+    component = _html_component("<p>{missing}</p>")
+    with pytest.raises(ProjectError) as error:
+        BindingResolver(Path("."), _project({}), validate_resources=False).resolve_component(
+            component, None, None,
+        )
+    assert error.value.diagnostic.code == "IMAGE_KEY_UNKNOWN"
 
 
 def test_variable_value_is_not_reparsed_as_an_image_key() -> None:
     from componentpress.bindings.resolver import BindingLocation, BindingResolver
 
     project = ProjectDefinition(
-        schema_version=8, id="game", name="Game", version="1.0",
+        schema_version=9, id="game", name="Game", version="1.0",
         variables={"label": "{image_2}"}, images=("assets/images/magic.png",),
-        icons={"image_2": IconDefinition(path="assets/images/magic.png", width_px=8, height_px=8)},
+        icons={"image_2": IconDefinition(path="assets/images/magic.png")},
     )
     html = BindingResolver(Path("."), project, validate_resources=False).resolve_html(
         '<p>{{ vars["label"] }}</p>', None,
@@ -179,7 +186,7 @@ def test_html_key_resource_error_keeps_diagnostic_metadata(tmp_path: Path) -> No
                 incident_id="incident-test",
             ))
 
-    project = _project({"magic": IconDefinition(path="assets/images/magic.png", width_px=8, height_px=8)})
+    project = _project({"magic": IconDefinition(path="assets/images/magic.png")})
     with pytest.raises(ProjectError) as caught:
         expand_html_icons(
             "<p>{magic}</p>", project.icons, loader=FailingLoader(), owner=tmp_path / "card.yaml",
@@ -214,7 +221,7 @@ def test_unregistered_file_can_be_registered_again_and_keys_follow_registration(
 
     assert service.import_image(root, source) == relative
     session = service.open_session(root)
-    service.add_image_key(session, "IMAGE_2", relative, 8, 8)
+    service.add_image_key(session, "IMAGE_2", relative)
     assert tuple(session.snapshot.model.icons) == ("image_2",)
     from componentpress.domain.nodes import HtmlNode
 
@@ -236,7 +243,7 @@ def test_unregistered_file_can_be_registered_again_and_keys_follow_registration(
     assert session.snapshot.model.images == ()
 
 
-def test_image_key_edit_renames_and_resizes_atomically(tmp_path: Path) -> None:
+def test_image_key_edit_renames_atomically_and_rejects_collisions(tmp_path: Path) -> None:
     from componentpress.bootstrap import project_service
     from componentpress.domain.diagnostics import ProjectError
 
@@ -249,22 +256,20 @@ def test_image_key_edit_renames_and_resizes_atomically(tmp_path: Path) -> None:
     assert image.save(str(source), "PNG")
     relative = service.import_image(root, source)
     session = service.open_session(root)
-    service.add_image_key(session, "magic", relative, 100001, 8)
-    service.add_image_key(session, "other", relative, 8, 8)
+    service.add_image_key(session, "magic", relative)
 
-    service.update_image_key(session, "magic", "MAGIC", 120001, 60001)
+    service.update_image_key(session, "magic", "MAGIC")
     edited = session.snapshot.model.icons["magic"]
-    assert (edited.path, edited.width_px, edited.height_px) == (relative, 120001, 60001)
-    assert session.snapshot.model.icons["other"].width_px == 8
+    assert edited.path == relative
 
     original_snapshot = session.snapshot
     original_file = (root / "project.cpress").read_bytes()
     with pytest.raises(ProjectError):
-        service.update_image_key(session, "magic", "other", 1, 1)
+        service.update_image_key(session, "magic", "bad name")
     assert session.snapshot is original_snapshot
     assert (root / "project.cpress").read_bytes() == original_file
 
     with pytest.raises(ProjectError):
-        service.update_image_key(session, "magic", "bad name", 1, 1)
+        service.add_image_key(session, "other", relative)
     assert session.snapshot is original_snapshot
     assert (root / "project.cpress").read_bytes() == original_file

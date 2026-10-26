@@ -31,8 +31,6 @@ class ComponentRef(StrictModel):
 
 class IconDefinition(StrictModel):
     path: str
-    width_px: int = Field(gt=0)
-    height_px: int = Field(gt=0)
 
 
 def _validate_image_filename(value: str) -> str:

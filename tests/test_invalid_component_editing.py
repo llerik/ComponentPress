@@ -25,7 +25,7 @@ def test_unknown_schema_opens_for_text_and_can_be_saved_verbatim(tmp_path: Path)
     root = project(tmp_path)
     path = root / "components" / "forest-card.yaml"
     original = path.read_text(encoding="utf-8")
-    invalid = original.replace("schema_version: 8", "schema_version: 7", 1)
+    invalid = original.replace("schema_version: 9", "schema_version: 7", 1)
     path.write_bytes(invalid.encode("utf-8"))
 
     service = project_service()
@@ -49,7 +49,7 @@ def test_invalid_component_is_text_only_until_yaml_is_fixed(tmp_path: Path, qtbo
     root = project(tmp_path)
     path = root / "components" / "forest-card.yaml"
     original = path.read_text(encoding="utf-8")
-    invalid = original.replace("schema_version: 8", "schema_version: 7", 1)
+    invalid = original.replace("schema_version: 9", "schema_version: 7", 1)
     path.write_bytes(invalid.encode("utf-8"))
 
     service = project_service()
@@ -63,7 +63,7 @@ def test_invalid_component_is_text_only_until_yaml_is_fixed(tmp_path: Path, qtbo
     assert not tab.layout_mode.isEnabled()
     assert len(tab.text_editor.extraSelections()) == 1
 
-    fixed = invalid.replace("schema_version: 7", "schema_version: 8", 1)
+    fixed = invalid.replace("schema_version: 7", "schema_version: 9", 1)
     tab.set_text(fixed)
     window._draft_changed(tab, fixed)
     assert window.session.documents["forest-card"].model_ready

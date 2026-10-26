@@ -102,8 +102,8 @@ if sys.argv[3:] == ["componentpress.application.preview_service"]:
     from componentpress.domain.values import DataRow, DataSheetSnapshot
 
     root = Path("unwritten-project")
-    component = ComponentDefinition(schema_version=8, id="card", name="Card", size_mm=SizeMM(width=40, height=30))
-    project = ProjectDefinition(schema_version=8, id="game", name="Game", version="0.0.1",
+    component = ComponentDefinition(schema_version=9, id="card", name="Card", size_mm=SizeMM(width=40, height=30))
+    project = ProjectDefinition(schema_version=9, id="game", name="Game", version="0.0.1",
                                 components=(ComponentRef(id="card", path="components/card.yaml"),))
     document = DocumentSnapshot(root / "components/card.yaml", "", "", component)
     snapshot = ProjectSnapshot(root, "", "", project, {"card": document})

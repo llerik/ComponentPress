@@ -288,12 +288,13 @@ class MainWindowShell:
 
     def _build_status_bar(self) -> None:
         self.status_project = QLabel(tr("ui.project_closed"))
+        self.status_project.setMinimumWidth(0)
         self.status_event = QLabel("")
         self.status_event.setObjectName("lastEventStatus")
-        self.status_event.setMaximumWidth(420)
+        self.status_event.setMinimumWidth(0)
         self.status_zoom = QLabel("")
-        self.statusBar().addWidget(self.status_project, 1)
-        self.statusBar().addPermanentWidget(self.status_event)
+        self.statusBar().addPermanentWidget(self.status_project, 0)
+        self.statusBar().addPermanentWidget(self.status_event, 1)
         self.statusBar().addPermanentWidget(self.status_zoom)
         self._update_project_visibility()
         self._refresh_recent_projects_menu()

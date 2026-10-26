@@ -71,7 +71,7 @@ def test_picker_shows_only_flat_registered_image_files(tmp_path: Path, qtbot, mo
 
 def test_picker_import_error_keeps_dialog_open_and_manager_still_constructs(tmp_path: Path, qtbot, monkeypatch) -> None:
     picker = dialogs.ResourcePickerDialog(tmp_path / "project", lambda *_: (_ for _ in ()).throw(ValueError("import failed")))
-    project = ProjectDefinition(schema_version=8, id="game", name="Game", version="1.0")
+    project = ProjectDefinition(schema_version=9, id="game", name="Game", version="1.0")
     manager = dialogs.ImageManagerDialog(tmp_path / "project", project, lambda *_: "", lambda *_: None, lambda *_: None, lambda *_: None, lambda *_: None)
     qtbot.addWidget(picker)
     qtbot.addWidget(manager)
@@ -93,16 +93,17 @@ def test_image_manager_reveals_properties_and_keys_for_selected_tile(tmp_path: P
     image.fill(0xFFFF00FF)
     assert image.save(str(image_path), "PNG")
     project = ProjectDefinition(
-        schema_version=8, id="game", name="Game", version="1.0",
+        schema_version=9, id="game", name="Game", version="1.0",
         images=("assets/images/magic.png",),
-        icons={"image_2": IconDefinition(path="assets/images/magic.png", width_px=8, height_px=8)},
+        icons={"image_2": IconDefinition(path="assets/images/magic.png")},
     )
     manager = dialogs.ImageManagerDialog(root, project, lambda *_: "", lambda *_: None, lambda *_: None, lambda *_: None, lambda *_: None)
     qtbot.addWidget(manager)
     assert manager.images.count() == 1
     manager.images.setCurrentRow(0)
-    assert manager.keys.count() == 1
-    assert manager.keys.item(0).text() == "image_2 — 8×8 px"
+    assert manager.key_name.text() == "image_2"
+    assert manager.keys.count() == 0
+    assert manager.add_key_button.text() == "Сохранить ключ"
     qtbot.waitUntil(lambda: manager.details.maximumWidth() > 0, timeout=1000)
     assert "8 × 8 px" in manager.properties.text()
 
@@ -114,6 +115,37 @@ def test_image_manager_reveals_properties_and_keys_for_selected_tile(tmp_path: P
     assert manager.details.maximumWidth() == 0
     manager.images.setCurrentRow(0)
     qtbot.waitUntil(lambda: manager.details.maximumWidth() > 0, timeout=1000)
+
+
+def test_adding_image_key_prefills_file_stem(tmp_path: Path, qtbot, monkeypatch) -> None:
+    root = tmp_path / "project"
+    image_path = root / "assets" / "images" / "card-face.png"
+    image_path.parent.mkdir(parents=True)
+    image = QImage(8, 8, QImage.Format.Format_ARGB32)
+    image.fill(0xFFFFFFFF)
+    assert image.save(str(image_path), "PNG")
+    project = ProjectDefinition(schema_version=9, id="game", name="Game", version="1.0",
+                                images=("assets/images/card-face.png",))
+    created = []
+    manager = dialogs.ImageManagerDialog(root, project, lambda *_: "", lambda *_: None,
+                                         lambda name, path: created.append((name, path)), lambda *_: None,
+                                         lambda *_: None)
+    qtbot.addWidget(manager)
+    manager.images.setCurrentRow(0)
+    names = []
+
+    class KeyDialog:
+        def __init__(self, name, *_args, **_kwargs):
+            names.append(name)
+            self.name = SimpleNamespace(text=lambda: "card_face")
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(dialogs, "ImageKeyDialog", KeyDialog)
+    manager._save_key()
+    assert names == ["card-face"]
+    assert created == [("card_face", "assets/images/card-face.png")]
 
 
 @pytest.mark.parametrize("language, title", (("ru", "Редактировать ключ изображения"), ("en", "Edit image key")))
@@ -128,9 +160,12 @@ def test_image_key_double_click_opens_populated_editor(tmp_path: Path, qtbot, mo
     image.fill(0xFFFF00FF)
     assert image.save(str(image_path), "PNG")
     project = ProjectDefinition(
-        schema_version=8, id="game", name="Game", version="1.0",
+        schema_version=9, id="game", name="Game", version="1.0",
         images=("assets/images/magic.png",),
-        icons={"image_2": IconDefinition(path="assets/images/magic.png", width_px=120001, height_px=60001)},
+        icons={
+            "image_1": IconDefinition(path="assets/images/magic.png"),
+            "image_2": IconDefinition(path="assets/images/magic.png"),
+        },
     )
     updates = []
     manager = dialogs.ImageManagerDialog(
@@ -140,15 +175,15 @@ def test_image_key_double_click_opens_populated_editor(tmp_path: Path, qtbot, mo
     qtbot.addWidget(manager)
     manager.images.setCurrentRow(0)
     key = manager.keys.item(0)
+    assert key.text() == "image_2"
     monkeypatch.setattr(dialogs.ImageKeyDialog, "exec", lambda dialog: QDialog.DialogCode.Accepted)
     manager.keys.itemDoubleClicked.emit(key)
-    assert updates == [("image_2", "image_2", 120001, 60001)]
+    assert updates == [("image_2", "image_2")]
 
-    editor = dialogs.ImageKeyDialog("image_2", 120001, 60001, editing=True)
+    editor = dialogs.ImageKeyDialog("image_2", editing=True)
     qtbot.addWidget(editor)
     assert editor.windowTitle() == title
     assert editor.name.text() == "image_2"
-    assert (editor.width.value(), editor.height.value()) == (120001, 60001)
 @pytest.mark.parametrize("language", ("ru", "en"))
 def test_image_and_html_add_dialogs_only_apply_accepted_picker_results(tmp_path: Path, qtbot, monkeypatch, language: str) -> None:
     from componentpress.i18n import set_language

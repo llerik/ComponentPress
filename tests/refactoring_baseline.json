@@ -111,14 +111,6 @@
       "stage": "9а",
       "owner": "coder:src/componentpress/bindings"
     },
-    "src/componentpress/bindings/icons.py|_HtmlIconParser.__init__": {
-      "path": "src/componentpress/bindings/icons.py",
-      "name": "_HtmlIconParser.__init__",
-      "line": 22,
-      "length": 24,
-      "stage": "9а",
-      "owner": "coder:src/componentpress/bindings"
-    },
     "src/componentpress/bindings/icons.py|expand_icons": {
       "path": "src/componentpress/bindings/icons.py",
       "name": "expand_icons",
@@ -247,14 +239,6 @@
       "stage": "9а",
       "owner": "coder:src/componentpress/editor"
     },
-    "src/componentpress/editor/dialogs.py|ImageKeyDialog.__init__": {
-      "path": "src/componentpress/editor/dialogs.py",
-      "name": "ImageKeyDialog.__init__",
-      "line": 104,
-      "length": 25,
-      "stage": "20",
-      "owner": "coder:stage20"
-    },
     "src/componentpress/editor/dialogs.py|ImageManagerDialog.__init__": {
       "path": "src/componentpress/editor/dialogs.py",
       "name": "ImageManagerDialog.__init__",
@@ -268,14 +252,6 @@
       "name": "ImageManagerDialog.refresh",
       "line": 221,
       "length": 21,
-      "stage": "20",
-      "owner": "coder:stage20"
-    },
-    "src/componentpress/editor/dialogs.py|ImageManagerDialog._select_image": {
-      "path": "src/componentpress/editor/dialogs.py",
-      "name": "ImageManagerDialog._select_image",
-      "line": 247,
-      "length": 24,
       "stage": "20",
       "owner": "coder:stage20"
     },

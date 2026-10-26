@@ -62,6 +62,7 @@ class ComponentResolver(Protocol):
         self, component: ComponentDefinition, data: DataSheetSnapshot | None,
         row: DataRow | None, *, owner: Path | None = None,
     ) -> ResolvedComponent: ...
+    def drain_diagnostics(self) -> tuple[Diagnostic, ...]: ...
 
 
 class ValidationStateStore(Protocol):

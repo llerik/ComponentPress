@@ -409,6 +409,15 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._resize_status_widgets()
+
+    def _resize_status_widgets(self) -> None:
+        path = getattr(self, "_status_project_path", tr("ui.project_closed"))
+        width = max(1, self.width() // 4)
+        self.status_project.setMaximumWidth(width)
+        self.status_project.setToolTip(path)
+        self.status_project.setText(self.status_project.fontMetrics().elidedText(path, Qt.TextElideMode.ElideMiddle, width))
+        self._update_latest_event_status()
 
     def _connect_signals(self) -> None:
         self._connect_project_actions()
@@ -533,7 +542,8 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
 
     def _show_loaded_session(self, session):
         self.setWindowTitle(f"{session.snapshot.model.name} — ComponentPress")
-        self.status_project.setText(str(session.snapshot.root))
+        self._status_project_path = str(session.snapshot.root)
+        self._resize_status_widgets()
         self._update_project_visibility()
         if self.controller.recovery_diagnostics:
             details = "; ".join(format_diagnostic(item) for item in self.controller.recovery_diagnostics)
@@ -897,8 +907,8 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
             self.session.snapshot.model,
             lambda source, folder: self._import_single_image(root, source, folder),
             lambda relative, delete_file: self._unregister_project_image(root, relative, delete_file),
-            lambda name, relative, width, height: self._add_project_image_key(root, name, relative, width, height),
-            lambda original, name, width, height: self._edit_project_image_key(root, original, name, width, height),
+            lambda name, relative: self._add_project_image_key(root, name, relative),
+            lambda original, name: self._edit_project_image_key(root, original, name),
             lambda name: self._remove_project_image_key(root, name),
             self,
         )
@@ -919,10 +929,10 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         self.controller.service.remove_image(self.session, relative, delete_file=delete_file)
         self._resource_images_changed()
 
-    def _add_project_image_key(self, root: Path, name: str, relative: str, width: int, height: int) -> None:
+    def _add_project_image_key(self, root: Path, name: str, relative: str) -> None:
         self._require_resource_write(root)
         assert self.session is not None
-        self.controller.service.add_image_key(self.session, name, relative, width, height)
+        self.controller.service.add_image_key(self.session, name, relative)
         self._resource_images_changed()
 
     def _remove_project_image_key(self, root: Path, name: str) -> None:
@@ -931,27 +941,39 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         self.controller.service.remove_image_key(self.session, name)
         self._resource_images_changed()
 
-    def _edit_project_image_key(self, root: Path, original: str, name: str, width: int, height: int) -> None:
+    def _edit_project_image_key(self, root: Path, original: str, name: str) -> None:
         self._require_resource_write(root)
         assert self.session is not None
-        self.controller.service.update_image_key(self.session, original, name, width, height)
+        self.controller.service.update_image_key(self.session, original, name)
         self._resource_images_changed()
 
     def _resource_images_changed(self) -> None:
-        if self.session is None:
+        if not self._refresh_resource_snapshot():
             return
+        try:
+            diagnostics = self.controller.preview.validate_all(
+                self._snapshot_for_current_documents() or self.session.snapshot,
+                force_read=False, manual=True,
+            )
+        except ProjectError as exc:
+            diagnostics = (exc.diagnostic,)
+        self._add_events(diagnostics)
+        for tab in self._tabs.values():
+            self._refresh_preview(tab)
+
+    def _refresh_resource_snapshot(self) -> bool:
+        if self.session is None:
+            return False
         try:
             snapshot = self.controller.service.open(self.session.snapshot.root)
             self.session.replace_snapshot(snapshot)
             manager = getattr(self, "_image_manager_dialog", None)
             if manager is not None and hasattr(manager, "refresh"):
                 manager.refresh(snapshot.model)
+            return True
         except ProjectError as exc:
             self._show_error(exc)
-            return
-        self.controller.preview.invalidate(self.session.snapshot.root)
-        for tab in self._tabs.values():
-            self._refresh_preview(tab)
+            return False
 
     def _require_resource_write(self, root: Path) -> None:
         if not self._operation_allowed("resource_write") or self.session is None or self.session.snapshot.root != root:
@@ -1483,7 +1505,7 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
         latest = self.event_list.item(self.event_list.count() - 1)
         text = latest.text() if latest is not None else ""
         self.status_event.setText(self.status_event.fontMetrics().elidedText(
-            text, Qt.TextElideMode.ElideMiddle, self.status_event.maximumWidth(),
+            text, Qt.TextElideMode.ElideMiddle, max(1, self.status_event.width()),
         ))
         self.status_event.setToolTip(latest.toolTip() if latest is not None else "")
 
@@ -1567,11 +1589,12 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
     def _show_active_validation_diagnostics(self, snapshot, component_id, diagnostics) -> bool:
         if not diagnostics:
             return False
+        errors = tuple(item for item in diagnostics if item.severity == "error")
         other_paths = {document.path for key, document in snapshot.documents.items() if key != component_id}
-        current_failed = any(item.path == snapshot.documents[component_id].path for item in diagnostics)
+        current_failed = any(item.path == snapshot.documents[component_id].path for item in errors)
         self._add_events(diagnostics)
-        if current_failed or not all(item.path in other_paths for item in diagnostics):
-            self.statusBar().showMessage(tr("ui.error_count", count=len(diagnostics)), 7000)
+        if current_failed or not all(item.path in other_paths for item in errors):
+            self.statusBar().showMessage(tr("ui.error_count", count=len(errors)), 7000)
             return True
         self.statusBar().showMessage(tr("ui.validation_other_components"), 7000)
         return False
@@ -1587,8 +1610,9 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
             return
         diagnostics = self.controller.preview.validate_all(snapshot, force_read=force_read, manual=True)
         self._add_events(diagnostics or (Diagnostic("VALIDATION_OK", "", self.session.snapshot.root, severity="info", message_key="ui.validation_all_ok"),))
-        if diagnostics:
-            self.statusBar().showMessage(tr("ui.error_count", count=len(diagnostics)), 7000)
+        errors = tuple(item for item in diagnostics if item.severity == "error")
+        if errors:
+            self.statusBar().showMessage(tr("ui.error_count", count=len(errors)), 7000)
         else:
             self.statusBar().showMessage(tr("ui.validation_all_ok"), 5000)
         if self.active_tab is not None:
@@ -1624,9 +1648,10 @@ class MainWindow(QMainWindow, MainWindowShell, MainWindowDialogs):
             diagnostics = self.controller.preview.validate_all(
                 self._snapshot_for_current_documents(), manual=True, component_ids=(tab.component_id,),
             )
-            if diagnostics:
-                self._add_events(diagnostics)
-                self.statusBar().showMessage(format_diagnostic(diagnostics[0]), 10000)
+            self._add_events(diagnostics)
+            errors = tuple(item for item in diagnostics if item.severity == "error")
+            if errors:
+                self.statusBar().showMessage(format_diagnostic(errors[0]), 10000)
                 return None
         return self.controller.preview.cached_data(self.session.snapshot, tab.component_id, component=component)
 

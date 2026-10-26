@@ -87,9 +87,19 @@ def _single_node_signature(node: object) -> tuple[object, ...]:
 
 
 def _model_signature(snapshot: ProjectSnapshot, component: ComponentDefinition) -> ModelSignature:
-    icons = tuple(sorted((name, item.path, item.width_px, item.height_px) for name, item in snapshot.model.icons.items()))
+    icons = tuple(sorted((name, item.path) for name, item in snapshot.model.icons.items()))
     return (component.data.sheet if component.data else None, _node_signature(component.elements),
             tuple(sorted(snapshot.model.variables.items())), snapshot.model.images, icons)
+
+
+def _drain_diagnostics(resolver) -> tuple[Diagnostic, ...]:
+    drain = getattr(resolver, "drain_diagnostics", None)
+    return tuple(drain()) if drain is not None else ()
+
+
+def _attach_warnings(error: ProjectError, warnings: tuple[Diagnostic, ...]) -> None:
+    if warnings:
+        error.diagnostics = (*warnings, error.diagnostic)
 
 
 class PreviewService:
@@ -255,8 +265,9 @@ class PreviewService:
             component_overrides={component_id: model},
             _request_ids={component_id: request_id} if request_id is not None else None,
         )
-        if diagnostics:
-            raise ValidationIssues(diagnostics)
+        errors = tuple(item for item in diagnostics if item.severity == "error")
+        if errors:
+            raise ValidationIssues(errors)
         return self.cached_data(snapshot, component_id, component=model)
 
     def _reject_stale(self, root: Path, component_id: str, request_id: int | None, path: Path) -> None:
@@ -394,15 +405,17 @@ class PreviewService:
         if not manual and self._validated_models.get(key) == signature:
             batch.checked_ids.append(component_id)
             return
+        resolver = self._resolver_factory(snapshot.root, snapshot.model)
         try:
-            self._resolver_factory(snapshot.root, snapshot.model).resolve_component(
-                model, None, None, owner=document.path,
-            )
+            resolved = resolver.resolve_component(model, None, None, owner=document.path)
         except ProjectError as exc:
-            self._record_failure(batch, key, None, signature, (exc.diagnostic,))
+            diagnostics = (*_drain_diagnostics(resolver), exc.diagnostic)
+            self._record_failure(batch, key, None, signature, diagnostics)
         else:
             batch.static[key] = signature
             batch.checked_ids.append(component_id)
+            if resolved is not None:
+                batch.diagnostics.extend(resolved.diagnostics)
 
     def _stage_sheet(
         self, snapshot: ProjectSnapshot, plan: _ValidationPlan, batch: _ValidationBatch,
@@ -452,14 +465,16 @@ class PreviewService:
         version = previous.version + 1 if previous is not None else 1
         try:
             loaded = self._load_data(snapshot, plan, component_id, model, previous, reused, force_read, version)
-            self._validate_sheet(snapshot, model, document.path, loaded)
+            warnings = self._validate_sheet(snapshot, model, document.path, loaded)
         except ValidationIssues as exc:
             self._record_failure(batch, cache_key, plan.fingerprint, signature, exc.diagnostics)
         except ProjectError as exc:
-            self._record_failure(batch, cache_key, plan.fingerprint, signature, (exc.diagnostic,))
+            self._record_failure(batch, cache_key, plan.fingerprint, signature,
+                                 getattr(exc, "diagnostics", (exc.diagnostic,)))
         else:
             batch.cached[cache_key] = _CachedData(loaded, plan.fingerprint, signature)
             batch.checked_ids.append(component_id)
+            batch.diagnostics.extend(warnings)
 
     def _load_data(
         self, snapshot: ProjectSnapshot, plan: _ValidationPlan, component_id: str,
@@ -482,12 +497,29 @@ class PreviewService:
     def _validate_sheet(
         self, snapshot: ProjectSnapshot, component: ComponentDefinition,
         owner: Path, data: DataSheetSnapshot,
-    ) -> None:
+    ) -> tuple[Diagnostic, ...]:
         resolver = self._resolver_factory(snapshot.root, snapshot.model)
-        resolver.validate_columns(component, data, owner=owner)
-        resolver.validate_static_resources(component, owner=owner)
+        try:
+            resolver.validate_columns(component, data, owner=owner)
+            resolver.validate_static_resources(component, owner=owner)
+        except ProjectError as exc:
+            _attach_warnings(exc, _drain_diagnostics(resolver))
+            raise
+        warnings = _drain_diagnostics(resolver)
+        return (*warnings, *self._validate_sheet_rows(resolver, component, owner, data, warnings))
+
+    @staticmethod
+    def _validate_sheet_rows(resolver, component, owner, data, previous):
+        warnings = []
         for row in data.rows:
-            resolver.resolve_component(component, data, row, owner=owner)
+            try:
+                resolved = resolver.resolve_component(component, data, row, owner=owner)
+            except ProjectError as exc:
+                _attach_warnings(exc, (*previous, *warnings, *_drain_diagnostics(resolver)))
+                raise
+            if resolved is not None:
+                warnings.extend(resolved.diagnostics)
+        return tuple(warnings)
 
     @staticmethod
     def _record_failure(

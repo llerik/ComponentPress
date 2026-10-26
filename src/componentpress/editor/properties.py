@@ -4,12 +4,11 @@ import math
 import re
 
 from PySide6.QtCore import QSignalBlocker, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFontDatabase, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
@@ -25,6 +24,7 @@ from componentpress.i18n import tr
 from componentpress.app_assets import set_themed_icon
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.nodes import ConditionalGroupNode, GroupNode, HtmlNode, ImageNode, LineNode, Node, ShapeNode
+from componentpress.editor.numeric import NumericSpinBox
 
 _POSITION_ROWS = (
     (("north_west", "left", "top"), ("north", "center", "top"), ("north_east", "right", "top")),
@@ -104,8 +104,8 @@ class ComponentProperties(QWidget):
         self._available_sheets = sheets
 
     @staticmethod
-    def _size_spin(name: str) -> QDoubleSpinBox:
-        spin = QDoubleSpinBox()
+    def _size_spin(name: str) -> NumericSpinBox:
+        spin = NumericSpinBox()
         spin.setObjectName(name)
         spin.setRange(0.001, 10000.0)
         spin.setDecimals(3)
@@ -405,8 +405,8 @@ class ElementProperties(QWidget):
         return button
 
     @staticmethod
-    def _number(name: str, minimum: float, maximum: float) -> QDoubleSpinBox:
-        spin = QDoubleSpinBox()
+    def _number(name: str, minimum: float, maximum: float) -> NumericSpinBox:
+        spin = NumericSpinBox()
         spin.setObjectName(name)
         spin.setRange(minimum, maximum)
         spin.setDecimals(3)
@@ -691,6 +691,7 @@ class ElementProperties(QWidget):
         families = list(font_families or sorted(QFontDatabase.families(), key=str.casefold))
         for family in families:
             self.font_combo.addItem(family, family)
+            self.font_combo.setItemData(self.font_combo.count() - 1, QFont(family), Qt.ItemDataRole.FontRole)
         if node.font_family not in families:
             self.font_combo.insertItem(0, tr("ui.font_unavailable", font=node.font_family), node.font_family)
         self.font_combo.setCurrentIndex(max(0, self.font_combo.findData(node.font_family)))

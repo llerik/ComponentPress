@@ -61,7 +61,7 @@ def main() -> None:
 
         safe = sheet.lower()
         color, pale, accent = PALETTES[sheet_index]
-        component = f'''schema_version: 8
+        component = f'''schema_version: 9
 id: {safe}
 name: "{sheet}"
 size_mm:
@@ -143,7 +143,7 @@ elements:
     refs = "\n".join(f"- id: {sheet.lower()}\n  path: components/{sheet.lower()}.yaml" for sheet in SHEETS)
     image_names = sorted(path.name for path in (ROOT / "assets" / "images").glob("*.png"))
     images = "\n".join(f"- assets/images/{name}" for name in image_names)
-    project = f'''schema_version: 8
+    project = f'''schema_version: 9
 id: lorem-ipsum-load-test
 name: "Lorem Ipsum load test"
 version: "0.1.0"

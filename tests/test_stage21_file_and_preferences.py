@@ -26,6 +26,65 @@ from componentpress.versioning.repository import _manifest_for
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "demo-game"
 
 
+def test_schema8_project_is_upgraded_to_9_on_open_without_retaining_old_files(tmp_path):
+    root = tmp_path / "legacy-schema"
+    shutil.copytree(DEMO, root)
+    for path in (root / "project.cpress", *sorted((root / "components").glob("*.yaml"))):
+        text = path.read_text(encoding="utf-8").replace("schema_version: 9", "schema_version: 8", 1)
+        if path.name == "project.cpress":
+            text = text.replace("    path: assets/images/leaf.png", "    path: assets/images/leaf.png\n    width_px: 24\n    height_px: 24", 1)
+        path.write_text(text, encoding="utf-8")
+
+    snapshot = FileProjectRepository().open(root)
+
+    assert snapshot.model.schema_version == 9
+    manifest = (root / "project.cpress").read_text(encoding="utf-8")
+    component = (root / "components/forest-card.yaml").read_text(encoding="utf-8")
+    assert "width_px" not in manifest and "height_px" not in manifest
+    assert "schema_version: 9" in manifest and "schema_version: 9" in component
+    assert not list((root / ".componentpress/migrations").glob("*/"))
+
+
+def test_registered_schema_migration_resumes_after_partial_file_replacement(tmp_path, monkeypatch):
+    root = tmp_path / "interrupted-schema"
+    shutil.copytree(DEMO, root)
+    for path in (root / "project.cpress", *sorted((root / "components").glob("*.yaml"))):
+        path.write_text(path.read_text(encoding="utf-8").replace("schema_version: 9", "schema_version: 8", 1), encoding="utf-8")
+    import componentpress.project_io.schema_migration_engine as engine
+    write = engine.atomic_write
+    calls = 0
+
+    def fail_manifest(path, data, expected_hash=None):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("interrupted")
+        write(path, data, expected_hash)
+
+    monkeypatch.setattr(engine, "atomic_write", fail_manifest)
+    with pytest.raises(OSError):
+        FileProjectRepository().open(root)
+    monkeypatch.setattr(engine, "atomic_write", write)
+    snapshot = FileProjectRepository().open(root)
+    assert snapshot.model.schema_version == 9
+    assert not (root / ".componentpress/migrations/active.json").exists()
+
+
+def test_incomplete_registered_migration_path_is_rejected_before_any_write(tmp_path, monkeypatch):
+    root = tmp_path / "unreachable-schema"
+    shutil.copytree(DEMO, root)
+    for path in (root / "project.cpress", *sorted((root / "components").glob("*.yaml"))):
+        path.write_text(path.read_text(encoding="utf-8").replace("schema_version: 9", "schema_version: 8", 1), encoding="utf-8")
+    before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    import componentpress.project_io.schema_migration_engine as engine
+    monkeypatch.setattr(engine, "SCHEMA_VERSION", 10)
+    with pytest.raises(ProjectError) as error:
+        FileProjectRepository().open(root)
+    assert error.value.diagnostic.code == "SCHEMA_UNSUPPORTED"
+    assert {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+    assert not (root / ".componentpress").exists()
+
+
 def test_legacy_and_ambiguous_manifest_are_read_only(tmp_path):
     root = tmp_path / "legacy"
     shutil.copytree(DEMO, root)
@@ -50,7 +109,7 @@ def test_manifest_symbolic_link_is_rejected_without_following_it(tmp_path):
     root = tmp_path / "linked"
     root.mkdir()
     target = tmp_path / "outside.cpress"
-    target.write_text("schema_version: 8\n", encoding="utf-8")
+    target.write_text("schema_version: 9\n", encoding="utf-8")
     try:
         (root / "project.cpress").symlink_to(target)
     except OSError:
@@ -58,14 +117,14 @@ def test_manifest_symbolic_link_is_rejected_without_following_it(tmp_path):
     with pytest.raises(ProjectError) as error:
         FileProjectRepository().open(root)
     assert error.value.diagnostic.code == "PROJECT_MANIFEST_LINK"
-    assert target.read_text(encoding="utf-8") == "schema_version: 8\n"
+    assert target.read_text(encoding="utf-8") == "schema_version: 9\n"
 
 
 def test_invalid_manifest_is_rejected_before_transaction_recovery(tmp_path):
     root = tmp_path / "damaged"
     shutil.copytree(DEMO, root)
     manifest = root / "project.cpress"
-    manifest.write_text("schema_version: 8\nid: [\n", encoding="utf-8")
+    manifest.write_text("schema_version: 9\nid: [\n", encoding="utf-8")
     manifest_bytes = manifest.read_bytes()
     orphan = root / "components/orphan.yaml"
     orphan_bytes = b"orphan\n"

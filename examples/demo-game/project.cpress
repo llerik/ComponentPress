@@ -1,5 +1,5 @@
 # Пример проекта второго этапа
-schema_version: 8
+schema_version: 9
 id: demo-game
 name: "Лесная игра"
 version: "0.1.0"
@@ -10,8 +10,6 @@ images:
 icons:
   ic_leaf_6:
     path: assets/images/leaf.png
-    width_px: 32
-    height_px: 32
 data_source: null
 copies_columns:
   prod: Prod

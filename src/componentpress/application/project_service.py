@@ -254,7 +254,7 @@ class ProjectService:
             target.unlink()
 
     @_logged("register")
-    def add_image_key(self, session: ProjectSession, name: str, relative: str, width_px: int, height_px: int) -> None:
+    def add_image_key(self, session: ProjectSession, name: str, relative: str) -> None:
         from componentpress.domain.project import IconDefinition
 
         canonical = name.lower()
@@ -263,14 +263,16 @@ class ProjectService:
                                           message_key="error.image_key_exists", params={"name": canonical}))
         if relative not in session.snapshot.model.images:
             raise ProjectError(Diagnostic("RESOURCE_UNKNOWN", "изображение не зарегистрировано", session.snapshot.root))
+        if any(icon.path == relative for icon in session.snapshot.model.icons.values()):
+            raise ProjectError(Diagnostic("IMAGE_KEY_EXISTS", "для изображения уже задан ключ", session.snapshot.root))
         icons = dict(session.snapshot.model.icons)
-        icons[canonical] = IconDefinition(path=relative, width_px=width_px, height_px=height_px)
+        icons[canonical] = IconDefinition(path=relative)
         updated = self.projects.save_project(session.snapshot, icons=icons)
         session.replace_snapshot(updated)
 
     @_logged("save")
     def update_image_key(
-        self, session: ProjectSession, original_name: str, name: str, width_px: int, height_px: int,
+        self, session: ProjectSession, original_name: str, name: str,
     ) -> None:
         from componentpress.domain.project import IconDefinition
 
@@ -283,9 +285,7 @@ class ProjectService:
         if canonical in icons:
             raise ProjectError(Diagnostic("IMAGE_KEY_EXISTS", "такой ключ изображения уже существует", session.snapshot.root,
                                           message_key="error.image_key_exists", params={"name": canonical}))
-        icons[canonical] = IconDefinition(
-            path=original.path, width_px=width_px, height_px=height_px,
-        )
+        icons[canonical] = IconDefinition(path=original.path)
         updated = self.projects.save_project(session.snapshot, icons=icons)
         session.replace_snapshot(updated)
 

@@ -26,7 +26,7 @@ def test_positioned_resize_keeps_world_anchor_with_shear(anchor):
         transform={"m11": 1.5, "m12": 0.4, "m21": 0.2, "m22": 1.2},
     )
     component = ComponentDefinition(
-        schema_version=8, id="card", name="Card", size_mm=SizeMM(width=100, height=100),
+        schema_version=9, id="card", name="Card", size_mm=SizeMM(width=100, height=100),
         elements=(shape,),
     )
 
@@ -44,7 +44,7 @@ def test_line_resize_keeps_world_anchor_and_signed_direction(dx, dy, anchor):
         transform={"m11": 1.5, "m12": 0.4, "m21": 0.2, "m22": 1.2},
     )
     component = ComponentDefinition(
-        schema_version=8, id="card", name="Card", size_mm=SizeMM(width=100, height=100),
+        schema_version=9, id="card", name="Card", size_mm=SizeMM(width=100, height=100),
         elements=(line,),
     )
 
@@ -70,7 +70,7 @@ def test_group_resize_keeps_world_anchor_with_shear(anchor):
         children=(shape,),
     )
     component = ComponentDefinition(
-        schema_version=8, id="card", name="Card", size_mm=SizeMM(width=100, height=100),
+        schema_version=9, id="card", name="Card", size_mm=SizeMM(width=100, height=100),
         elements=(group,),
     )
 
@@ -84,7 +84,7 @@ def _canvas(qtbot, node=None):
         id="shape", name="Shape", type="rectangle", x_mm=20, y_mm=20, width_mm=20, height_mm=20,
     )
     component = ComponentDefinition(
-        schema_version=8, id="card", name="Card", size_mm=SizeMM(width=100, height=100),
+        schema_version=9, id="card", name="Card", size_mm=SizeMM(width=100, height=100),
         elements=(node,),
     )
     canvas = ComponentCanvas()

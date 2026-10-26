@@ -1,6 +1,7 @@
 """Resolved render input that never mutates the source component template."""
 
 from dataclasses import dataclass
+from .diagnostics import Diagnostic
 
 from .component import ComponentDefinition
 from .values import DataRow
@@ -12,3 +13,4 @@ class ResolvedComponent:
     source_component_id: str
     row: DataRow | None
     data_version: int | None
+    diagnostics: tuple[Diagnostic, ...] = ()

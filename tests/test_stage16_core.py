@@ -20,7 +20,7 @@ from ruamel.yaml.comments import CommentedMap
 
 
 def _component(elements=(), *, component_id="card", width=63, height=88):
-    return ComponentDefinition(schema_version=8, id=component_id, name=component_id,
+    return ComponentDefinition(schema_version=9, id=component_id, name=component_id,
                                size_mm=SizeMM(width=width, height=height), elements=tuple(elements))
 
 

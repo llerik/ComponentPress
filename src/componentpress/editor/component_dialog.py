@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
+    QComboBox, QDialog, QDialogButtonBox, QFormLayout,
     QHBoxLayout, QLineEdit, QToolButton, QVBoxLayout,
 )
 
 from componentpress.i18n import tr
 from componentpress.domain.component import ComponentDefinition, DataBinding
 from componentpress.app_assets import set_themed_icon
+from componentpress.editor.numeric import NumericSpinBox
 
 
 PRESETS: tuple[tuple[str, float, float], ...] = (
@@ -86,8 +87,8 @@ class ComponentDialog(QDialog):
         return row
 
     @staticmethod
-    def _millimetres(name: str, value: float) -> QDoubleSpinBox:
-        spin = QDoubleSpinBox()
+    def _millimetres(name: str, value: float) -> NumericSpinBox:
+        spin = NumericSpinBox()
         spin.setObjectName(name)
         spin.setRange(0.1, 10000)
         spin.setDecimals(3)

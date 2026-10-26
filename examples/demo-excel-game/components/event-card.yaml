@@ -1,7 +1,7 @@
 %YAML 1.2
 ---
 # Второй компонент читает другой лист той же книги
-schema_version: 8
+schema_version: 9
 id: event-card
 name: "Карта события"
 size_mm:

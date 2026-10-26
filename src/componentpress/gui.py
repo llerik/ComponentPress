@@ -369,7 +369,7 @@ def _run_release_smoke(window: MainWindow, root: Path) -> bool:
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     if saved.model.background != "#DDEEFF" or "# Проверка текстового режима" not in saved.committed.text:
         return _smoke_failure(root, inspect.currentframe().f_lineno)
-    if saved.model.schema_version != 8 or not {node.type for node in saved.model.elements}.issuperset({"rectangle", "ellipse", "line"}):
+    if saved.model.schema_version != 9 or not {node.type for node in saved.model.elements}.issuperset({"rectangle", "ellipse", "line"}):
         return _smoke_failure(root, inspect.currentframe().f_lineno)
     if not any(node.id == "smoke-group" for node in saved.model.elements):
         return _smoke_failure(root, inspect.currentframe().f_lineno)

@@ -1,5 +1,5 @@
 # Статический макет с вложенной группой
-schema_version: 8
+schema_version: 9
 id: forest-card
 name: "Лесная карта"
 size_mm:

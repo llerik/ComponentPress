@@ -66,6 +66,13 @@ class BindingResolver:
         self.loader = loader if loader is not None else ProjectResourceLoader(root)
         self.validate_resources = validate_resources
         self.environment = SandboxedEnvironment(undefined=StrictUndefined, autoescape=False)
+        self._diagnostics: list[Diagnostic] = []
+        self._font_size_pt = 10.0
+
+    def drain_diagnostics(self) -> tuple[Diagnostic, ...]:
+        diagnostics = tuple(self._diagnostics)
+        self._diagnostics.clear()
+        return diagnostics
 
     def _expression(self, kind: str, name: str, context: dict[str, object]) -> str:
         expression = f'{kind}[{name!r}]'
@@ -159,13 +166,15 @@ class BindingResolver:
             token, self.project.icons, loader=self.loader if self.validate_resources else None,
             owner=location.owner, field=location.field, source=location.source,
             sheet=location.sheet, cell=cell, node_id=location.node_id,
+            font_size_pt=self._font_size_pt,
         )
 
-    def _expand_html_text(self, value: str, location: BindingLocation) -> str:
+    def _expand_html_text(self, value: str, location: BindingLocation, *, strict_unknown: bool = True) -> str:
         return expand_html_icons(
             value, self.project.icons, loader=self.loader if self.validate_resources else None,
             owner=location.owner, field=location.field, source=location.source,
             sheet=location.sheet, cell="", node_id=location.node_id,
+            strict_unknown=strict_unknown, font_size_pt=self._font_size_pt,
         )
 
     def _resolve_manual_html(self, template: str, row: DataRow | None, location: BindingLocation) -> str:
@@ -181,6 +190,7 @@ class BindingResolver:
             value, self.project.icons, loader=self.loader if self.validate_resources else None,
             owner=location.owner, field=location.field, source=location.source,
             sheet=location.sheet, cell=cell.coordinate, node_id=location.node_id,
+            font_size_pt=self._font_size_pt, strict_unknown=False, diagnostics=self._diagnostics,
         )
 
     def resolve_text(self, template: str, row: DataRow | None, location: BindingLocation, *, icons: bool) -> str:
@@ -207,8 +217,9 @@ class BindingResolver:
                 raise self._resource_error(exc, location, source_cell) from exc
         return value
 
-    def resolve_html(self, template: str, row: DataRow | None, location: BindingLocation, *, content_mode: str = "manual") -> str:
-        parser = _BindingHtmlParser(self, row, location, content_mode)
+    def resolve_html(self, template: str, row: DataRow | None, location: BindingLocation, *, content_mode: str = "manual", font_size_pt: float = 10.0) -> str:
+        self._font_size_pt = font_size_pt
+        parser = _BindingHtmlParser(self, row, location, content_mode, font_size_pt)
         parser.feed(template)
         parser.close()
         html = "".join(parser.output)
@@ -246,11 +257,12 @@ class BindingResolver:
         ))
 
     def resolve_component(self, component: ComponentDefinition, data: DataSheetSnapshot | None, row: DataRow | None, *, owner: Path | None = None) -> ResolvedComponent:
+        self._diagnostics.clear()
         self._check_resolver_input(component, data, row)
         context = self._context(component, data, row, owner)
         self._check_condition_columns(component.elements, context)
         model = component.model_copy(update={"elements": self._resolve_nodes(component.elements, context)})
-        return ResolvedComponent(model, component.id, row, data.version if data else None)
+        return ResolvedComponent(model, component.id, row, data.version if data else None, tuple(self._diagnostics))
 
     @staticmethod
     def _check_resolver_input(component, data, row) -> None:
@@ -338,25 +350,28 @@ class BindingResolver:
 
     def _resolve_html_node(self, node: HtmlNode, context: _ResolutionContext) -> Node:
         location = context.location(node, f"elements.{node.id}.html")
-        html = self._column_html(node, context, location) if node.content_mode == "column" else self.resolve_html(node.html, context.row, location)
+        html = self._column_html(node, context, location) if node.content_mode == "column" else self.resolve_html(
+            node.html, context.row, location, font_size_pt=node.font_size_pt)
         return node.model_copy(update={"html": html, "content_mode": "manual", "content_column": None})
 
     def _column_html(self, node: HtmlNode, context: _ResolutionContext, location: BindingLocation) -> str:
+        self._font_size_pt = node.font_size_pt
         cell = self._column_cell(node.content_column or "", context.row, location)
         html = self._cell_text(cell, location, node.content_column or "")
         self._validate_source_html(html, location, cell, allow_images=False)
         if "{{" in html:
             raise ProjectError(Diagnostic("COLUMN_TEMPLATE_FORBIDDEN", "содержимое Excel не может содержать подстановки", location.owner, location.field, source=location.source, sheet=location.sheet, cell=cell.coordinate, node_id=node.id))
-        html = self._expand_column_html(html, location, cell)
+        html = self._expand_column_html(html, location, cell, node.font_size_pt)
         self._validate_source_html(html, location, cell, allow_images=True)
         return html
 
-    def _expand_column_html(self, html: str, location: BindingLocation, cell: CellValue) -> str:
+    def _expand_column_html(self, html: str, location: BindingLocation, cell: CellValue, font_size_pt: float) -> str:
         try:
             return expand_html_icons(
                 html, self.project.icons, loader=self.loader if self.validate_resources else None,
                 owner=location.owner, field=location.field, source=location.source,
                 sheet=location.sheet, cell=cell.coordinate, node_id=location.node_id,
+                strict_unknown=False, font_size_pt=font_size_pt, diagnostics=self._diagnostics,
             )
         except ProjectError as exc:
             raise self._resource_error(exc, location, cell) from exc
@@ -423,12 +438,13 @@ class BindingResolver:
 
 
 class _BindingHtmlParser(HTMLParser):
-    def __init__(self, resolver: BindingResolver, row: DataRow | None, location: BindingLocation, content_mode: str):
+    def __init__(self, resolver: BindingResolver, row: DataRow | None, location: BindingLocation, content_mode: str, font_size_pt: float):
         super().__init__(convert_charrefs=False)
         self.resolver = resolver
         self.row = row
         self.location = location
         self.content_mode = content_mode
+        self.font_size_pt = font_size_pt
         self.output: list[str] = []
         self.resources: list[tuple[str, CellValue | None]] = []
 
@@ -459,8 +475,9 @@ class _BindingHtmlParser(HTMLParser):
         self.output.append(f"</{tag}>")
 
     def handle_data(self, data: str) -> None:
+        self.resolver._font_size_pt = self.font_size_pt
         if self.content_mode != "manual":
-            self.output.append(self.resolver._expand_html_text(data, self.location))
+            self.output.append(self.resolver._expand_html_text(data, self.location, strict_unknown=False))
             return
         self.output.append(self.resolver._resolve_manual_html(data, self.row, self.location))
 

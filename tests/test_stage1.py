@@ -50,7 +50,7 @@ def test_comments_group_ids_and_values_survive_save_cycle(tmp_path: Path) -> Non
     root = demo(tmp_path)
     repo = FileProjectRepository()
     snapshot = repo.open(root)
-    assert snapshot.model.icons["ic_leaf_6"].width_px == 32
+    assert snapshot.model.icons["ic_leaf_6"].path == "assets/images/leaf.png"
     assert snapshot.documents["forest-card"].model.elements[1].children[1].id == "caption"
     snapshot = repo.save_project(snapshot, name="Новое название")
     size = snapshot.documents["forest-card"].model.size_mm.model_copy(update={"width": 70.5})
@@ -84,7 +84,7 @@ def test_invalid_component_has_diagnostic_and_is_not_rewritten(tmp_path: Path, r
     path = root / "components/forest-card.yaml"
     original = path.read_text(encoding="utf-8")
     if code == "SCHEMA_UNSUPPORTED":
-            broken = original.replace("schema_version: 8", replacement)
+            broken = original.replace("schema_version: 9", replacement)
     elif code == "YAML_SYNTAX":
         broken = original.replace('name: "Лесная карта"', replacement)
     elif code == "DOCUMENT_INVALID":
@@ -120,7 +120,7 @@ def test_icon_and_portable_path_errors(tmp_path: Path) -> None:
     original = path.read_text(encoding="utf-8")
     for broken, code in [
         (original.replace("ic_leaf_6", "leaf.name"), "DOCUMENT_INVALID"),
-        (original.replace("width_px: 32", "width_px: 0"), "DOCUMENT_INVALID"),
+        (original.replace("    path: assets/images/leaf.png", "    path: assets/images/leaf.png\n    width_px: 0"), "DOCUMENT_INVALID"),
         (original.replace("assets/images/leaf.png", "assets/images/../leaf.png"), "DOCUMENT_INVALID"),
         (original.replace("assets/images/leaf.png", "assets/images/leaf.svg"), "DOCUMENT_INVALID"),
     ]:

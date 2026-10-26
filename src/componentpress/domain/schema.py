@@ -2,7 +2,7 @@
 
 from typing import Any
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 PROJECT_MANIFEST = "project.cpress"
 
 

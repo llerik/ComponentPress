@@ -7,15 +7,17 @@ from uuid import uuid4
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QImage, QKeyEvent, QMouseEvent, QPainter, QPen, QPixmap, QTransform, QWheelEvent
-from PySide6.QtWidgets import QFrame, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsScene, QGraphicsView, QGraphicsLineItem
+from PySide6.QtWidgets import QLabel, QFrame, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsScene, QGraphicsView, QGraphicsLineItem
 
 from componentpress.domain.component import ComponentDefinition
 from componentpress.domain.nodes import GroupNode, LineNode, Node
 from componentpress.domain.geometry import Affine, local_bounds
 from componentpress.domain.tree import effectively_locked_ids, locations
 from componentpress.editor.theme import is_dark_theme, theme_palette
+from componentpress.editor.canvas_rulers import CanvasRuler
 from componentpress.diagnostics.logging import log_event
 from componentpress.editor.canvas_gestures import CanvasGesture, DrawGesture, MoveGesture, NudgeGesture, ResizeGesture
+from componentpress.i18n import tr
 
 
 def _component_rect(width_mm: float, height_mm: float) -> QRectF:
@@ -195,7 +197,29 @@ class ComponentCanvas(QGraphicsView):
         super().__init__(parent)
         self._configure_view()
         self._initialize_canvas_state()
+        self._create_rulers()
         self.scene().selectionChanged.connect(self._scene_selection_changed)
+
+    def _create_rulers(self) -> None:
+        self._ruler_size = 24
+        self.setViewportMargins(self._ruler_size, self._ruler_size, 0, 0)
+        self.corner = QLabel(tr("ui.millimetres"), self)
+        self.corner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.horizontal_ruler = CanvasRuler(self, True)
+        self.vertical_ruler = CanvasRuler(self, False)
+        self.horizontalScrollBar().valueChanged.connect(self._update_rulers)
+        self.verticalScrollBar().valueChanged.connect(self._update_rulers)
+        self._update_rulers()
+
+    def _update_rulers(self, *_args) -> None:
+        viewport = self.viewport().geometry()
+        self.corner.setGeometry(0, 0, viewport.x(), viewport.y())
+        self.horizontal_ruler.setGeometry(viewport.x(), 0, viewport.width(), viewport.y())
+        self.vertical_ruler.setGeometry(0, viewport.y(), viewport.x(), viewport.height())
+        position = getattr(self, "_cursor_view_pos", None)
+        point = self.mapToScene(position) if position is not None else None
+        self.horizontal_ruler.set_cursor(point.x() / self._world_per_mm_x if point is not None else None)
+        self.vertical_ruler.set_cursor(point.y() / self._world_per_mm_y if point is not None else None)
 
     def _configure_view(self):
         self.setObjectName("componentCanvas")
@@ -779,6 +803,8 @@ class ComponentCanvas(QGraphicsView):
         self._log_gesture("started")
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        self._cursor_view_pos = event.position().toPoint()
+        self._update_rulers()
         gesture = self._gesture
         if gesture is None or not event.buttons() & Qt.MouseButton.LeftButton:
             self._update_hover_cursor(event.position())
@@ -975,6 +1001,7 @@ class ComponentCanvas(QGraphicsView):
             self.fitInView(self._pixmap_item.sceneBoundingRect(), Qt.AspectRatioMode.KeepAspectRatio)
         finally:
             self._fitting = False
+        self._update_rulers()
         self.zoomChanged.emit(self.zoom_percent)
 
     def actual_size(self) -> None:
@@ -985,6 +1012,7 @@ class ComponentCanvas(QGraphicsView):
         self.resetTransform()
         if self._pixmap_item is not None:
             self.centerOn(self._pixmap_item.sceneBoundingRect().center())
+        self._update_rulers()
         self.zoomChanged.emit(100)
 
     def zoom_by(self, factor: float) -> None:
@@ -993,12 +1021,19 @@ class ComponentCanvas(QGraphicsView):
         self._fit_mode = False
         _set_fit_scrollbars(self, False)
         _scale_view(self, factor)
+        self._update_rulers()
         self.zoomChanged.emit(self.zoom_percent)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._update_rulers()
         if self._fit_mode and self._has_image and not self._fitting:
             self.fit_page()
+
+    def leaveEvent(self, event) -> None:
+        self._cursor_view_pos = None
+        self._update_rulers()
+        super().leaveEvent(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:

@@ -40,6 +40,7 @@ class _BuildPlan:
     input_hashes: dict[str, str] = field(default_factory=dict)
     source_hashes: dict[Path, str] = field(default_factory=dict)
     xlsx_bytes: dict[Path, bytes] = field(default_factory=dict)
+    warnings: list[Diagnostic] = field(default_factory=list)
 
 
 @dataclass
@@ -134,7 +135,7 @@ class InputSnapshotBuilder:
         plan = self._collect_instances(source, ordered, mode, token)
         captured = self._capture_resources(source, plan, job_directory, memory_budget_bytes, token)
         self._verify_sources(plan.source_hashes, captured.source_hashes, token)
-        warnings = self._quality_warnings(source, plan.instances, captured.resources)
+        warnings = (*plan.warnings, *self._quality_warnings(source, plan.instances, captured.resources))
         snapshot = self._assemble_snapshot(source, plan, captured, job_id, job_directory, staging,
                                            print_settings, mode, max_render_workers, memory_budget_bytes, warnings)
         return snapshot if defer_font_registration else self.register_snapshot_fonts(snapshot)
@@ -204,6 +205,7 @@ class InputSnapshotBuilder:
         rows = self._resolve_rows(source, document, plan, resolver, mode)
         for row, resolved in rows:
             token.check()
+            plan.warnings.extend(resolved.diagnostics)
             instance = self._make_instance(len(plan.instances), component_id, document, row, mode, resolved)
             plan.instances.append(instance)
             plan.resource_paths.update(_resource_paths(resolved.component))

@@ -19,19 +19,10 @@ _KEY = re.compile(r"(\\)?\{([A-Za-z0-9_-]+)(\\)?\}")
 class _HtmlIconParser(HTMLParser):
     """Expand icon labels in HTML text while preserving markup and entities."""
 
-    def __init__(
-        self,
-        icons: dict[str, IconDefinition],
-        *,
-        loader: ProjectResourceLoader | None,
-        owner: Path,
-        field: str,
-        source: str,
-        sheet: str,
-        cell: str,
-        node_id: str,
-        strict_unknown: bool,
-    ):
+    def __init__(self, icons: dict[str, IconDefinition], *, loader: ProjectResourceLoader | None,
+                 owner: Path, field: str, source: str, sheet: str, cell: str, node_id: str,
+                 strict_unknown: bool, font_size_pt: float = 10.0,
+                 diagnostics: list[Diagnostic] | None = None):
         super().__init__(convert_charrefs=False)
         self.icons = icons
         self.loader = loader
@@ -42,6 +33,8 @@ class _HtmlIconParser(HTMLParser):
         self.cell = cell
         self.node_id = node_id
         self.strict_unknown = strict_unknown
+        self.font_size_pt = font_size_pt
+        self.diagnostics = diagnostics
         self.output: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -60,10 +53,10 @@ class _HtmlIconParser(HTMLParser):
         self.output.append(f"</{tag}>")
 
     def handle_data(self, data: str) -> None:
-        expanded = _KEY.sub(lambda match: _expand_key(
-            match, self.icons, self.loader, self.owner, self.field, self.source,
-            self.sheet, self.cell, self.node_id, strict_unknown=self.strict_unknown,
-        ), expand_icons(
+        self.output.append(self._expanded_data(data))
+
+    def _expanded_data(self, data: str) -> str:
+        expanded = expand_icons(
             data,
             self.icons,
             loader=self.loader,
@@ -73,10 +66,19 @@ class _HtmlIconParser(HTMLParser):
             sheet=self.sheet,
             cell=self.cell,
             node_id=self.node_id,
-        ))
+            font_size_pt=self.font_size_pt, strict_unknown=self.strict_unknown,
+            diagnostics=self.diagnostics,
+        )
+        expanded = _KEY.sub(self._expand_key, expanded)
         if self.strict_unknown:
             expanded = expanded.replace(r"\{", "{").replace(r"\}", "}")
-        self.output.append(expanded)
+        return expanded
+
+    def _expand_key(self, match):
+        return _expand_key(match, self.icons, self.loader, self.owner, self.field,
+                           self.source, self.sheet, self.cell, self.node_id,
+                           strict_unknown=self.strict_unknown, font_size_pt=self.font_size_pt,
+                           diagnostics=self.diagnostics)
 
     def handle_entityref(self, name: str) -> None:
         self.output.append(f"&{name};")
@@ -112,6 +114,9 @@ def expand_icons(
     sheet: str,
     cell: str,
     node_id: str,
+    font_size_pt: float = 10.0,
+    strict_unknown: bool = True,
+    diagnostics: list[Diagnostic] | None = None,
 ) -> str:
     pieces: list[str] = []
     position = 0
@@ -123,10 +128,11 @@ def expand_icons(
         else:
             icon = icons.get(name.lower())
             if icon is None:
-                raise ProjectError(Diagnostic(
-                    "ICON_UNKNOWN", f"нет именованной иконки {name!r}", owner, field,
-                    source=source, sheet=sheet, cell=cell, node_id=node_id,
-                ))
+                if strict_unknown:
+                    raise ProjectError(_unknown_diagnostic("ICON_UNKNOWN", name, owner, field, source, sheet, cell, node_id))
+                _collect_unknown(diagnostics, "ICON_UNKNOWN", name, owner, field, source, sheet, cell, node_id)
+                pieces.append(escape(text[match.start():match.end()], quote=False))
+                continue
             if loader is not None:
                 try:
                     loader.image(icon.path, owner=owner, field=field)
@@ -134,8 +140,8 @@ def expand_icons(
                     raise _resource_error(exc, owner=owner, field=field, source=source,
                                           sheet=sheet, cell=cell, node_id=node_id) from exc
             pieces.append(
-                f'<img src="{escape(icon.path, quote=True)}" '
-                f'width="{icon.width_px}" height="{icon.height_px}" alt="{escape(name, quote=True)}" />'
+                f'<img src="{escape(icon.path, quote=True)}" height="{font_size_pt:g}" '
+                f'alt="{escape(name, quote=True)}" />'
             )
         position = match.end()
     pieces.append(escape(text[position:], quote=False))
@@ -154,19 +160,13 @@ def expand_html_icons(
     cell: str,
     node_id: str,
     strict_unknown: bool = True,
+    font_size_pt: float = 10.0,
+    diagnostics: list[Diagnostic] | None = None,
 ) -> str:
     """Expand icon labels in HTML text nodes without escaping the HTML tags."""
-    parser = _HtmlIconParser(
-        icons,
-        loader=loader,
-        owner=owner,
-        field=field,
-        source=source,
-        sheet=sheet,
-        cell=cell,
-        node_id=node_id,
-        strict_unknown=strict_unknown,
-    )
+    parser = _HtmlIconParser(icons, loader=loader, owner=owner, field=field, source=source,
+                             sheet=sheet, cell=cell, node_id=node_id, strict_unknown=strict_unknown,
+                             font_size_pt=font_size_pt, diagnostics=diagnostics)
     parser.feed(html)
     parser.close()
     return "".join(parser.output)
@@ -176,24 +176,34 @@ def _expand_key(
     match: re.Match[str], icons: dict[str, IconDefinition],
     loader: ProjectResourceLoader | None, owner: Path, field: str,
     source: str, sheet: str, cell: str, node_id: str, *, strict_unknown: bool = True,
+    font_size_pt: float = 10.0, diagnostics: list[Diagnostic] | None = None,
 ) -> str:
     escaped_open, name, escaped_close = match.groups()
     if escaped_open or escaped_close:
         return escape("{" + name + "}", quote=False)
     icon = icons.get(name.lower())
     if icon is None:
-        if not strict_unknown:
-            return match.group(0)
-        raise ProjectError(Diagnostic(
-            "IMAGE_KEY_UNKNOWN", f"нет ключа изображения {name!r}", owner, field,
-            source=source, sheet=sheet, cell=cell, node_id=node_id,
-            message_key="error.image_key_unknown", params={"name": name},
-        ))
+        if strict_unknown:
+            raise ProjectError(_unknown_diagnostic("IMAGE_KEY_UNKNOWN", name, owner, field, source, sheet, cell, node_id))
+        _collect_unknown(diagnostics, "IMAGE_KEY_UNKNOWN", name, owner, field, source, sheet, cell, node_id)
+        return escape(match.group(0), quote=False)
     if loader is not None:
         try:
             loader.image(icon.path, owner=owner, field=field)
         except ProjectError as exc:
             raise _resource_error(exc, owner=owner, field=field, source=source,
                                   sheet=sheet, cell=cell, node_id=node_id) from exc
-    return (f'<img src="{escape(icon.path, quote=True)}" width="{icon.width_px}" '
-            f'height="{icon.height_px}" alt="{escape(name, quote=True)}" />')
+    return (f'<img src="{escape(icon.path, quote=True)}" height="{font_size_pt:g}" '
+            f'alt="{escape(name, quote=True)}" />')
+
+
+def _unknown_diagnostic(code, name, owner, field, source, sheet, cell, node_id):
+    key = "error.image_key_unknown" if code == "IMAGE_KEY_UNKNOWN" else "error.icon_unknown"
+    return Diagnostic(code, f"нет ключа изображения {name!r}", owner, field,
+                      source=source, sheet=sheet, cell=cell, node_id=node_id,
+                      severity="warning", message_key=key, params={"name": name})
+
+
+def _collect_unknown(diagnostics, code, name, owner, field, source, sheet, cell, node_id):
+    if diagnostics is not None:
+        diagnostics.append(_unknown_diagnostic(code, name, owner, field, source, sheet, cell, node_id))

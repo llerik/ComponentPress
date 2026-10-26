@@ -230,7 +230,7 @@ def test_focus_loss_commits_one_pending_arrow_nudge(tmp_path: Path, qtbot, monke
 
 def _component() -> ComponentDefinition:
     return ComponentDefinition(
-        schema_version=8,
+        schema_version=9,
         id="card",
         name="Card",
         size_mm=SizeMM(width=63, height=88),
@@ -248,11 +248,11 @@ def _component() -> ComponentDefinition:
 def test_project_and_new_component_templates_use_shared_schema_eight(tmp_path: Path) -> None:
     repository = project_repository()
     snapshot = repository.create(tmp_path / "game", "Game")
-    assert snapshot.model.schema_version == 8
+    assert snapshot.model.schema_version == 9
     snapshot = repository.add_component(snapshot, "card", "Card")
-    assert snapshot.documents["card"].model.schema_version == 8
-    assert snapshot.model.schema_version == snapshot.documents["card"].model.schema_version == SCHEMA_VERSION == 8
-    assert "schema_version: 8" in snapshot.documents["card"].text
+    assert snapshot.documents["card"].model.schema_version == 9
+    assert snapshot.model.schema_version == snapshot.documents["card"].model.schema_version == SCHEMA_VERSION == 9
+    assert "schema_version: 9" in snapshot.documents["card"].text
 
 
 @pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6, "5", "true", "5.0", 5.0])
@@ -265,7 +265,7 @@ def test_old_or_mistyped_project_schema_is_rejected_without_rewriting(tmp_path: 
     if version == "true":
         scalar = "true"
     scalar = "true" if version == "true" else scalar
-    project.write_text(source.replace("schema_version: 8", f"schema_version: {scalar}", 1), encoding="utf-8")
+    project.write_text(source.replace("schema_version: 9", f"schema_version: {scalar}", 1), encoding="utf-8")
     original = project.read_bytes()
     with pytest.raises(ProjectError) as caught:
         project_repository().open(root)
@@ -277,7 +277,7 @@ def test_old_component_schema_is_rejected_without_rewriting(tmp_path: Path) -> N
     root = tmp_path / "game"
     shutil.copytree(ROOT / "examples" / "demo-game", root)
     component = root / "components" / "forest-card.yaml"
-    component.write_text(component.read_text(encoding="utf-8").replace("schema_version: 8", "schema_version: 4", 1), encoding="utf-8")
+    component.write_text(component.read_text(encoding="utf-8").replace("schema_version: 9", "schema_version: 4", 1), encoding="utf-8")
     original = component.read_bytes()
     with pytest.raises(ProjectError) as caught:
         project_repository().open(root)
@@ -306,7 +306,7 @@ def test_document_models_require_schema_version_to_be_strict_integer_seven(model
 ])
 def test_css_is_rejected_from_manual_component_html(tmp_path: Path, markup: str) -> None:
     owner = tmp_path / "card.yaml"
-    text = f'''schema_version: 8
+    text = f'''schema_version: 9
 id: card
 name: Card
 size_mm: {{width: 63, height: 88}}
@@ -440,7 +440,7 @@ def test_aligning_an_already_aligned_selection_is_a_no_op():
 
 
 def test_initial_image_size_limit_preserves_ratio_and_rejects_unrepresentable_minimum():
-    component = ComponentDefinition(schema_version=8, id="wide", name="Wide", size_mm=SizeMM(width=100, height=200))
+    component = ComponentDefinition(schema_version=9, id="wide", name="Wide", size_mm=SizeMM(width=100, height=200))
     assert MainWindow._initial_image_size(component, 0, 0, 0.02, 0.01) == pytest.approx((0.02, 0.01))
     assert MainWindow._initial_image_size(component, 0, 0, 140, 70) == pytest.approx((75, 37.5))
     assert MainWindow._initial_image_size(component, 0, 0, 1_000_000, 1) is None
@@ -506,7 +506,7 @@ def test_component_position_controls_have_all_icons_and_axis_actions(qtbot):
 
 def test_visual_lock_guard_allows_layer_crossing_and_preserves_yaml_edit_path() -> None:
     component = ComponentDefinition(
-        schema_version=8, id="card", name="Card", size_mm=SizeMM(width=63, height=88),
+        schema_version=9, id="card", name="Card", size_mm=SizeMM(width=63, height=88),
         elements=(
             ImageNode(id="locked", name="Locked", type="image", x_mm=1, y_mm=1, width_mm=2, height_mm=2, source="assets/images/leaf.png", locked=True),
             ImageNode(id="free", name="Free", type="image", x_mm=4, y_mm=1, width_mm=2, height_mm=2, source="assets/images/leaf.png"),
@@ -521,7 +521,7 @@ def test_visual_lock_guard_allows_layer_crossing_and_preserves_yaml_edit_path() 
         ensure_visual_edit_respects_locks(component, moved_locked)
     assert caught.value.diagnostic.code == "NODE_LOCKED"
 
-    yaml_text = '''schema_version: 8
+    yaml_text = '''schema_version: 9
 id: card
 name: Card
 size_mm: {width: 63, height: 88}

@@ -183,7 +183,7 @@ def test_open_recovers_verified_membership_backup_after_writer_crash(tmp_path: P
         assert not target.exists() and backup.read_bytes() == component and journal.is_file()
 
     record = json.loads(journal.read_text(encoding="utf-8"))
-    invalid = component.replace(b"schema_version: 8", b"schema_version: 7", 1)
+    invalid = component.replace(b"schema_version: 9", b"schema_version: 7", 1)
     assert invalid != component
     backup.write_bytes(invalid)
     record["component_hash"] = hashlib.sha256(invalid).hexdigest()

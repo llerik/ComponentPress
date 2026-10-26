@@ -1,7 +1,7 @@
 %YAML 1.2
 ---
 # Пример проекта второго этапа; расширен для демонстрации этапа 6
-schema_version: 8
+schema_version: 9
 id: demo-game
 name: "Лесная игра"
 version: "0.1.0"
@@ -160,12 +160,8 @@ images:
 icons:
   ic_leaf_6:
     path: assets/images/leaf.png
-    width_px: 32
-    height_px: 32
   ic_leaf_3:
     path: assets/images/leaf-small.png
-    width_px: 16
-    height_px: 16
 data_source:
   path: data/game.xlsx
 copies_columns:

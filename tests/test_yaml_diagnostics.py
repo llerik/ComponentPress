@@ -58,7 +58,7 @@ def _component(operator: str, value: str | None, placement: str, *, bound: bool 
     elements = nested if placement == "nested" else sibling + condition
     data = "data: {sheet: Cards}\n" if bound else ""
     return (
-        "schema_version: 8\nid: card\nname: Card\n"
+        "schema_version: 9\nid: card\nname: Card\n"
         "size_mm: {width: 63, height: 88}\n"
         + data
         + "elements:\n"

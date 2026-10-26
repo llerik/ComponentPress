@@ -11,7 +11,7 @@ from componentpress.project_io.yaml_codec import dump_yaml, parse_component, par
 from ruamel.yaml.comments import CommentedMap
 
 
-COMPONENT = """schema_version: 8
+COMPONENT = """schema_version: 9
 id: card
 name: Card
 size_mm: {width: 40, height: 30}
@@ -64,7 +64,7 @@ def test_public_yaml_rejects_unknown_and_internal_fields(node: str, data: str, f
 
 def test_component_round_trip_preserves_public_node_variants() -> None:
     component = ComponentDefinition(
-        schema_version=8,
+        schema_version=9,
         id="card",
         name="Card",
         size_mm=SizeMM(width=40, height=30),
@@ -106,7 +106,7 @@ def _conditions() -> tuple[ConditionalGroupNode, ...]:
 
 
 def test_project_round_trip_preserves_comment_and_applies_model_edit() -> None:
-    original = """schema_version: 8
+    original = """schema_version: 9
 id: game
 name: Game # project note
 version: "1.0"
@@ -122,7 +122,7 @@ components: []
 
 
 def test_comments_follow_node_ids_and_round_trip_stabilizes() -> None:
-    original = """schema_version: 8
+    original = """schema_version: 9
 id: card
 name: Card
 size_mm: {width: 40, height: 30}

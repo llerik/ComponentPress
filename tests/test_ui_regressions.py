@@ -50,8 +50,8 @@ def text_node(**changes):
 
 
 def snapshot(tmp_path, elements):
-    project = ProjectDefinition(schema_version=8, id="test", name="Test", version="0.1.0")
-    component = ComponentDefinition(schema_version=8, id="card", name="Card",
+    project = ProjectDefinition(schema_version=9, id="test", name="Test", version="0.1.0")
+    component = ComponentDefinition(schema_version=9, id="card", name="Card",
                                     size_mm=SizeMM(width=30, height=20), elements=tuple(elements))
     return ProjectSnapshot(tmp_path, "", "", project,
                            {"card": DocumentSnapshot(tmp_path / "card.yaml", "", "", component)})
@@ -132,6 +132,28 @@ def test_actual_size_uses_96_logical_dpi_and_preview_zoom_is_independent(tmp_pat
     preview.set_frame(replacement, component)
     assert canvas.transform().m11() == pytest.approx(2.0)
     assert preview.transform().m11() == pytest.approx(1.5)
+
+
+def test_canvas_rulers_track_zoom_scroll_and_cursor(qtbot):
+    canvas = ComponentCanvas()
+    qtbot.addWidget(canvas)
+    canvas.resize(640, 480)
+    canvas.show()
+    canvas.zoom_by(2)
+    canvas._cursor_view_pos = QPoint(80, 90)
+    canvas._update_rulers()
+    point = canvas.mapToScene(canvas._cursor_view_pos)
+    assert canvas.horizontal_ruler.cursor_mm == pytest.approx(point.x() / canvas._world_per_mm_x)
+    assert canvas.vertical_ruler.cursor_mm == pytest.approx(point.y() / canvas._world_per_mm_y)
+
+
+def test_resource_validation_refresh_keeps_component_preview(make_editor):
+    window, _root, errors = make_editor()
+    tab = window.active_tab
+    assert tab.canvas._pixmap_item is not None
+    window._resource_images_changed()
+    assert tab.canvas._pixmap_item is not None
+    assert not errors
 
 
 def test_canvas_hover_cursor_matches_resize_handle_and_move(make_editor, qtbot):
@@ -319,8 +341,10 @@ def test_component_creation_validates_excel_and_enables_image_column(make_editor
     qtbot.addWidget(dialog)
     dialog.show()
     assert dialog.content_mode.isEnabled()
-    assert dialog.content_column.isVisible()
+    assert not dialog.content_column.isVisible()
     dialog.content_mode.setCurrentIndex(dialog.content_mode.findData("column"))
+    assert dialog.content_column.isVisible()
+    assert not dialog.source_row.isVisible()
     dialog.content_column.setCurrentText("Изображение")
     dialog.name.setText("Excel image node")
     assert dialog.content_column.isEnabled()
@@ -821,6 +845,7 @@ def test_html_creation_uses_font_list_and_palette_and_whole_point_step(make_edit
         font = dialog.findChild(QComboBox, "newHtmlFont")
         assert font is not None and not font.isEditable() and font.count() > 0
         captured["font"] = font.currentText()
+        assert font.itemData(font.currentIndex(), Qt.ItemDataRole.FontRole).family() == font.currentText()
         assert dialog.font_size.decimals() == 1
         assert dialog.font_size.singleStep() == pytest.approx(1.0)
         dialog.font_size.setValue(10.26)

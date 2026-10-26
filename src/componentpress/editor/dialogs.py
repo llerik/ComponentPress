@@ -6,14 +6,13 @@ from pathlib import Path
 from collections.abc import Callable
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPixmap
+from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QColorDialog,
     QDialog,
     QDialogButtonBox,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -37,6 +36,7 @@ from componentpress.i18n.diagnostics import format_diagnostic, format_project_er
 from componentpress.domain.diagnostics import Diagnostic, ProjectError
 from componentpress.resources.repository import ResourceRepository
 from componentpress.rendering.fonts import available_font_families
+from componentpress.editor.numeric import NumericSpinBox
 
 
 def format_error(error: Exception) -> str:
@@ -101,43 +101,19 @@ class ResourcePickerDialog(QDialog):
 
 
 class ImageKeyDialog(QDialog):
-    def __init__(self, name: str, width: int, height: int, parent=None, *, editing=False):
+    def __init__(self, name: str, parent=None, *, editing=False):
         super().__init__(parent)
         self.setWindowTitle(tr("ui.image_key_edit_title" if editing else "ui.image_key_add_title"))
-        self._ratio = width / height
-        self._updating = False
         layout = QVBoxLayout(self)
         form = QFormLayout()
         self.name = QLineEdit(name)
         self.name.setObjectName("imageKeyName")
-        self.width = QSpinBox()
-        self.width.setRange(1, max(100000, width))
-        self.width.setValue(width)
-        self.height = QSpinBox()
-        self.height.setRange(1, max(100000, height))
-        self.height.setValue(height)
         form.addRow(tr("ui.image_key_name"), self.name)
-        form.addRow(tr("ui.width_px"), self.width)
-        form.addRow(tr("ui.height_px"), self.height)
         layout.addLayout(form)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         layout.addWidget(buttons)
-        self.width.valueChanged.connect(self._width_changed)
-        self.height.valueChanged.connect(self._height_changed)
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
-
-    def _width_changed(self, value: int) -> None:
-        if not self._updating:
-            self._updating = True
-            self.height.setValue(max(1, round(value / self._ratio)))
-            self._updating = False
-
-    def _height_changed(self, value: int) -> None:
-        if not self._updating:
-            self._updating = True
-            self.width.setValue(max(1, round(value * self._ratio)))
-            self._updating = False
 
     def _accept(self) -> None:
         value = self.name.text()
@@ -163,6 +139,17 @@ class ImageManagerDialog(QDialog):
         self.resize(900, 560)
         layout = QVBoxLayout(self)
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.images = self._build_image_list()
+        self.details = self._build_details()
+        self.splitter.addWidget(self.images)
+        self.splitter.addWidget(self.details)
+        self.splitter.setStretchFactor(0, 1)
+        layout.addWidget(self.splitter, 1)
+        self._build_actions(layout)
+        self._connect_manager_signals()
+        self.refresh()
+
+    def _build_image_list(self):
         self.images = QListWidget()
         self.images.setObjectName("projectImages")
         self.images.setViewMode(QListWidget.ViewMode.IconMode)
@@ -171,8 +158,9 @@ class ImageManagerDialog(QDialog):
         self.images.setWrapping(True)
         self.images.setIconSize(QSize(80, 80))
         self.images.setGridSize(QSize(130, 116))
-        self.splitter.addWidget(self.images)
+        return self.images
 
+    def _build_details(self):
         self.details = QWidget()
         self.details.setObjectName("imageDetails")
         self.details.setMinimumWidth(0)
@@ -180,19 +168,24 @@ class ImageManagerDialog(QDialog):
         details_layout = QVBoxLayout(self.details)
         self.properties = QLabel()
         self.properties.setObjectName("imageProperties")
+        self._build_key_controls(details_layout)
+        return self.details
+
+    def _build_key_controls(self, layout):
         self.copy_name_button = QPushButton(tr("ui.image_copy_name"))
+        self.key_name = QLineEdit()
+        self.key_name.setObjectName("imageKeyName")
+        self.copy_key_button = QPushButton(tr("ui.image_key_copy"))
         self.keys = QListWidget()
         self.keys.setObjectName("imageKeys")
         self.keys.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.aliases_label = QLabel(tr("ui.image_key_aliases"))
         self.add_key_button = QPushButton(tr("ui.image_key_add"))
-        details_layout.addWidget(self.properties)
-        details_layout.addWidget(self.copy_name_button)
-        details_layout.addWidget(self.keys, 1)
-        details_layout.addWidget(self.add_key_button)
-        self.splitter.addWidget(self.details)
-        self.splitter.setStretchFactor(0, 1)
-        layout.addWidget(self.splitter, 1)
+        for widget in (self.properties, self.copy_name_button, self.key_name, self.copy_key_button,
+                       self.aliases_label, self.keys, self.add_key_button):
+            layout.addWidget(widget, 1 if widget is self.keys else 0)
 
+    def _build_actions(self, layout):
         self.import_progress = QLabel()
         self.import_progress.setObjectName("imageImportProgress")
         layout.addWidget(self.import_progress)
@@ -203,6 +196,8 @@ class ImageManagerDialog(QDialog):
         for button in (self.add_button, self.folder_button, self.remove_button):
             actions.addWidget(button)
         layout.addLayout(actions)
+
+    def _connect_manager_signals(self):
         self._animation = QPropertyAnimation(self.details, b"maximumWidth", self)
         self._animation.setDuration(180)
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -212,10 +207,11 @@ class ImageManagerDialog(QDialog):
         self.add_button.clicked.connect(self._add_image)
         self.folder_button.clicked.connect(self._import_folder)
         self.remove_button.clicked.connect(self._remove_image)
-        self.add_key_button.clicked.connect(self._add_key)
+        self.add_key_button.clicked.connect(self._save_key)
         self.keys.itemDoubleClicked.connect(self._edit_key)
         self.keys.customContextMenuRequested.connect(self._key_context_menu)
         self.copy_name_button.clicked.connect(self._copy_name)
+        self.copy_key_button.clicked.connect(self._copy_key)
         self.refresh()
 
     def refresh(self, project=None) -> None:
@@ -246,12 +242,20 @@ class ImageManagerDialog(QDialog):
 
     def _select_image(self, item) -> None:
         if item is None:
-            self.keys.clear()
-            self.add_key_button.setEnabled(False)
-            self.remove_button.setEnabled(False)
-            self._slide_details(False)
+            self._clear_image_selection()
             return
-        relative = item.data(Qt.ItemDataRole.UserRole)
+        self._show_image_details(item.data(Qt.ItemDataRole.UserRole))
+
+    def _clear_image_selection(self):
+        self.keys.clear()
+        self.key_name.clear()
+        self.aliases_label.hide()
+        self.copy_key_button.setEnabled(False)
+        self.add_key_button.setEnabled(False)
+        self.remove_button.setEnabled(False)
+        self._slide_details(False)
+
+    def _show_image_details(self, relative):
         path = self.root / relative
         pixmap = QPixmap(str(path))
         self.properties.setText(
@@ -260,14 +264,22 @@ class ImageManagerDialog(QDialog):
                if not pixmap.isNull() else tr("ui.image_manager_read_error"))
         )
         self.keys.clear()
-        for name, definition in sorted(self.project.icons.items()):
-            if definition.path == relative:
-                key_item = QListWidgetItem(f"{name} — {definition.width_px}×{definition.height_px} px")
-                key_item.setData(Qt.ItemDataRole.UserRole, name)
-                self.keys.addItem(key_item)
+        names = sorted(name for name, definition in self.project.icons.items() if definition.path == relative)
+        self._set_primary_key(names)
+        self.aliases_label.setVisible(bool(names[1:]))
+        self.keys.setVisible(bool(names[1:]))
+        self.copy_key_button.setEnabled(bool(names))
+        self.add_key_button.setText(tr("ui.image_key_save" if names else "ui.image_key_add"))
         self.add_key_button.setEnabled(not pixmap.isNull())
         self.remove_button.setEnabled(True)
         self._slide_details(True)
+
+    def _set_primary_key(self, names):
+        self.key_name.setText(names[0] if names else "")
+        for name in names[1:]:
+            key_item = QListWidgetItem(name)
+            key_item.setData(Qt.ItemDataRole.UserRole, name)
+            self.keys.addItem(key_item)
 
     def _slide_details(self, visible: bool) -> None:
         self._animation.stop()
@@ -290,20 +302,31 @@ class ImageManagerDialog(QDialog):
             from PySide6.QtGui import QGuiApplication
             QGuiApplication.clipboard().setText(Path(item.data(Qt.ItemDataRole.UserRole)).name)
 
-    def _add_key(self) -> None:
+    def _copy_key(self) -> None:
+        from PySide6.QtGui import QGuiApplication
+        QGuiApplication.clipboard().setText("{" + self.key_name.text() + "}")
+
+    def _save_key(self) -> None:
         selected = self.images.selectedItems()
         item = selected[0] if selected else None
         if item is None:
             return
         relative = item.data(Qt.ItemDataRole.UserRole)
+        self._edit_primary_key(relative)
+
+    def _edit_primary_key(self, relative):
         pixmap = QPixmap(str(self.root / relative))
         if pixmap.isNull():
             return
-        dialog = ImageKeyDialog("", pixmap.width(), pixmap.height(), self)
+        names = sorted(name for name, definition in self.project.icons.items() if definition.path == relative)
+        dialog = ImageKeyDialog(Path(relative).stem if not names else self.key_name.text(), self, editing=bool(names))
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            self.key_creator(dialog.name.text(), relative, dialog.width.value(), dialog.height.value())
+            if names:
+                self.key_editor(names[0], dialog.name.text())
+            else:
+                self.key_creator(dialog.name.text(), relative)
             self.refresh()
         except Exception as exc:
             QMessageBox.warning(self, tr("ui.image_key_add_title"), format_error(exc))
@@ -313,14 +336,11 @@ class ImageManagerDialog(QDialog):
         definition = self.project.icons.get(original_name)
         if definition is None:
             return
-        if max(definition.width_px, definition.height_px) > 2_147_483_647:
-            QMessageBox.warning(self, tr("ui.image_key_edit_title"), tr("ui.image_key_size_uneditable"))
-            return
-        dialog = ImageKeyDialog(original_name, definition.width_px, definition.height_px, self, editing=True)
+        dialog = ImageKeyDialog(original_name, self, editing=True)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            self.key_editor(original_name, dialog.name.text(), dialog.width.value(), dialog.height.value())
+            self.key_editor(original_name, dialog.name.text())
             self.refresh()
         except Exception as exc:
             QMessageBox.warning(self, tr("ui.image_key_edit_title"), format_error(exc))
@@ -408,6 +428,7 @@ class ImageAddDialog(QDialog):
         self.setWindowTitle(tr("ui.image_new"))
         layout = QVBoxLayout(self)
         form = QFormLayout()
+        self.form = form
         self.name = QLineEdit(tr("ui.image"))
         self.name.setObjectName("newImageName")
         self.content_mode = QComboBox()
@@ -416,18 +437,12 @@ class ImageAddDialog(QDialog):
         self.content_mode.setEnabled(bool(columns))
         self.content_column = QComboBox()
         self.content_column.addItems(list(columns))
-        row = QHBoxLayout()
-        self.source = QLineEdit()
-        self.source.setObjectName("newImageSource")
-        self.source.setReadOnly(True)
-        choose = QPushButton(tr("ui.choose"))
-        row.addWidget(self.source, 1)
-        row.addWidget(choose)
+        self.source_row, choose = self._build_source_row()
         self.fit = QComboBox()
         self.fit.addItems(["contain", "cover", "stretch"])
         form.addRow(tr("ui.name"), self.name)
         form.addRow(tr("ui.source"), self.content_mode)
-        form.addRow(tr("ui.image_resource"), row)
+        form.addRow(tr("ui.image_resource"), self.source_row)
         form.addRow(tr("ui.column"), self.content_column)
         form.addRow(tr("ui.mode"), self.fit)
         layout.addLayout(form)
@@ -438,6 +453,18 @@ class ImageAddDialog(QDialog):
         self._sync_content_mode()
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
+
+    def _build_source_row(self):
+        source_row = QWidget()
+        row = QHBoxLayout(source_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.source = QLineEdit()
+        self.source.setObjectName("newImageSource")
+        self.source.setReadOnly(True)
+        choose = QPushButton(tr("ui.choose"))
+        row.addWidget(self.source, 1)
+        row.addWidget(choose)
+        return source_row, choose
 
     def _choose(self) -> None:
         if self.content_mode.currentData() != "manual":
@@ -462,6 +489,8 @@ class ImageAddDialog(QDialog):
         manual = self.content_mode.currentData() == "manual"
         self.source.setEnabled(manual)
         self.content_column.setEnabled(not manual)
+        self.form.setRowVisible(self.source_row, manual)
+        self.form.setRowVisible(self.content_column, not manual)
 
 
 class HtmlAddDialog(QDialog):
@@ -482,17 +511,7 @@ class HtmlAddDialog(QDialog):
         self.content_mode.setEnabled(bool(columns))
         self.content_column = QComboBox()
         self.content_column.addItems(list(columns))
-        self.font = QComboBox()
-        self.font.setObjectName("newHtmlFont")
-        self.font.addItems(available_font_families(root))
-        if self.font.findText("Arial") >= 0:
-            self.font.setCurrentText("Arial")
-        self.font_size = QDoubleSpinBox()
-        self.font_size.setRange(0.1, 1000)
-        self.font_size.setDecimals(1)
-        self.font_size.setSingleStep(1.0)
-        self.font_size.setValue(10)
-        self.font_size.setObjectName("newHtmlFontSize")
+        self.font, self.font_size = _html_font_controls(root)
         self.color = QLineEdit("#111111")
         self.color.setReadOnly(True)
         self.color.setObjectName("newHtmlColor")
@@ -560,3 +579,20 @@ class HtmlAddDialog(QDialog):
         manual = self.content_mode.currentData() == "manual"
         self.content_column.setEnabled(not manual)
         self.html.setEnabled(manual)
+
+
+def _html_font_controls(root):
+    font = QComboBox()
+    font.setObjectName("newHtmlFont")
+    for family in available_font_families(root):
+        font.addItem(family, family)
+        font.setItemData(font.count() - 1, QFont(family), Qt.ItemDataRole.FontRole)
+    if font.findText("Arial") >= 0:
+        font.setCurrentText("Arial")
+    size = NumericSpinBox()
+    size.setRange(0.1, 1000)
+    size.setDecimals(1)
+    size.setSingleStep(1.0)
+    size.setValue(10)
+    size.setObjectName("newHtmlFontSize")
+    return font, size
